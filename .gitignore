@@ -1,0 +1,73 @@
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Logs / Runtime ---
+*.log
+*.pid
+*.seed
+*.out
+*.err
+
+# --- Python backend ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Flask uploads / local runtime data
+backend/uploads/
+uploads/
+instance/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# --- Node / frontend ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Frontend build output
+frontend/dist/
+
+# Vite cache
+.vite/
+
+# Optional lockfiles (uncomment if you do not want them tracked)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml

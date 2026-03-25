@@ -1,0 +1,94 @@
+import { Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import Sidebar from './Sidebar';
+import Topbar from './Topbar';
+
+const SIDEBAR_EXPANDED = 220;
+const SIDEBAR_COLLAPSED = 76;
+
+const titleMap = {
+  '/admin': 'Admin Dashboard',
+  '/admin/courses': 'Manage Courses',
+  '/admin/papers': 'Manage Papers',
+  '/admin/lecturers': 'Manage Lecturers',
+  '/admin/students': 'Manage Students',
+  '/admin/enrollment': 'Student Enrollment',
+  '/admin/audit': 'Audit Trail',
+  '/lecturer': 'Lecturer Dashboard',
+  '/lecturer/session': 'Attendance Session',
+  '/student': 'Student Dashboard',
+  '/student/attendance': 'Attendance Summary',
+  '/student/exams': 'Exam Portal',
+};
+
+export default function DashboardLayout() {
+  const { pathname } = useLocation();
+  const title = titleMap[pathname] || 'Dashboard';
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('sidebar-collapsed');
+    return saved === '1';
+  });
+  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
+
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobile(mobile);
+      if (mobile) {
+        setIsSidebarOpen(false);
+      } else {
+        setIsSidebarOpen(true);
+      }
+    };
+
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('sidebar-collapsed', isSidebarCollapsed ? '1' : '0');
+  }, [isSidebarCollapsed]);
+
+  const toggleSidebar = () => {
+    if (isMobile) {
+      setIsSidebarOpen((prev) => !prev);
+      return;
+    }
+    setIsSidebarCollapsed((prev) => !prev);
+  };
+
+  const closeSidebarOnMobile = () => {
+    if (isMobile) setIsSidebarOpen(false);
+  };
+
+  const contentMarginLeft = isMobile ? 0 : (isSidebarCollapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED);
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar
+        isCollapsed={isSidebarCollapsed}
+        isMobile={isMobile}
+        isOpen={isSidebarOpen}
+        onNavigate={closeSidebarOnMobile}
+      />
+      <div style={{ flex: 1, marginLeft: contentMarginLeft, display: 'flex', flexDirection: 'column', transition: 'margin-left 0.2s ease' }}>
+        <Topbar
+          title={title}
+          onToggleSidebar={toggleSidebar}
+          isMobile={isMobile}
+          isSidebarCollapsed={isSidebarCollapsed}
+        />
+        <main style={{ flex: 1, padding: 28, overflow: 'auto' }}>
+          <Outlet />
+        </main>
+      </div>
+      {isMobile && isSidebarOpen && (
+        <div
+          onClick={closeSidebarOnMobile}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 45 }}
+        />
+      )}
+    </div>
+  );
+}

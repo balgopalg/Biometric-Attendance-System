@@ -1,0 +1,29 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+class Config:
+    """Application configuration loaded from environment variables."""
+
+    ENV = os.getenv("FLASK_ENV", "development").lower()
+    DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
+
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/biometric_attendance")
+    MONGO_DB_AUTH = os.getenv("MONGO_DB_AUTH", "biometric_auth")
+    MONGO_DB_ACADEMIC = os.getenv("MONGO_DB_ACADEMIC", "biometric_academic")
+    MONGO_DB_ATTENDANCE = os.getenv("MONGO_DB_ATTENDANCE", "biometric_attendance_ops")
+    MONGO_DB_AUDIT = os.getenv("MONGO_DB_AUDIT", "biometric_audit")
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
+    CORS_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+        if origin.strip()
+    ]
+    JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24 hours in seconds
+
+    FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.45"))
+    UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
+
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB max upload
