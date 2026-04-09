@@ -64,16 +64,19 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       {/* Logo */}
       <div style={{ padding: isCollapsed ? '20px 12px 0' : '20px 20px 0', display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start', gap: 10 }}>
         <div style={{
-          width: 32, height: 32, borderRadius: 10,
-          background: 'rgba(255,255,255,0.2)',
+          width: 34, height: 34, borderRadius: 10,
+          background: 'linear-gradient(160deg, rgba(34,211,238,0.34), rgba(14,165,233,0.3))',
+          border: '1px solid rgba(255,255,255,0.3)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 8px 18px rgba(14,165,233,0.2)',
         }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-            <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
-            <circle cx="12" cy="10" r="3" />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9">
+            <rect x="3" y="3" width="18" height="18" rx="5" />
+            <circle cx="12" cy="10" r="2.8" />
+            <path d="M7.5 17c1.2-2 2.8-3 4.5-3s3.3 1 4.5 3" strokeLinecap="round" />
           </svg>
         </div>
-        {!isCollapsed && <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#fff', letterSpacing: '-0.01em' }}>BioAttend</span>}
+        {!isCollapsed && <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#fff', letterSpacing: '-0.01em' }}>FaceAttend</span>}
       </div>
 
       {/* User Profile */}

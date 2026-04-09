@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-const STORAGE_KEY = 'bioattend-landing-seen';
+const STORAGE_KEY = 'faceattend-landing-seen';
 
 export default function InitialLandingAnimation({ children }) {
   const [showSplash, setShowSplash] = useState(false);
@@ -35,13 +35,29 @@ export default function InitialLandingAnimation({ children }) {
               position: 'fixed',
               inset: 0,
               zIndex: 9999,
-              background: 'radial-gradient(circle at 20% 20%, rgba(6,182,212,0.24), transparent 45%), radial-gradient(circle at 80% 80%, rgba(139,92,246,0.3), transparent 50%), linear-gradient(140deg, #0a0e1a, #111827)',
+              background: 'radial-gradient(circle at 15% 18%, rgba(34,211,238,0.28), transparent 42%), radial-gradient(circle at 85% 80%, rgba(14,165,233,0.22), transparent 44%), linear-gradient(145deg, #050816 0%, #0b1226 45%, #0f1f3a 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               overflow: 'hidden',
             }}
           >
+            <motion.div
+              aria-hidden
+              initial={{ opacity: 0.18 }}
+              animate={{ opacity: [0.18, 0.28, 0.18] }}
+              transition={{ duration: 5.2, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute',
+                inset: '-20%',
+                backgroundImage:
+                  'linear-gradient(rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.08) 1px, transparent 1px)',
+                backgroundSize: '46px 46px',
+                transform: 'perspective(700px) rotateX(58deg)',
+                transformOrigin: 'center top',
+              }}
+            />
+
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
@@ -54,39 +70,73 @@ export default function InitialLandingAnimation({ children }) {
               }}
             >
               <motion.div
-                animate={{ scale: [1, 1.08, 1], rotate: [0, 3, 0] }}
-                transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                animate={{ scale: [1, 1.04, 1], y: [0, -3, 0] }}
+                transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
                 style={{
-                  width: 68,
-                  height: 68,
-                  borderRadius: 20,
-                  margin: '0 auto 14px',
-                  background: 'var(--gradient-primary)',
-                  boxShadow: '0 14px 36px rgba(6,182,212,0.22)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: '#fff',
-                  fontWeight: 800,
-                  fontSize: 24,
-                  letterSpacing: '0.02em',
+                  width: 92,
+                  height: 92,
+                  borderRadius: 24,
+                  margin: '0 auto 16px',
+                  background: 'linear-gradient(155deg, rgba(34,211,238,0.18), rgba(14,165,233,0.22))',
+                  border: '1px solid rgba(255,255,255,0.16)',
+                  boxShadow: '0 18px 44px rgba(14,165,233,0.24), inset 0 1px 0 rgba(255,255,255,0.14)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  position: 'relative',
                 }}
               >
-                B
+                <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden>
+                  <rect x="2" y="2" width="52" height="52" rx="14" stroke="rgba(255,255,255,0.35)" strokeWidth="1.4" />
+                  <motion.rect
+                    x="12"
+                    y="12"
+                    width="32"
+                    height="32"
+                    rx="8"
+                    stroke="#7dd3fc"
+                    strokeWidth="2"
+                    fill="none"
+                    animate={{ opacity: [0.55, 1, 0.55] }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                  <motion.circle
+                    cx="28"
+                    cy="25"
+                    r="6"
+                    stroke="#bae6fd"
+                    strokeWidth="2"
+                    fill="none"
+                    animate={{ scale: [1, 1.08, 1] }}
+                    transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                  <path d="M18 38c2.7-3.9 6.6-5.7 10-5.7s7.3 1.8 10 5.7" stroke="#e0f2fe" strokeWidth="2" strokeLinecap="round" />
+                  <motion.rect
+                    x="10"
+                    y="10"
+                    width="36"
+                    height="4"
+                    rx="2"
+                    fill="#22d3ee"
+                    animate={{ y: [10, 42, 10], opacity: [0.2, 0.9, 0.2] }}
+                    transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                </svg>
               </motion.div>
 
               <h1
                 style={{
-                  fontSize: 'clamp(1.55rem, 4vw, 2.35rem)',
+                  fontSize: 'clamp(1.65rem, 4vw, 2.45rem)',
                   lineHeight: 1.15,
                   fontWeight: 800,
                   color: '#f8fafc',
                   letterSpacing: '-0.02em',
                 }}
               >
-                BioAttend
+                FaceAttend
               </h1>
-              <p style={{ marginTop: 8, color: 'rgba(241,245,249,0.75)', fontSize: '0.9rem' }}>
-                Smart attendance, ready to launch
+              <p style={{ marginTop: 9, color: 'rgba(241,245,249,0.78)', fontSize: '0.9rem', letterSpacing: '0.02em' }}>
+                Fast face recognition for smarter attendance
               </p>
             </motion.div>
 
@@ -98,11 +148,11 @@ export default function InitialLandingAnimation({ children }) {
                 position: 'absolute',
                 top: '16%',
                 left: '8%',
-                width: 160,
-                height: 160,
+                width: 180,
+                height: 180,
                 borderRadius: '50%',
-                background: 'rgba(6,182,212,0.18)',
-                filter: 'blur(8px)',
+                background: 'rgba(34,211,238,0.2)',
+                filter: 'blur(10px)',
               }}
             />
             <motion.div
@@ -116,8 +166,8 @@ export default function InitialLandingAnimation({ children }) {
                 width: 200,
                 height: 200,
                 borderRadius: '50%',
-                background: 'rgba(139,92,246,0.22)',
-                filter: 'blur(10px)',
+                background: 'rgba(14,165,233,0.25)',
+                filter: 'blur(12px)',
               }}
             />
           </motion.div>
