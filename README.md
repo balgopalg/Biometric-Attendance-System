@@ -149,4 +149,4 @@ Frame -> Face Detection -> Face Crop -> Embedding Generation -> Similarity Match
 
 ## License
 
-Academic project. By Balgopal.
+Academic project.
