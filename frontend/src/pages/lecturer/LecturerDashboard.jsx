@@ -97,6 +97,9 @@ export default function LecturerDashboard() {
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                   {p.total_classes} classes held
                 </p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
+                  {p.total_enrolled_students || 0} total enrolled students
+                </p>
               </div>
               <button className="btn-primary" style={{ padding: '8px 14px', fontSize: '0.75rem' }}>
                 <HiOutlineCamera size={14} /> Start

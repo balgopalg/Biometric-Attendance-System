@@ -351,6 +351,26 @@ def list_course_semesters(user, cid):
     return jsonify(sorted(list(semesters)))
 
 
+def _normalise_course_semester(course_id, semester):
+    cid = _as_text(course_id)
+    if not cid:
+        return None, None, "course_id is required"
+
+    course = _safe_get_course(cid)
+    if not course:
+        return None, None, "Course not found"
+
+    sem = _to_int(semester, 0)
+    if sem <= 0:
+        return None, None, "semester must be a positive integer"
+
+    max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
+    if sem > max_sem:
+        return None, None, f"semester must be between 1 and {max_sem} for selected course"
+
+    return cid, sem, None
+
+
 @admin_bp.route("/courses/<cid>", methods=["PUT"])
 @role_required("admin")
 def edit_course(user, cid):
@@ -431,12 +451,17 @@ def add_paper(user):
     d = request.get_json(silent=True) or {}
     if not d.get("name") or not d.get("code") or not d.get("course_id") or not d.get("semester"):
         return jsonify({"error": "name, code, course_id and semester are required"}), 400
+
+    course_id, semester, error = _normalise_course_semester(d.get("course_id"), d.get("semester"))
+    if error:
+        return jsonify({"error": error}), 400
+
     paper = create_paper(
         d["name"],
         d["code"],
-        d.get("course_id", ""),
+        course_id,
         d.get("lecturer_id") or None,
-        _to_int(d.get("semester"), 0) or None,
+        semester,
         d.get("total_classes", 0),
     )
     log_action(
@@ -453,11 +478,22 @@ def add_paper(user):
 def edit_paper(user, pid):
     d = request.get_json(silent=True) or {}
     fields = dict(d)
-    if "semester" in fields:
-        fields["semester"] = _to_int(fields.get("semester"), 0) or None
     if "lecturer_id" in fields and not fields["lecturer_id"]:
         fields["lecturer_id"] = None
+
     previous = get_paper_by_id(pid)
+    if not previous:
+        return jsonify({"error": "Paper not found"}), 404
+
+    if "course_id" in fields or "semester" in fields:
+        next_course_id = fields.get("course_id", previous.get("course_id"))
+        next_semester = fields.get("semester", previous.get("semester"))
+        course_id, semester, error = _normalise_course_semester(next_course_id, next_semester)
+        if error:
+            return jsonify({"error": error}), 400
+        fields["course_id"] = course_id
+        fields["semester"] = semester
+
     updated = update_paper(pid, fields)
     log_action(
         "UPDATE_PAPER",
@@ -519,6 +555,26 @@ def bulk_assign(user):
         log_action("BULK_ASSIGN_LECTURER", str(user["_id"]),
                    details=f"Papers {paper_ids} → Lecturer {lecturer_id}")
     if course_id:
+        course = _safe_get_course(course_id)
+        if not course:
+            return jsonify({"error": "Course not found"}), 404
+        max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
+
+        invalid = []
+        for paper_id in paper_ids:
+            paper = get_paper_by_id(paper_id)
+            if not paper:
+                continue
+            psem = _to_int(paper.get("semester"), 0)
+            if psem > max_sem:
+                invalid.append({"paper_id": paper_id, "paper_code": paper.get("code", ""), "semester": psem})
+
+        if invalid:
+            return jsonify({
+                "error": f"One or more papers have semester above course limit (max {max_sem})",
+                "invalid_papers": invalid,
+            }), 400
+
         bulk_assign_course(paper_ids, course_id)
         log_action("BULK_ASSIGN_COURSE", str(user["_id"]),
                    details=f"Papers {paper_ids} → Course {course_id}")
@@ -1126,7 +1182,32 @@ def enroll_student_face(user):
 def list_audit_logs(user):
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 50, type=int)
-    logs, total = get_audit_logs(page, per_page)
+    action = _as_text(request.args.get("action", "")).upper()
+    date_from = _as_text(request.args.get("from", ""))
+    date_to = _as_text(request.args.get("to", ""))
+
+    filters = {}
+    if action:
+        # Contains match allows flexible keyword search like OVERRIDE, CREATE, DELETE, etc.
+        filters["action"] = {"$regex": re.escape(action), "$options": "i"}
+
+    ts_filter = {}
+    try:
+        if date_from:
+            ts_filter["$gte"] = datetime.strptime(date_from, "%Y-%m-%d")
+    except ValueError:
+        pass
+    try:
+        if date_to:
+            # Inclusive end date: < next day midnight UTC.
+            ts_filter["$lt"] = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+    except ValueError:
+        pass
+
+    if ts_filter:
+        filters["timestamp"] = ts_filter
+
+    logs, total = get_audit_logs(page, per_page, filters)
 
     enriched = []
     for raw in logs:
@@ -1246,7 +1327,8 @@ def exam_eligibility_summary(user):
     """Admin view of exam eligibility with filters and override states."""
     course_id = _as_text(request.args.get("course_id", ""))
     paper_id = _as_text(request.args.get("paper_id", ""))
-    academic_year = _normalise_year(request.args.get("academic_year", ""))
+    academic_session = _normalise_year(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
+    semester_filter = _as_text(request.args.get("semester", ""))
     q = _as_text(request.args.get("q", "")).lower()
     final_eligible_filter = _as_text(request.args.get("final_eligible", ""))
 
@@ -1293,19 +1375,37 @@ def exam_eligibility_summary(user):
         stu_course_id = _as_text(profile.get("course_id", ""))
         course = course_map.get(stu_course_id)
         stu_year = _as_text(profile.get("academic_session") or profile.get("academic_year") or profile.get("year"))
+        enrolled = profile.get("enrolled_papers", []) or []
+        stu_semester = _to_int(profile.get("current_semester"), 0) or None
+        if stu_semester is None:
+            derived_semesters = []
+            for pid in enrolled:
+                pdoc = paper_map.get(pid) or {}
+                psem = _to_int(pdoc.get("semester"), 0)
+                if psem > 0:
+                    derived_semesters.append(psem)
+            if derived_semesters:
+                stu_semester = max(derived_semesters)
 
         if course_id and stu_course_id != course_id:
             continue
-        if academic_year and stu_year != academic_year:
+        if academic_session and stu_year != academic_session:
             continue
 
-        enrolled = profile.get("enrolled_papers", []) or []
+        per_paper_rows = []
+        total_attended_overall = 0
+        total_classes_overall = 0
+
         for pid in enrolled:
             if paper_id and pid != paper_id:
                 continue
 
             paper = paper_map.get(pid)
             if not paper:
+                continue
+
+            paper_semester = _to_int(paper.get("semester"), 0)
+            if semester_filter and str(paper_semester) != semester_filter:
                 continue
 
             lecturer_id_for_paper = _as_text(paper.get("lecturer_id", ""))
@@ -1340,17 +1440,13 @@ def exam_eligibility_summary(user):
 
             attended = count_attendance(uid, pid)
             pct = round((attended / classes_happened) * 100, 2) if classes_happened > 0 else 0.0
-            eligible_by_attendance = pct >= 75.0
+
+            total_attended_overall += attended
+            total_classes_overall += classes_happened
 
             override = overrides_col.find_one({"student_id": uid, "paper_id": pid})
             override_status = None if not override else override.get("override_status")
             override_reason = "" if not override else _as_text(override.get("reason", ""))
-            final_eligible = eligible_by_attendance if override_status is None else bool(override_status)
-
-            if final_eligible_filter:
-                required = _to_bool(final_eligible_filter)
-                if final_eligible != required:
-                    continue
 
             if q and not (
                 q in _as_text(student.get("name", "")).lower()
@@ -1361,34 +1457,60 @@ def exam_eligibility_summary(user):
             ):
                 continue
 
-            items.append({
+            per_paper_rows.append({
                 "student_id": uid,
                 "student_name": student.get("name", "Unknown"),
                 "student_email": student.get("email", ""),
                 "reg_number": profile.get("reg_number") or profile.get("roll_number"),
                 "course_id": stu_course_id,
                 "course_name": (course or {}).get("name"),
+                "student_semester": stu_semester,
                 "paper_id": pid,
                 "paper_name": paper.get("name", ""),
                 "paper_code": paper.get("code", ""),
+                "semester": paper_semester or None,
                 "lecturer_id": lecturer_id_for_paper,
                 "academic_year": stu_year,
+                "academic_session": stu_year,
                 "enrolled_since": profile_created_at,
                 "attended": attended,
                 "total_classes": classes_happened,
                 "attended_classes": attended,
                 "classes_happened": classes_happened,
                 "attendance_percentage": pct,
-                "eligible_by_attendance": eligible_by_attendance,
                 "override_status": override_status,
                 "override_reason": override_reason,
-                "final_eligible": final_eligible,
             })
+
+        overall_pct = round((total_attended_overall / total_classes_overall) * 100, 2) if total_classes_overall > 0 else 0.0
+        has_lectures = total_classes_overall > 0
+        overall_eligible = (overall_pct >= 75.0) if has_lectures else None
+
+        for row in per_paper_rows:
+            override_status = row.get("override_status")
+            final_eligible = overall_eligible if override_status is None else bool(override_status)
+            if final_eligible is None:
+                eligibility_status = "no_lectures_yet"
+            else:
+                eligibility_status = "eligible" if final_eligible else "ineligible"
+
+            if final_eligible_filter:
+                required = _to_bool(final_eligible_filter)
+                if final_eligible is None or final_eligible != required:
+                    continue
+
+            row["overall_attendance_percentage"] = overall_pct
+            row["overall_attended_classes"] = total_attended_overall
+            row["overall_total_classes"] = total_classes_overall
+            row["eligible_by_attendance"] = overall_eligible
+            row["final_eligible"] = final_eligible
+            row["eligibility_status"] = eligibility_status
+            items.append(row)
 
     return jsonify({
         "total": len(items),
-        "eligible_count": sum(1 for x in items if x["final_eligible"]),
-        "ineligible_count": sum(1 for x in items if not x["final_eligible"]),
+        "eligible_count": sum(1 for x in items if x["final_eligible"] is True),
+        "ineligible_count": sum(1 for x in items if x["final_eligible"] is False),
         "items": items,
     })
 

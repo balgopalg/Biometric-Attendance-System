@@ -23,7 +23,10 @@ class Config:
     ]
     JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24 hours in seconds
 
-    FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.45"))
+    # FaceNet cosine similarity threshold (0.6+ recommended for reliable matching)
+    # Higher = stricter matching, fewer false positives (absent marked as present)
+    # Lower = lenient matching, may have false positives
+    FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.60"))
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
 
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB max upload

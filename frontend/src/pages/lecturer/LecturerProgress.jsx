@@ -75,7 +75,7 @@ export default function LecturerProgress() {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>My Progress</h2>
+        <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
           Track classes taken and attendance per class within a selected date range.
         </p>

@@ -15,7 +15,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 32px',
+      padding: isMobile ? '0 14px' : '0 32px',
       position: 'sticky',
       top: 0,
       zIndex: 40,
@@ -40,9 +40,9 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
         >
           {isMobile ? <HiOutlineMenuAlt2 size={18} /> : (isSidebarCollapsed ? <HiOutlineChevronDoubleRight size={18} /> : <HiOutlineChevronDoubleLeft size={18} />)}
         </button>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{title}</h2>
+        <h2 style={{ fontSize: isMobile ? '0.95rem' : '1.1rem', fontWeight: 700, maxWidth: isMobile ? 170 : 'none', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</h2>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 10 }}>
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
@@ -77,7 +77,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
           }}>
             {user?.name?.charAt(0)?.toUpperCase() || 'U'}
           </div>
-          <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{user?.name}</span>
+          {!isMobile && <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{user?.name}</span>}
         </div>
       </div>
     </header>

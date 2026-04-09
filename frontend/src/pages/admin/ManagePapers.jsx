@@ -52,6 +52,72 @@ export default function ManagePapers() {
     );
   }, [papers, search]);
 
+  const selectedCourse = useMemo(
+    () => courses.find((c) => c._id === form.course_id) || null,
+    [courses, form.course_id]
+  );
+
+  const selectedFilterCourse = useMemo(
+    () => courses.find((c) => c._id === filters.course_id) || null,
+    [courses, filters.course_id]
+  );
+
+  const filteredLecturers = useMemo(() => {
+    if (!filters.course_id) return lecturers;
+    return lecturers.filter((l) => (l.assigned_course_ids || []).includes(filters.course_id));
+  }, [lecturers, filters.course_id]);
+
+  const formLecturers = useMemo(() => {
+    if (!form.course_id) return lecturers;
+    return lecturers.filter((l) => (l.assigned_course_ids || []).includes(form.course_id));
+  }, [lecturers, form.course_id]);
+
+  const formSemesterOptions = useMemo(() => {
+    const durationYears = Number(selectedCourse?.course_duration || 0);
+    const maxSemesters = durationYears > 0 ? durationYears * 2 : 0;
+    if (maxSemesters <= 0) return [];
+    return Array.from({ length: maxSemesters }, (_, i) => i + 1);
+  }, [selectedCourse]);
+
+  const filterSemesterOptions = useMemo(() => {
+    const durationYears = Number(selectedFilterCourse?.course_duration || 0);
+    const maxSemesters = durationYears > 0 ? durationYears * 2 : 0;
+    if (maxSemesters <= 0) return [];
+    return Array.from({ length: maxSemesters }, (_, i) => i + 1);
+  }, [selectedFilterCourse]);
+
+  useEffect(() => {
+    if (!form.course_id && form.semester) {
+      setForm((prev) => ({ ...prev, semester: '' }));
+      return;
+    }
+
+    if (formSemesterOptions.length === 0 || !form.semester) return;
+    if (!formSemesterOptions.includes(Number(form.semester))) {
+      setForm((prev) => ({ ...prev, semester: '' }));
+    }
+  }, [form.course_id, form.semester, formSemesterOptions]);
+
+  useEffect(() => {
+    if (!filters.course_id && filters.semester) {
+      setFilters((prev) => ({ ...prev, semester: '' }));
+      return;
+    }
+
+    if (!filters.semester || filterSemesterOptions.length === 0) return;
+    if (!filterSemesterOptions.includes(Number(filters.semester))) {
+      setFilters((prev) => ({ ...prev, semester: '' }));
+    }
+  }, [filters.course_id, filters.semester, filterSemesterOptions]);
+
+  useEffect(() => {
+    if (!form.lecturer_id || formLecturers.length === 0 || !form.course_id) return;
+    const isAllowed = formLecturers.some((l) => l._id === form.lecturer_id);
+    if (!isAllowed) {
+      setForm((prev) => ({ ...prev, lecturer_id: '' }));
+    }
+  }, [form.course_id, form.lecturer_id, formLecturers]);
+
   const handleAdd = async () => {
     try {
       await api.post('/admin/papers', form);
@@ -117,28 +183,35 @@ export default function ManagePapers() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course</label>
-          <select className="input-field" value={form.course_id} onChange={(e) => setForm({ ...form, course_id: e.target.value })}>
+          <select
+            className="input-field"
+            value={form.course_id}
+            onChange={(e) => setForm({ ...form, course_id: e.target.value, semester: '', lecturer_id: '' })}
+          >
             <option value="">Select course</option>
             {courses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
           </select>
         </div>
         <div>
-          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Lecturer</label>
-          <select className="input-field" value={form.lecturer_id} onChange={(e) => setForm({ ...form, lecturer_id: e.target.value })}>
-            <option value="">Unassigned</option>
-            {lecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
+          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Semester</label>
+          <select
+            className="input-field"
+            value={form.semester}
+            onChange={(e) => setForm({ ...form, semester: e.target.value })}
+            disabled={!form.course_id || formSemesterOptions.length === 0}
+          >
+            <option value="">{form.course_id ? 'Select semester' : 'Select course first'}</option>
+            {formSemesterOptions.map((s) => <option key={s} value={s}>Semester {s}</option>)}
           </select>
         </div>
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <div>
-          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Semester</label>
-          <select className="input-field" value={form.semester} onChange={(e) => setForm({ ...form, semester: e.target.value })}>
-            <option value="">Select semester</option>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s) => <option key={s} value={s}>Semester {s}</option>)}
-          </select>
-        </div>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Lecturer</label>
+        <select className="input-field" value={form.lecturer_id} onChange={(e) => setForm({ ...form, lecturer_id: e.target.value })}>
+          <option value="">Unassigned</option>
+          {formLecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
+        </select>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
@@ -162,22 +235,36 @@ export default function ManagePapers() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input className="search-input" placeholder="Search by name/code/course/lecturer..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <select className="input-field" value={filters.course_id} onChange={(e) => setFilters({ ...filters, course_id: e.target.value })}>
+        <select
+          className="input-field"
+          value={filters.course_id}
+          onChange={(e) => setFilters({
+            ...filters,
+            course_id: e.target.value,
+            semester: '',
+            lecturer_id: '',
+          })}
+        >
           <option value="">All Courses</option>
           {courses.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
         </select>
+        <select
+          className="input-field"
+          value={filters.semester}
+          onChange={(e) => setFilters({ ...filters, semester: e.target.value })}
+          disabled={!filters.course_id || filterSemesterOptions.length === 0}
+        >
+          <option value="">{filters.course_id ? 'All Semesters' : 'Select Course First'}</option>
+          {filterSemesterOptions.map((s) => <option key={s} value={s}>Semester {s}</option>)}
+        </select>
         <select className="input-field" value={filters.lecturer_id} onChange={(e) => setFilters({ ...filters, lecturer_id: e.target.value })}>
           <option value="">All Lecturers</option>
-          {lecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
-        </select>
-        <select className="input-field" value={filters.semester} onChange={(e) => setFilters({ ...filters, semester: e.target.value })}>
-          <option value="">All Semesters</option>
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((s) => <option key={s} value={s}>Semester {s}</option>)}
+          {filteredLecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
         </select>
       </div>
 

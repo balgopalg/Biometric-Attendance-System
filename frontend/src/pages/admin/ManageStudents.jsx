@@ -63,40 +63,6 @@ export default function ManageStudents() {
     api.get('/admin/students', { params }).then((r) => setStudents(r.data)).catch(() => {});
   };
 
-  const fetchFilterSemesters = (courseId) => {
-    if (!courseId) {
-      setFilterSemesters([]);
-      return;
-    }
-    api.get(`/admin/courses/${courseId}/semesters`)
-      .then((r) => setFilterSemesters(r.data || []))
-      .catch(() => setFilterSemesters([]));
-  };
-
-  const fetchBulkSemesters = (courseId) => {
-    if (!courseId) {
-      setBulkSemesters([]);
-      return;
-    }
-    api.get(`/admin/courses/${courseId}/semesters`).then((r) => setBulkSemesters(r.data || [])).catch(() => setBulkSemesters([]));
-  };
-
-  const fetchBulkPapersAndStudents = (courseId, semester) => {
-    if (!courseId || !semester) {
-      setBulkPapers([]);
-      setBulkStudents([]);
-      return;
-    }
-
-    api.get('/admin/papers', { params: { course_id: courseId, semester } })
-      .then((r) => setBulkPapers(r.data || []))
-      .catch(() => setBulkPapers([]));
-
-    api.get('/admin/students', { params: { course_id: courseId, semester } })
-      .then((r) => setBulkStudents(r.data || []))
-      .catch(() => setBulkStudents([]));
-  };
-
   useEffect(() => {
     fetchMetadata();
   }, []);
@@ -106,17 +72,85 @@ export default function ManageStudents() {
   }, [filters.course_id, filters.paper_id, filters.semester]);
 
   useEffect(() => {
-    fetchFilterSemesters(filters.course_id);
+    let cancelled = false;
+    if (!filters.course_id) {
+      setFilterSemesters([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    api.get(`/admin/courses/${filters.course_id}/semesters`)
+      .then((r) => {
+        if (!cancelled) setFilterSemesters(r.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setFilterSemesters([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [filters.course_id]);
 
   useEffect(() => {
-    if (!showBulk) return;
-    fetchBulkSemesters(bulkForm.course_id);
+    let cancelled = false;
+    if (!showBulk) return () => {
+      cancelled = true;
+    };
+    if (!bulkForm.course_id) {
+      setBulkSemesters([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    api.get(`/admin/courses/${bulkForm.course_id}/semesters`)
+      .then((r) => {
+        if (!cancelled) setBulkSemesters(r.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBulkSemesters([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [showBulk, bulkForm.course_id]);
 
   useEffect(() => {
-    if (!showBulk) return;
-    fetchBulkPapersAndStudents(bulkForm.course_id, bulkForm.semester);
+    let cancelled = false;
+    if (!showBulk) return () => {
+      cancelled = true;
+    };
+
+    if (!bulkForm.course_id || !bulkForm.semester) {
+      setBulkPapers([]);
+      setBulkStudents([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    api.get('/admin/papers', { params: { course_id: bulkForm.course_id, semester: bulkForm.semester } })
+      .then((r) => {
+        if (!cancelled) setBulkPapers(r.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBulkPapers([]);
+      });
+
+    api.get('/admin/students', { params: { course_id: bulkForm.course_id, semester: bulkForm.semester } })
+      .then((r) => {
+        if (!cancelled) setBulkStudents(r.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBulkStudents([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [showBulk, bulkForm.course_id, bulkForm.semester]);
 
   const filtered = useMemo(() => {
@@ -128,11 +162,6 @@ export default function ManageStudents() {
     );
   }, [students, search]);
 
-  useEffect(() => {
-    const visibleIds = new Set(filtered.map((s) => s.user_id || s._id));
-    setSelectedStudentIds((prev) => prev.filter((id) => visibleIds.has(id)));
-  }, [filtered]);
-
   const subjectOptions = useMemo(() => {
     return papers.filter((p) => {
       const sameCourse = !filters.course_id || p.course_id === filters.course_id;
@@ -140,6 +169,11 @@ export default function ManageStudents() {
       return sameCourse && sameSemester;
     });
   }, [papers, filters.course_id, filters.semester]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filtered.map((s) => s.user_id || s._id));
+    setSelectedStudentIds((prev) => prev.filter((id) => visibleIds.has(id)));
+  }, [filtered]);
 
   const areAllBulkStudentsSelected = bulkStudents.length > 0 && bulkStudents.every((s) => {
     const sid = s.user_id || s._id;

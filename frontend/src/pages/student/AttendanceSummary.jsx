@@ -22,7 +22,10 @@ export default function AttendanceSummary() {
           <tbody>
             {data.map((a) => {
               const pct = a.percentage;
-              const color = pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)';
+              const hasLectures = Number(a.total_classes || 0) > 0;
+              const color = !hasLectures
+                ? 'var(--text-muted)'
+                : (pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)');
               return (
                 <tr key={a.paper_id}>
                   <td><span className="badge badge-info">{a.paper_code}</span></td>
@@ -32,14 +35,14 @@ export default function AttendanceSummary() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)' }}>
-                        <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', borderRadius: 3, background: color, transition: 'width 0.5s ease' }} />
+                        <div style={{ width: `${hasLectures ? Math.min(pct, 100) : 0}%`, height: '100%', borderRadius: 3, background: color, transition: 'width 0.5s ease' }} />
                       </div>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color, minWidth: 42 }}>{Math.round(pct)}%</span>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color, minWidth: 42 }}>{hasLectures ? `${Math.round(pct)}%` : '—'}</span>
                     </div>
                   </td>
                   <td>
-                    <span className={`badge ${pct >= 75 ? 'badge-success' : pct >= 50 ? 'badge-warning' : 'badge-danger'}`}>
-                      {pct >= 75 ? 'Good' : pct >= 50 ? 'Warning' : 'Critical'}
+                    <span className={`badge ${!hasLectures ? 'badge-info' : (pct >= 75 ? 'badge-success' : pct >= 50 ? 'badge-warning' : 'badge-danger')}`}>
+                      {!hasLectures ? 'No Lectures yet' : (pct >= 75 ? 'Good' : pct >= 50 ? 'Warning' : 'Critical')}
                     </span>
                   </td>
                 </tr>

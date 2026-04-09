@@ -27,17 +27,18 @@ def log_action(action, performed_by, target_user=None, details="", rollback=None
     return doc
 
 
-def get_audit_logs(page=1, per_page=50):
-    """Return paginated audit logs, newest first."""
+def get_audit_logs(page=1, per_page=50, filters=None):
+    """Return paginated audit logs, newest first, with optional filters."""
     skip = (page - 1) * per_page
     logs_col = get_collection("audit", "audit_logs")
+    query = filters or {}
     logs = list(
-        logs_col.find()
+        logs_col.find(query)
         .sort("timestamp", -1)
         .skip(skip)
         .limit(per_page)
     )
-    total = logs_col.count_documents({})
+    total = logs_col.count_documents(query)
     return logs, total
 
 

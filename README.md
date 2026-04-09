@@ -99,6 +99,20 @@ pip install -r requirements.txt
 python run.py
 ```
 
+Create a `backend/.env` file with:
+
+```dotenv
+MONGO_URI=mongodb://localhost:27017/biometric_attendance
+MONGO_DB_AUTH=biometric_auth
+MONGO_DB_ACADEMIC=biometric_academic
+MONGO_DB_ATTENDANCE=biometric_attendance_ops
+MONGO_DB_AUDIT=biometric_audit
+JWT_SECRET_KEY=dd29382bc1f40da4ee3817eeedaef0e5123bdc9fdcd63a5d4caf5770d5f1fa2a
+FACENET_THRESHOLD=0.60
+CORS_ORIGINS=http://localhost:5173
+UPLOAD_FOLDER=uploads
+```
+
 Backend runs on `http://localhost:5000`.
 
 ### 2. Frontend

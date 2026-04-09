@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from datetime import timedelta
 from flask import Flask
 from pymongo import ASCENDING, DESCENDING
+from pymongo.errors import OperationFailure
 from .config import Config
 from .extensions import mongo, jwt, cors, get_collection
 
@@ -64,50 +65,64 @@ def _validate_production_config(app):
 
 
 def _ensure_indexes(mongo, config):
+    def _create_index_safe(collection, keys, name, **kwargs):
+        """Create index and auto-repair stale index definitions with same name."""
+        try:
+            collection.create_index(keys, name=name, **kwargs)
+        except OperationFailure as exc:
+            # Code 86: existing index has same name but different key spec.
+            if getattr(exc, "code", None) == 86:
+                collection.drop_index(name)
+                collection.create_index(keys, name=name, **kwargs)
+            else:
+                raise
+
     client = mongo.cx
 
     auth_users = client[config["MONGO_DB_AUTH"]]["users"]
-    auth_users.create_index([("email", ASCENDING)], unique=True, name="uq_users_email")
-    auth_users.create_index([("role", ASCENDING)], name="ix_users_role")
+    _create_index_safe(auth_users, [("email", ASCENDING)], unique=True, name="uq_users_email")
+    _create_index_safe(auth_users, [("role", ASCENDING)], name="ix_users_role")
 
     courses = client[config["MONGO_DB_ACADEMIC"]]["courses"]
-    courses.create_index([("code", ASCENDING)], unique=True, name="uq_courses_code")
+    _create_index_safe(courses, [("code", ASCENDING)], unique=True, name="uq_courses_code")
 
     papers = client[config["MONGO_DB_ACADEMIC"]]["papers"]
-    papers.create_index([("code", ASCENDING)], unique=True, name="uq_papers_code")
-    papers.create_index([("course_id", ASCENDING)], name="ix_papers_course")
-    papers.create_index([("lecturer_id", ASCENDING)], name="ix_papers_lecturers")
+    _create_index_safe(papers, [("code", ASCENDING)], unique=True, name="uq_papers_code")
+    _create_index_safe(papers, [("course_id", ASCENDING)], name="ix_papers_course")
+    _create_index_safe(papers, [("lecturer_id", ASCENDING)], name="ix_papers_lecturers")
 
     profiles = client[config["MONGO_DB_ACADEMIC"]]["student_profiles"]
-    profiles.create_index([("user_id", ASCENDING)], unique=True, name="uq_profiles_user")
-    profiles.create_index([("reg_number", ASCENDING)], unique=True, name="uq_profiles_reg")
-    profiles.create_index([("course_id", ASCENDING)], name="ix_profiles_course")
-    profiles.create_index([("academic_year", ASCENDING)], name="ix_profiles_year")
+    _create_index_safe(profiles, [("user_id", ASCENDING)], unique=True, name="uq_profiles_user")
+    _create_index_safe(profiles, [("reg_number", ASCENDING)], unique=True, name="uq_profiles_reg")
+    _create_index_safe(profiles, [("course_id", ASCENDING)], name="ix_profiles_course")
+    _create_index_safe(profiles, [("academic_year", ASCENDING)], name="ix_profiles_year")
 
     attendance_logs = client[config["MONGO_DB_ATTENDANCE"]]["attendance_logs"]
-    attendance_logs.create_index(
+    _create_index_safe(
+        attendance_logs,
         [("session_id", ASCENDING), ("paper_id", ASCENDING), ("student_id", ASCENDING)],
         unique=True,
         name="uq_attendance_session_paper_student",
     )
-    attendance_logs.create_index([("timestamp", DESCENDING)], name="ix_attendance_timestamp")
-    attendance_logs.create_index([("paper_id", ASCENDING), ("student_id", ASCENDING)], name="ix_attendance_paper_student")
+    _create_index_safe(attendance_logs, [("timestamp", DESCENDING)], name="ix_attendance_timestamp")
+    _create_index_safe(attendance_logs, [("paper_id", ASCENDING), ("student_id", ASCENDING)], name="ix_attendance_paper_student")
 
     sessions = client[config["MONGO_DB_ATTENDANCE"]]["attendance_sessions"]
-    sessions.create_index([("session_id", ASCENDING)], unique=True, name="uq_sessions_id")
-    sessions.create_index([("lecturer_id", ASCENDING), ("created_at", DESCENDING)], name="ix_sessions_lecturer_created")
-    sessions.create_index([("rollback_until", ASCENDING)], name="ix_sessions_rollback_until")
+    _create_index_safe(sessions, [("session_id", ASCENDING)], unique=True, name="uq_sessions_id")
+    _create_index_safe(sessions, [("lecturer_id", ASCENDING), ("created_at", DESCENDING)], name="ix_sessions_lecturer_created")
+    _create_index_safe(sessions, [("rollback_until", ASCENDING)], name="ix_sessions_rollback_until")
 
     overrides = client[config["MONGO_DB_ATTENDANCE"]]["exam_eligibility_overrides"]
-    overrides.create_index(
+    _create_index_safe(
+        overrides,
         [("student_id", ASCENDING), ("paper_id", ASCENDING)],
         unique=True,
         name="uq_overrides_student_paper",
     )
 
     audits = client[config["MONGO_DB_AUDIT"]]["audit_logs"]
-    audits.create_index([("timestamp", DESCENDING)], name="ix_audit_timestamp")
-    audits.create_index([("action", ASCENDING)], name="ix_audit_action")
+    _create_index_safe(audits, [("timestamp", DESCENDING)], name="ix_audit_timestamp")
+    _create_index_safe(audits, [("action", ASCENDING)], name="ix_audit_action")
 
 
 def _seed_admin(mongo):

@@ -74,9 +74,12 @@ export default function StudentDashboard() {
     api.get('/student/profile').then((r) => setProfile(r.data)).catch(() => {});
   }, []);
 
-  const avgPct = attendance.length > 0
-    ? Math.round(attendance.reduce((s, a) => s + a.percentage, 0) / attendance.length)
-    : 0;
+  const lectureStartedPapers = attendance.filter((a) => Number(a.total_classes || 0) > 0);
+  const avgPct = lectureStartedPapers.length > 0
+    ? Math.round(lectureStartedPapers.reduce((s, a) => s + a.percentage, 0) / lectureStartedPapers.length)
+    : null;
+
+  const overallPrediction = predictions[0] || null;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -86,7 +89,12 @@ export default function StudentDashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
-        <StatsCard icon={HiOutlineChartBar} label="Average Attendance" value={`${avgPct}%`} color="var(--accent-purple)" />
+        <StatsCard
+          icon={HiOutlineChartBar}
+          label="Average Attendance"
+          value={avgPct === null ? 'No Lectures yet' : `${avgPct}%`}
+          color="var(--accent-purple)"
+        />
         <StatsCard icon={HiOutlineAcademicCap} label="Enrolled Papers" value={attendance.length} color="var(--accent-cyan)" />
       </div>
 
@@ -132,8 +140,11 @@ export default function StudentDashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
         {attendance.map((a) => {
           const pct = a.percentage;
-          const color = pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)';
-          const deg = (pct / 100) * 360;
+          const hasLectures = Number(a.total_classes || 0) > 0;
+          const color = !hasLectures
+            ? 'var(--text-muted)'
+            : (pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)');
+          const deg = hasLectures ? (pct / 100) * 360 : 0;
           return (
             <motion.div key={a.paper_id} whileHover={{ y: -4 }} className="glass-card" style={{ padding: 20, textAlign: 'center' }}>
               <div style={{
@@ -146,12 +157,12 @@ export default function StudentDashboard() {
                   background: 'var(--bg-secondary)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontWeight: 800, fontSize: '1rem', color,
-                }}>{Math.round(pct)}%</div>
+                }}>{hasLectures ? `${Math.round(pct)}%` : '—'}</div>
               </div>
               <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{a.paper_name}</p>
               <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{a.attended} / {a.total_classes} classes</p>
-              <span className={`badge ${pct >= 75 ? 'badge-success' : 'badge-danger'}`} style={{ marginTop: 8 }}>
-                {pct >= 75 ? 'On Track' : 'At Risk'}
+              <span className={`badge ${!hasLectures ? 'badge-info' : (pct >= 75 ? 'badge-success' : 'badge-danger')}`} style={{ marginTop: 8 }}>
+                {!hasLectures ? 'No Lectures yet' : (pct >= 75 ? 'On Track' : 'At Risk')}
               </span>
             </motion.div>
           );
@@ -160,28 +171,34 @@ export default function StudentDashboard() {
 
       {/* Predictions */}
       <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <HiOutlineCalculator size={18} style={{ color: 'var(--accent-amber)' }} /> Predictions
+        <HiOutlineCalculator size={18} style={{ color: 'var(--accent-amber)' }} /> Overall Predictions
       </h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-        {predictions.map((p) => (
-          <div key={p.paper_id} className="glass-card" style={{ padding: 20 }}>
+        {overallPrediction ? (
+          <div className="glass-card" style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span className="badge badge-info">{p.paper_code}</span>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: p.current_percentage >= 75 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>{p.current_percentage}%</span>
+              <span className="badge badge-info">Across All Enrolled Papers</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: overallPrediction.current_percentage >= 75 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                {overallPrediction.current_percentage}%
+              </span>
             </div>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 10 }}>{p.paper_name}</p>
+            <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 10 }}>Combined attendance projection</p>
             <div style={{ display: 'flex', gap: 12 }}>
               <div style={{ flex: 1, padding: 10, borderRadius: 'var(--radius)', background: 'rgba(245, 158, 11, 0.08)', textAlign: 'center' }}>
-                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-amber)' }}>{p.classes_needed_for_75}</p>
-                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Classes needed for 75%</p>
+                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-amber)' }}>{overallPrediction.classes_needed_for_75}</p>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Overall classes needed for 75%</p>
               </div>
               <div style={{ flex: 1, padding: 10, borderRadius: 'var(--radius)', background: 'rgba(16, 185, 129, 0.08)', textAlign: 'center' }}>
-                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-emerald)' }}>{p.safe_bunks_remaining}</p>
-                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Safe bunks left</p>
+                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-emerald)' }}>{overallPrediction.safe_bunks_remaining}</p>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Overall safe bunks left</p>
               </div>
             </div>
           </div>
-        ))}
+        ) : (
+          <div className="glass-card" style={{ padding: 20, color: 'var(--text-muted)' }}>
+            Predictions will appear after attendance data is available.
+          </div>
+        )}
       </div>
     </motion.div>
   );

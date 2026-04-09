@@ -4,10 +4,11 @@ import api from '../../api/axios';
 import { useWebcam } from '../../hooks/useWebcam';
 import WebcamFeed from '../../components/recognition/WebcamFeed';
 import RecognizedList from '../../components/recognition/RecognizedList';
+import UploadClassroomImage from '../../components/recognition/UploadClassroomImage';
 import PinCommitModal from './PinCommitModal';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlinePlay, HiOutlinePause, HiOutlineStop, HiOutlineCheckCircle } from 'react-icons/hi';
+import { HiOutlinePlay, HiOutlinePause, HiOutlineStop, HiOutlineCheckCircle, HiOutlinePhotograph } from 'react-icons/hi';
 
 function fmt(dt) {
   if (!dt) return 'N/A';
@@ -24,6 +25,7 @@ export default function AttendanceSession() {
 
   const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam();
   const [papers, setPapers] = useState([]);
+  const [selectedCourseId, setSelectedCourseId] = useState('');
   const [selectedPaperId, setSelectedPaperId] = useState(paperIdFromQuery || '');
 
   const [sessionId, setSessionId] = useState(null);
@@ -32,6 +34,8 @@ export default function AttendanceSession() {
   const [recognized, setRecognized] = useState([]);
   const [scanning, setScanning] = useState(false);
   const [showPin, setShowPin] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadLoading, setUploadLoading] = useState(false);
 
   const [diag, setDiag] = useState({ faces_detected: 0, candidates_count: 0, best_similarity_seen: null, threshold: null });
   const [scanError, setScanError] = useState('');
@@ -40,6 +44,7 @@ export default function AttendanceSession() {
   const [review, setReview] = useState(null);
   const [showAdjustPin, setShowAdjustPin] = useState(false);
   const [adjustIds, setAdjustIds] = useState([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const intervalRef = useRef(null);
 
@@ -48,11 +53,47 @@ export default function AttendanceSession() {
     [papers, selectedPaperId]
   );
 
+  const courseOptions = useMemo(() => {
+    const map = new Map();
+    papers.forEach((p) => {
+      if (!p.course_id) return;
+      if (!map.has(p.course_id)) {
+        map.set(p.course_id, {
+          _id: p.course_id,
+          name: p.course_name || 'N/A',
+          code: p.course_code || '',
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [papers]);
+
+  const filteredPapers = useMemo(() => {
+    if (!selectedCourseId) return [];
+    return papers.filter((p) => p.course_id === selectedCourseId);
+  }, [papers, selectedCourseId]);
+
+  const currentAcademicSession = useMemo(() => String(new Date().getFullYear()), []);
+
   const fetchPapers = () => {
     api.get('/lecturer/papers').then((r) => {
-      setPapers(r.data || []);
-      if (!selectedPaperId && r.data?.length) {
-        setSelectedPaperId(r.data[0]._id);
+      const list = r.data || [];
+      setPapers(list);
+
+      if (paperIdFromQuery) {
+        const queriedPaper = list.find((p) => p._id === paperIdFromQuery);
+        if (queriedPaper) {
+          setSelectedCourseId(queriedPaper.course_id || '');
+          setSelectedPaperId(queriedPaper._id);
+          return;
+        }
+      }
+
+      if (list.length) {
+        const firstCourseId = list[0].course_id || '';
+        setSelectedCourseId(firstCourseId);
+        const firstPaperInCourse = list.find((p) => p.course_id === firstCourseId);
+        setSelectedPaperId(firstPaperInCourse?._id || '');
       }
     }).catch(() => {});
   };
@@ -60,6 +101,18 @@ export default function AttendanceSession() {
   useEffect(() => {
     fetchPapers();
   }, []);
+
+  useEffect(() => {
+    if (!selectedCourseId) {
+      if (selectedPaperId) setSelectedPaperId('');
+      return;
+    }
+
+    const belongsToCourse = filteredPapers.some((p) => p._id === selectedPaperId);
+    if (!belongsToCourse) {
+      setSelectedPaperId(filteredPapers[0]?._id || '');
+    }
+  }, [selectedCourseId, selectedPaperId, filteredPapers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +132,11 @@ export default function AttendanceSession() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60 * 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const startSession = async () => {
@@ -198,6 +256,65 @@ export default function AttendanceSession() {
     }
   }, [sessionId, selectedPaperId, captureFrame]);
 
+  const handleUploadImage = async (imageBlob) => {
+    if (!selectedPaperId) {
+      toast.error('Please select a paper first');
+      return;
+    }
+
+    if (!sessionId) {
+      toast.error('Please start a session first');
+      return;
+    }
+
+    setUploadLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('session_id', sessionId);
+      formData.append('image', imageBlob);
+
+      console.debug('[Image Upload] FormData ready', {
+        sessionId,
+        fileName: imageBlob.name,
+        fileSize: imageBlob.size,
+        fileType: imageBlob.type,
+      });
+
+      const res = await api.post('/lecturer/session/recognize-image', formData);
+      
+      console.debug('[Image Upload] Response received', {
+        facesDetected: res.data.faces_detected,
+        newMatches: res.data.new_matches?.length,
+      });
+
+      if (res.data.new_matches?.length > 0) {
+        setRecognized((prev) => [...prev, ...res.data.new_matches]);
+        res.data.new_matches.forEach((m) => toast.success(`Recognized: ${m.name}`));
+        toast.success(`Successfully recognized ${res.data.new_matches.length} student(s)`);
+      } else {
+        toast.success('No new students recognized in this image');
+      }
+
+      setDiag({
+        faces_detected: res.data.faces_detected || 0,
+        candidates_count: res.data.candidates_count || 0,
+        best_similarity_seen: res.data.best_similarity_seen,
+        threshold: res.data.threshold,
+      });
+
+      setShowUploadModal(false);
+    } catch (err) {
+      console.error('[Image Recognition] Failed', {
+        status: err.response?.status,
+        error: err.response?.data?.error,
+        message: err.message,
+      });
+      toast.error(err.response?.data?.error || err.message || 'Image recognition failed');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (scanning && sessionId) {
       intervalRef.current = setInterval(scanFrame, 2000);
@@ -249,9 +366,9 @@ export default function AttendanceSession() {
 
   const rollbackRemainingMins = useMemo(() => {
     if (!review?.rollback_until) return null;
-    const diff = new Date(review.rollback_until).getTime() - Date.now();
+    const diff = new Date(review.rollback_until).getTime() - nowMs;
     return Math.max(0, Math.ceil(diff / 60000));
-  }, [review]);
+  }, [review, nowMs]);
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -279,6 +396,9 @@ export default function AttendanceSession() {
                   <HiOutlinePlay size={16} /> Resume
                 </button>
               )}
+              <button className="btn-secondary" onClick={() => setShowUploadModal(true)}>
+                <HiOutlinePhotograph size={16} /> Upload Image
+              </button>
               <button className="btn-danger" onClick={stopSession}>
                 <HiOutlineStop size={16} /> Stop Session
               </button>
@@ -291,10 +411,16 @@ export default function AttendanceSession() {
       </div>
 
       <div className="glass-card" style={{ padding: 14, marginBottom: 14 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr 1fr', gap: 10 }}>
-          <select className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning}>
-            <option value="">Select Paper</option>
-            {papers.map((p) => (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          <select className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
+            <option value="">Select Course</option>
+            {courseOptions.map((c) => (
+              <option key={c._id} value={c._id}>{c.name} {c.code ? `(${c.code})` : ''}</option>
+            ))}
+          </select>
+          <select className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
+            <option value="">{selectedCourseId ? 'Select Paper' : 'Select Course First'}</option>
+            {filteredPapers.map((p) => (
               <option key={p._id} value={p._id}>{p.name} ({p.code})</option>
             ))}
           </select>
@@ -303,8 +429,8 @@ export default function AttendanceSession() {
             <p style={{ fontWeight: 700 }}>{selectedPaper ? `${selectedPaper.name} · ${selectedPaper.course_name || 'N/A'}` : 'N/A'}</p>
           </div>
           <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Academic Year</p>
-            <p style={{ fontWeight: 700 }}>{selectedPaper?.academic_year || 'N/A'}</p>
+            <p style={{ color: 'var(--text-muted)' }}>Academic Session</p>
+            <p style={{ fontWeight: 700 }}>{currentAcademicSession}</p>
           </div>
           <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
             <p style={{ color: 'var(--text-muted)' }}>Session Time</p>
@@ -313,7 +439,7 @@ export default function AttendanceSession() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
         <WebcamFeed ref={videoRef} isActive={isActive} error={error} />
         <RecognizedList students={recognized} />
       </div>
@@ -392,6 +518,14 @@ export default function AttendanceSession() {
         confirmLabel="Confirm Re-Commit"
         loadingLabel="Re-committing..."
       />
+
+      {showUploadModal && (
+        <UploadClassroomImage
+          onUpload={handleUploadImage}
+          onClose={() => setShowUploadModal(false)}
+          isLoading={uploadLoading}
+        />
+      )}
     </motion.div>
   );
 }

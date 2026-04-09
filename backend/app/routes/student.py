@@ -1,20 +1,13 @@
 """Student dashboard routes — attendance summary, predictions, exam eligibility."""
 
 from flask import Blueprint, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_mongo_doc, sanitise_many
-from app.models.user import find_user_by_email
+from app.utils.helpers import sanitise_mongo_doc
 from app.models.enrollment import get_profile_by_user
 from app.models.paper import get_paper_by_id
 from app.models.course import get_course_by_id
 from app.models.attendance import count_attendance
-from app.services.attendance_calc import (
-    get_attendance_percentage,
-    classes_needed_for_threshold,
-    safe_bunks_remaining,
-)
 
 student_bp = Blueprint("student", __name__)
 
@@ -113,27 +106,49 @@ def attendance_summary(user):
 @student_bp.route("/predictions", methods=["GET"])
 @role_required("student")
 def predictions(user):
-    """Classes needed for 75% and safe bunks remaining."""
+    """Overall classes needed for 75% and safe bunks remaining across enrolled papers."""
     profile = get_profile_by_user(str(user["_id"]))
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404
 
     uid = str(user["_id"])
-    result = []
-    for paper_id in profile.get("enrolled_papers", []):
+    enrolled_papers = profile.get("enrolled_papers", [])
+
+    total_attended = 0
+    total_classes = 0
+    for paper_id in enrolled_papers:
         paper = get_paper_by_id(paper_id)
         if not paper:
             continue
-        pct = get_attendance_percentage(uid, paper_id)
-        needed = classes_needed_for_threshold(uid, paper_id, 75.0)
-        bunks = safe_bunks_remaining(uid, paper_id, 75.0)
+        total_attended += count_attendance(uid, paper_id)
+        total_classes += _to_int(paper.get("total_classes"), 0)
+
+    overall_pct = round((total_attended / total_classes) * 100, 2) if total_classes > 0 else 0.0
+
+    # If student attends all upcoming classes, minimum classes to reach 75%:
+    # (A + n) / (T + n) >= 0.75  =>  n >= (0.75*T - A) / 0.25
+    needed_float = ((0.75 * total_classes) - total_attended) / 0.25 if total_classes > 0 else 0
+    classes_needed = max(0, int(needed_float) if needed_float.is_integer() else int(needed_float) + 1)
+
+    # Maximum bunks while staying at >=75%:
+    # A / (T + b) >= 0.75  =>  b <= A/0.75 - T
+    safe_bunks = max(0, int((total_attended / 0.75) - total_classes)) if total_classes > 0 else 0
+
+    result = []
+    for paper_id in enrolled_papers:
+        paper = get_paper_by_id(paper_id)
+        if not paper:
+            continue
         result.append({
             "paper_id": paper_id,
             "paper_name": paper.get("name", ""),
             "paper_code": paper.get("code", ""),
-            "current_percentage": pct,
-            "classes_needed_for_75": needed,
-            "safe_bunks_remaining": bunks,
+            "current_percentage": overall_pct,
+            "overall_attendance_percentage": overall_pct,
+            "overall_attended_classes": total_attended,
+            "overall_total_classes": total_classes,
+            "classes_needed_for_75": classes_needed,
+            "safe_bunks_remaining": safe_bunks,
         })
 
     return jsonify(result)
@@ -142,25 +157,44 @@ def predictions(user):
 @student_bp.route("/exam-eligibility", methods=["GET"])
 @role_required("student")
 def exam_eligibility(user):
-    """Exam eligibility status per paper (>= 75% required)."""
+    """Exam eligibility status per paper using overall attendance (>= 75% required)."""
     profile = get_profile_by_user(str(user["_id"]))
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404
 
     uid = str(user["_id"])
-    result = []
-    for paper_id in profile.get("enrolled_papers", []):
+    enrolled_papers = profile.get("enrolled_papers", [])
+
+    total_attended = 0
+    total_classes = 0
+    for paper_id in enrolled_papers:
         paper = get_paper_by_id(paper_id)
         if not paper:
             continue
-        pct = get_attendance_percentage(uid, paper_id)
+        attended = count_attendance(uid, paper_id)
+        classes = _to_int(paper.get("total_classes"), 0)
+        total_attended += attended
+        total_classes += classes
+
+    overall_pct = round((total_attended / total_classes) * 100, 2) if total_classes > 0 else 0.0
+    has_lectures = total_classes > 0
+    overall_eligible = (overall_pct >= 75.0) if has_lectures else None
+
+    result = []
+    for paper_id in enrolled_papers:
+        paper = get_paper_by_id(paper_id)
+        if not paper:
+            continue
         result.append({
             "paper_id": paper_id,
             "paper_name": paper.get("name", ""),
             "paper_code": paper.get("code", ""),
-            "attendance_percentage": pct,
-            "eligible": pct >= 75.0,
-            "status": "Eligible" if pct >= 75.0 else "Not Eligible",
+            "attendance_percentage": overall_pct,
+            "overall_attendance_percentage": overall_pct,
+            "overall_attended_classes": total_attended,
+            "overall_total_classes": total_classes,
+            "eligible": overall_eligible,
+            "status": "No Lectures Yet" if overall_eligible is None else ("Eligible" if overall_eligible else "Not Eligible"),
         })
 
     return jsonify(result)

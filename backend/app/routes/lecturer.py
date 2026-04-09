@@ -5,13 +5,14 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+import numpy as np
 from flask import Blueprint, request, jsonify, current_app
 
 from app.extensions import get_collection
 from app.models.audit import log_action
 from app.models.attendance import log_attendance
 from app.models.course import get_course_by_id
-from app.models.enrollment import get_profiles_for_paper
+from app.models.enrollment import get_profiles_for_paper, count_profiles_for_paper
 from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
 from app.models.user import find_user_by_id, update_user
 from app.services.face_detection import get_detector
@@ -38,6 +39,7 @@ def _enrich_paper(paper):
     item["course_code"] = (course or {}).get("code")
     item["academic_year"] = item.get("academic_session") or item.get("academic_year")
     item["semester"] = item.get("semester")
+    item["total_enrolled_students"] = count_profiles_for_paper(item.get("_id")) if item.get("_id") else 0
     return item
 
 
@@ -199,10 +201,10 @@ def recognize_frame(user):
     faces = detector.detect_faces(img)
 
     if not faces:
-        return jsonify({"new_matches": [], "faces_detected": 0, "candidates_count": 0, "threshold": current_app.config.get("FACENET_THRESHOLD", 0.45), "best_similarity_seen": None})
+        return jsonify({"new_matches": [], "faces_detected": 0, "candidates_count": 0, "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60), "best_similarity_seen": None})
 
     profiles = get_profiles_for_paper(paper_id)
-    threshold = current_app.config.get("FACENET_THRESHOLD", 0.45)
+    threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
 
     new_matches = []
     best_similarity_seen = -1.0
@@ -210,11 +212,13 @@ def recognize_frame(user):
         embedding = generate_embedding(face["crop"])
 
         face_best_similarity = -1.0
+        best_profile = None
         for profile in profiles:
             for stored_emb in profile.get("face_embeddings", []):
                 sim = compare_embeddings(embedding, stored_emb)
                 if sim > face_best_similarity:
                     face_best_similarity = sim
+                    best_profile = profile
         if face_best_similarity > best_similarity_seen:
             best_similarity_seen = face_best_similarity
 
@@ -224,7 +228,107 @@ def recognize_frame(user):
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
+            print(f"[RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
+        elif not match and best_profile:
+            print(f"[RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
 
+    return jsonify({
+        "new_matches": new_matches,
+        "faces_detected": len(faces),
+        "total_recognized": len(session["recognized"]),
+        "candidates_count": len(profiles),
+        "threshold": threshold,
+        "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
+    })
+
+
+@lecturer_bp.route("/session/recognize-image", methods=["POST"])
+@role_required("lecturer")
+def recognize_image(user):
+    """Accept an uploaded classroom image, run detection + recognition, return new matches."""
+    session_id = request.form.get("session_id")
+    
+    if not session_id or session_id not in _sessions:
+        return jsonify({"error": "Invalid session"}), 400
+    
+    if "image" not in request.files:
+        return jsonify({"error": "image file is required"}), 400
+    
+    file = request.files["image"]
+    if not file or file.filename == "":
+        return jsonify({"error": "No image file selected"}), 400
+    
+    session = _sessions[session_id]
+    paper_id = session["paper_id"]
+    
+    try:
+        # Read image from file
+        from PIL import Image
+        import io
+        img_pil = Image.open(io.BytesIO(file.read()))
+        img = np.array(img_pil)
+        
+        print(f"[DEBUG] Image shape: {img.shape}, dtype: {img.dtype}")
+        
+        # Ensure RGB format
+        if len(img.shape) == 2:
+            # Grayscale - convert to RGB
+            img = np.stack([img] * 3, axis=-1)
+        elif len(img.shape) == 3:
+            if img.shape[2] == 4:
+                # RGBA - remove alpha channel
+                img = img[:, :, :3]
+            elif img.shape[2] != 3:
+                # Unexpected format - take first 3 channels
+                img = img[:, :, :3]
+        else:
+            return jsonify({"error": f"Invalid image format: unexpected shape {img.shape}"}), 400
+            
+    except Exception as e:
+        print(f"[ERROR] Image processing failed: {str(e)}")
+        return jsonify({"error": f"Failed to process image: {str(e)}"}), 400
+    
+    detector = get_detector()
+    faces = detector.detect_faces(img)
+    
+    if not faces:
+        return jsonify({
+            "new_matches": [],
+            "faces_detected": 0,
+            "candidates_count": 0,
+            "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
+            "best_similarity_seen": None
+        })
+    
+    profiles = get_profiles_for_paper(paper_id)
+    threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
+
+    new_matches = []
+    best_similarity_seen = -1.0
+    for face in faces:
+        embedding = generate_embedding(face["crop"])
+        
+        face_best_similarity = -1.0
+        best_profile = None
+        for profile in profiles:
+            for stored_emb in profile.get("face_embeddings", []):
+                sim = compare_embeddings(embedding, stored_emb)
+                if sim > face_best_similarity:
+                    face_best_similarity = sim
+                    best_profile = profile
+        if face_best_similarity > best_similarity_seen:
+            best_similarity_seen = face_best_similarity
+        
+        match = find_best_match(embedding, profiles, threshold=threshold)
+        if match and match["user_id"] not in session["recognized"]:
+            session["recognized"].append(match["user_id"])
+            stu_user = find_user_by_id(match["user_id"])
+            match["name"] = stu_user["name"] if stu_user else "Unknown"
+            new_matches.append(match)
+            print(f"[IMAGE_RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
+        elif not match and best_profile:
+            print(f"[IMAGE_RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
+    
     return jsonify({
         "new_matches": new_matches,
         "faces_detected": len(faces),
@@ -306,6 +410,7 @@ def commit_session(user):
 
     committed_at = datetime.utcnow()
     rollback_until = committed_at + timedelta(minutes=ROLLBACK_MINUTES)
+    current_year = str(committed_at.year)
     sessions = get_collection("attendance", "attendance_sessions")
     sessions.update_one(
         {"session_id": session_id},
@@ -315,6 +420,8 @@ def commit_session(user):
                 "paper_id": paper_id,
                 "lecturer_id": lecturer_id,
                 "student_ids": present_student_ids,
+                "academic_session": current_year,
+                "academic_year": current_year,
                 "committed_at": committed_at,
                 "rollback_until": rollback_until,
                 "finalized": False,
@@ -491,7 +598,7 @@ def lecturer_progress(user):
             "paper_name": (paper or {}).get("name") or ((get_paper_by_id(pid) or {}).get("name") if pid else "Unknown"),
             "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
             "course_name": (paper or {}).get("course_name"),
-            "academic_year": (paper or {}).get("academic_year"),
+            "academic_year": (session_doc or {}).get("academic_year") or (paper or {}).get("academic_year"),
             "timestamp": first_ts,
             "students_count": len(students),
             "total_students": enrolled_totals_by_paper.get(pid, 0),
@@ -520,7 +627,7 @@ def lecturer_progress(user):
             "paper_name": (paper or {}).get("name", "Unknown"),
             "paper_code": (paper or {}).get("code", ""),
             "course_name": (paper or {}).get("course_name"),
-            "academic_year": (paper or {}).get("academic_year"),
+            "academic_year": (next((s for s in sessions if s.get("paper_id") == pid), {}) or {}).get("academic_year") or (paper or {}).get("academic_year"),
             "classes_taken": stat["classes_taken"],
             "attendance_marks": stat["attendance_marks"],
             "avg_attendance_per_class": round(

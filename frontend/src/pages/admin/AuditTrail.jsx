@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
@@ -11,6 +11,36 @@ export default function AuditTrail() {
   const [keyword, setKeyword] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const actionSuggestions = useMemo(() => {
+    const commonActions = [
+      'CREATE_STUDENT',
+      'UPDATE_STUDENT',
+      'DELETE_STUDENT',
+      'CREATE_PAPER',
+      'UPDATE_PAPER',
+      'DELETE_PAPER',
+      'ASSIGN_LECTURER',
+      'BULK_ASSIGN_LECTURER',
+      'ATTENDANCE_OVERRIDE_ADD',
+      'ATTENDANCE_OVERRIDE_REMOVE',
+      'EXAM_ELIGIBILITY_OVERRIDE',
+      'RESET_PASSWORD',
+      'ENROLL_FACE',
+    ];
+
+    const fromLogs = logs
+      .map((log) => String(log?.action || '').trim())
+      .filter(Boolean);
+
+    return Array.from(new Set([...commonActions, ...fromLogs])).sort();
+  }, [logs]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const fetchLogs = (p = page) => {
     const params = { page: p, per_page: 20 };
@@ -63,7 +93,7 @@ export default function AuditTrail() {
 
     const ts = new Date(log.timestamp).getTime();
     if (!Number.isFinite(ts)) return false;
-    const withinOneDay = Date.now() - ts <= 24 * 60 * 60 * 1000;
+    const withinOneDay = nowMs - ts <= 24 * 60 * 60 * 1000;
     return withinOneDay;
   };
 
@@ -104,9 +134,13 @@ export default function AuditTrail() {
             className="input-field"
             style={{ width: 180, padding: '8px 12px', fontSize: '0.8rem' }}
             placeholder="e.g. OVERRIDE"
+            list="audit-action-suggestions"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
+          <datalist id="audit-action-suggestions">
+            {actionSuggestions.map((action) => <option key={action} value={action} />)}
+          </datalist>
         </div>
         <div>
           <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>From</label>
@@ -139,7 +173,7 @@ export default function AuditTrail() {
       </div>
 
       {/* Table */}
-      <div className="glass-card" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+      <div className="glass-card table-desktop" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
         <table className="data-table" style={{ minWidth: 980 }}>
           <thead>
             <tr>
@@ -204,6 +238,70 @@ export default function AuditTrail() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="mobile-card-list" style={{ marginTop: 10 }}>
+        {logs.map((log, i) => {
+          const allowed = Boolean(log?.rollback_available) || isFallbackRollbackCandidate(log);
+          return (
+            <div key={log._id || i} className="glass-card mobile-card">
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">Timestamp</span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  {log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', {
+                    day: '2-digit', month: 'short', year: '2-digit',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  }) : '—'}
+                </span>
+              </div>
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">Actor</span>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--text-primary)' }}>{log.actor_name || '—'}</p>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{log.actor_email || ''}</p>
+                </div>
+              </div>
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">Role</span>
+                <span className="badge badge-info" style={{ textTransform: 'capitalize' }}>{log.role || '—'}</span>
+              </div>
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">Action</span>
+                <span className={`badge ${getActionColor(log.action)}`} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {log.action || '—'}
+                </span>
+              </div>
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">Target</span>
+                <span style={{ fontSize: '0.8rem' }}>{log.target_type || '—'}</span>
+              </div>
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">IP</span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{log.ip || '—'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                {log.rolled_back ? (
+                  <span className="badge badge-success">Rolled Back</span>
+                ) : (
+                  <button
+                    className="btn-secondary"
+                    style={{ padding: '6px 10px', fontSize: '0.75rem', opacity: allowed ? 1 : 0.6, whiteSpace: 'nowrap' }}
+                    onClick={() => handleRollback(log)}
+                    disabled={!allowed}
+                    title={allowed ? 'Rollback this action' : 'Rollback unavailable for this entry'}
+                  >
+                    <HiOutlineRefresh size={14} /> Rollback
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {logs.length === 0 && (
+          <div className="glass-card" style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+            No audit logs yet.
+          </div>
+        )}
       </div>
 
       {/* Pagination */}

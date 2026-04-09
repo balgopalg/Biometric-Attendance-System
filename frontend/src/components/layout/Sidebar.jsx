@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlineAcademicCap, HiOutlineUsers, HiOutlineBookOpen,
   HiOutlineClipboardList, HiOutlineShieldCheck, HiOutlineLogout,
-  HiOutlineHome, HiOutlineCamera, HiOutlineChartBar, HiOutlineDocumentText,
+  HiOutlineHome, HiOutlineCamera, HiOutlineChartBar, HiOutlineDocumentText, HiOutlineCheckCircle,
 } from 'react-icons/hi';
 
 const navMap = {
@@ -14,12 +14,13 @@ const navMap = {
     { to: '/admin/courses', icon: HiOutlineAcademicCap, label: 'Courses' },
     { to: '/admin/papers', icon: HiOutlineBookOpen, label: 'Papers' },
     { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
+    { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
     { to: '/admin/audit', icon: HiOutlineShieldCheck, label: 'Audit Log' },
   ],
   lecturer: [
     { to: '/lecturer', icon: HiOutlineHome, label: 'Dashboard' },
     { to: '/lecturer/session', icon: HiOutlineCamera, label: 'Take Attendance' },
-    { to: '/lecturer/progress', icon: HiOutlineChartBar, label: 'My Progress' },
+    { to: '/lecturer/progress', icon: HiOutlineChartBar, label: 'Attendance History' },
   ],
   student: [
     { to: '/student', icon: HiOutlineHome, label: 'Dashboard' },
@@ -76,7 +77,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       </div>
 
       {/* User Profile */}
-      <div style={{ padding: isCollapsed ? '20px 12px 16px' : '20px 20px 16px', borderBottom: '1px solid var(--sidebar-divider)', textAlign: isCollapsed ? 'center' : 'left' }}>
+      <div style={{ padding: isCollapsed ? '20px 12px 16px' : '20px 20px 16px', borderBottom: '1px solid var(--sidebar-divider)', textAlign: 'center' }}>
         <div style={{
           width: 44, height: 44, borderRadius: '50%',
           background: 'rgba(255,255,255,0.2)',

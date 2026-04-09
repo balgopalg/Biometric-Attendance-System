@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
 
 const AuthContext = createContext(null);
@@ -10,6 +10,13 @@ export function AuthProvider({ children }) {
   });
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
+
+  const logout = useCallback(() => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null);
+    setUser(null);
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -25,7 +32,7 @@ export function AuthProvider({ children }) {
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [token, logout]);
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
@@ -37,15 +44,9 @@ export function AuthProvider({ children }) {
     return userData;
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
-  };
-
   const clearMustChangePassword = () => {
     setUser((prev) => {
+      if (!prev) return prev;
       const updated = { ...prev, must_change_password: false };
       localStorage.setItem('user', JSON.stringify(updated));
       return updated;
@@ -63,12 +64,6 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
-  return ctx;
 }
 
 export default AuthContext;

@@ -371,3 +371,75 @@ body {
 }
 .animate-glow { animation: pulse-glow 3s ease-in-out infinite; }
 .animate-float { animation: float 4s ease-in-out infinite; }
+
+.mobile-card-list {
+  display: none;
+}
+
+.mobile-card {
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.mobile-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.mobile-card-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* ─── Responsive Tweaks ─── */
+@media (max-width: 1024px) {
+  .glass-card {
+    border-radius: 12px;
+  }
+
+  .stat-card {
+    padding: 14px 16px;
+  }
+
+  .filter-bar {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .search-input {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    padding: 9px 12px;
+    font-size: 0.78rem;
+  }
+
+  .data-table th {
+    padding: 10px 12px;
+    font-size: 0.66rem;
+  }
+
+  .data-table td {
+    padding: 10px 12px;
+    font-size: 0.78rem;
+  }
+
+  .table-desktop {
+    display: none;
+  }
+
+  .mobile-card-list {
+    display: block;
+  }
+}

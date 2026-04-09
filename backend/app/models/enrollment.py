@@ -61,9 +61,24 @@ def enroll_in_papers(user_id, paper_ids):
 
 def get_profiles_for_paper(paper_id):
     """Return all student profiles enrolled in a given paper."""
-    return list(
-        get_collection("academic", "student_profiles").find({"enrolled_papers": paper_id})
-    )
+    profiles = get_collection("academic", "student_profiles")
+    filters = [paper_id, str(paper_id)]
+    try:
+        filters.append(ObjectId(str(paper_id)))
+    except Exception:
+        pass
+    return list(profiles.find({"enrolled_papers": {"$in": filters}}))
+
+
+def count_profiles_for_paper(paper_id):
+    """Count enrolled students for a paper, handling string/ObjectId ids."""
+    profiles = get_collection("academic", "student_profiles")
+    filters = [paper_id, str(paper_id)]
+    try:
+        filters.append(ObjectId(str(paper_id)))
+    except Exception:
+        pass
+    return int(profiles.count_documents({"enrolled_papers": {"$in": filters}}))
 
 
 def update_profile(user_id, fields):

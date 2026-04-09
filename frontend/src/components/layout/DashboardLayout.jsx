@@ -13,9 +13,11 @@ const titleMap = {
   '/admin/lecturers': 'Manage Lecturers',
   '/admin/students': 'Manage Students',
   '/admin/enrollment': 'Student Enrollment',
+  '/admin/exam-eligibility': 'Exam Eligibility',
   '/admin/audit': 'Audit Trail',
   '/lecturer': 'Lecturer Dashboard',
   '/lecturer/session': 'Attendance Session',
+  '/lecturer/progress': 'Attendance History',
   '/student': 'Student Dashboard',
   '/student/attendance': 'Attendance Summary',
   '/student/exams': 'Exam Portal',
@@ -79,7 +81,7 @@ export default function DashboardLayout() {
           isMobile={isMobile}
           isSidebarCollapsed={isSidebarCollapsed}
         />
-        <main style={{ flex: 1, padding: 28, overflow: 'auto' }}>
+        <main style={{ flex: 1, padding: isMobile ? 14 : 28, overflow: 'auto' }}>
           <Outlet />
         </main>
       </div>
