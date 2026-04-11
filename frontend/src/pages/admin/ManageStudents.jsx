@@ -28,6 +28,8 @@ const EMPTY_FORM = {
   email: '',
   course_id: '',
   mobile_no: '',
+  roll_number: '',
+  reg_number: '',
 };
 const PAGE_SIZE = 10;
 
@@ -43,10 +45,12 @@ export default function ManageStudents() {
   const [showBulk, setShowBulk] = useState(false);
   const [showCreds, setShowCreds] = useState(false);
   const [showFaceEnroll, setShowFaceEnroll] = useState(false);
+  const [showStudentPapers, setShowStudentPapers] = useState(false);
 
   const [createdCreds, setCreatedCreds] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
   const [enrollingStudent, setEnrollingStudent] = useState(null);
+  const [paperStudent, setPaperStudent] = useState(null);
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ course_id: '', paper_id: '', semester: '' });
@@ -65,6 +69,11 @@ export default function ManageStudents() {
   const [bulkTraining, setBulkTraining] = useState(false);
   const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
   const [hiddenInactiveStudentCount, setHiddenInactiveStudentCount] = useState(0);
+  const [paperOptions, setPaperOptions] = useState([]);
+  const [selectedPaperIds, setSelectedPaperIds] = useState([]);
+  const [baseAssignedPaperIds, setBaseAssignedPaperIds] = useState([]);
+  const [loadingStudentPapers, setLoadingStudentPapers] = useState(false);
+  const [savingStudentPapers, setSavingStudentPapers] = useState(false);
 
   const fetchMetadata = () => {
     api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
@@ -325,6 +334,8 @@ export default function ManageStudents() {
       email: student.email || '',
       course_id: student.course_id || '',
       mobile_no: student.mobile_no || '',
+      roll_number: student.roll_number || '',
+      reg_number: student.reg_number || '',
     });
     setShowEdit(true);
   };
@@ -391,6 +402,69 @@ export default function ManageStudents() {
   const handleFaceEnroll = (student) => {
     setEnrollingStudent(student);
     setShowFaceEnroll(true);
+  };
+
+  const handleManageStudentPapers = async (student) => {
+    const courseId = student.course_id;
+    const semester = Number(student.current_semester || 0);
+
+    if (!courseId || !semester) {
+      toast.error('Student must have course and current semester to manage subjects');
+      return;
+    }
+
+    const assignedIds = (student.enrolled_papers || []).map((p) => p.paper_id).filter(Boolean);
+    setPaperStudent(student);
+    setShowStudentPapers(true);
+    setLoadingStudentPapers(true);
+    setPaperOptions([]);
+    setSelectedPaperIds([]);
+    setBaseAssignedPaperIds(assignedIds);
+
+    try {
+      const res = await api.get('/admin/papers', {
+        params: {
+          course_id: courseId,
+          semester,
+        },
+      });
+      const options = Array.isArray(res.data) ? res.data : [];
+      const optionIds = new Set(options.map((p) => p._id));
+      const currentSemAssigned = assignedIds.filter((id) => optionIds.has(id));
+      setPaperOptions(options);
+      setSelectedPaperIds(currentSemAssigned);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to load subjects for this semester');
+      setShowStudentPapers(false);
+      setPaperStudent(null);
+    } finally {
+      setLoadingStudentPapers(false);
+    }
+  };
+
+  const handleSaveStudentPapers = async () => {
+    if (!paperStudent) return;
+
+    const optionIds = new Set(paperOptions.map((p) => p._id));
+    const preservedNonCurrentSemester = baseAssignedPaperIds.filter((id) => !optionIds.has(id));
+    const mergedPaperIds = [...new Set([...preservedNonCurrentSemester, ...selectedPaperIds])];
+    const sid = paperStudent.user_id || paperStudent._id;
+
+    try {
+      setSavingStudentPapers(true);
+      await api.put(`/admin/students/${sid}`, { enrolled_papers: mergedPaperIds });
+      toast.success('Student subjects updated');
+      setShowStudentPapers(false);
+      setPaperStudent(null);
+      setPaperOptions([]);
+      setSelectedPaperIds([]);
+      setBaseAssignedPaperIds([]);
+      fetchStudents(page);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update student subjects');
+    } finally {
+      setSavingStudentPapers(false);
+    }
   };
 
   const handleFaceEnrollSuccess = () => {
@@ -580,6 +654,29 @@ export default function ManageStudents() {
         </div>
       </div>
 
+      {showEdit && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+          <div>
+            <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Roll No.</label>
+            <input
+              className="input-field"
+              placeholder="Update roll number"
+              value={form.roll_number || ''}
+              onChange={(e) => setForm({ ...form, roll_number: e.target.value })}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Registration No.</label>
+            <input
+              className="input-field"
+              placeholder="Update registration number"
+              value={form.reg_number || ''}
+              onChange={(e) => setForm({ ...form, reg_number: e.target.value })}
+            />
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         <button className="btn-secondary" onClick={() => { setShowAdd(false); setShowEdit(false); }}>Cancel</button>
         <button className="btn-primary" onClick={onSubmit}>{submitLabel}</button>
@@ -763,6 +860,9 @@ export default function ManageStudents() {
                       >
                         <HiOutlineSparkles size={15} />
                       </button>
+                      <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Manage Subjects'} onClick={() => handleManageStudentPapers(s)} disabled={s.is_course_inactive}>
+                        <HiOutlineClipboardList size={15} />
+                      </button>
                       <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Edit'} onClick={() => openEdit(s)} disabled={s.is_course_inactive}>
                         <HiOutlinePencil size={15} />
                       </button>
@@ -921,6 +1021,98 @@ export default function ManageStudents() {
           <button className="btn-secondary" onClick={() => setShowBulk(false)}>Cancel</button>
           <button className="btn-primary" onClick={handleBulkAssign}>Assign</button>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={showStudentPapers}
+        onClose={() => {
+          if (savingStudentPapers) return;
+          setShowStudentPapers(false);
+          setPaperStudent(null);
+          setPaperOptions([]);
+          setSelectedPaperIds([]);
+          setBaseAssignedPaperIds([]);
+        }}
+        title="Manage Student Subjects"
+        width={560}
+      >
+        <div style={{ marginBottom: 10, color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+          <strong>{paperStudent?.name || 'Student'}</strong>
+          {paperStudent?.current_semester ? ` · Semester ${paperStudent.current_semester}` : ''}
+        </div>
+
+        {loadingStudentPapers ? (
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>Loading subjects...</p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Selected: {selectedPaperIds.length} / {paperOptions.length}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={() => setSelectedPaperIds(paperOptions.map((paper) => paper._id))}
+                  disabled={paperOptions.length === 0 || selectedPaperIds.length === paperOptions.length}
+                >
+                  Select All
+                </button>
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={() => setSelectedPaperIds([])}
+                  disabled={selectedPaperIds.length === 0}
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+
+            <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8, marginBottom: 14 }}>
+              {paperOptions.map((paper) => (
+                <label key={paper._id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', cursor: 'pointer', fontSize: '0.84rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPaperIds.includes(paper._id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedPaperIds((prev) => [...new Set([...prev, paper._id])]);
+                      } else {
+                        setSelectedPaperIds((prev) => prev.filter((id) => id !== paper._id));
+                      }
+                    }}
+                  />
+                  {paper.name} ({paper.code || 'NA'})
+                </label>
+              ))}
+              {paperOptions.length === 0 && (
+                <p style={{ margin: 0, padding: '6px 8px', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  No subjects found for this student's current semester.
+                </p>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setShowStudentPapers(false);
+                  setPaperStudent(null);
+                  setPaperOptions([]);
+                  setSelectedPaperIds([]);
+                  setBaseAssignedPaperIds([]);
+                }}
+                disabled={savingStudentPapers}
+              >
+                Cancel
+              </button>
+              <button className="btn-primary" onClick={handleSaveStudentPapers} disabled={savingStudentPapers || loadingStudentPapers}>
+                {savingStudentPapers ? 'Saving...' : 'Save Subjects'}
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
 
       {showFaceEnroll && enrollingStudent && (
