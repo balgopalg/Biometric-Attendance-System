@@ -188,6 +188,14 @@ STRICT_JWT_SECRET=1
 - Some rollback controls appear only for eligible audit entries within 1 day.
 - Uploaded/enrolled data can include local runtime artifacts; `.gitignore` excludes them.
 
+## CI Quality Checks
+
+GitHub Actions runs checks on pushes and PRs to `main` and `develop`:
+
+- Frontend lint (`npm run lint`)
+- Frontend production build (`npm run build`)
+- Backend syntax compile check (`python -m compileall backend`)
+
 ## SPA Rewrite Rules (Production)
 
 Because frontend uses `BrowserRouter`, server must rewrite unknown routes to `index.html`.
