@@ -2,7 +2,10 @@
 
 import re
 import random
+import os
 from datetime import datetime, timedelta
+import cv2
+import numpy as np
 
 from flask import Blueprint, request, jsonify, current_app
 from bson import ObjectId
@@ -17,12 +20,14 @@ from app.models.course import (
     get_course_by_id,
     update_course,
     delete_course,
+    is_course_active,
 )
 from app.models.enrollment import (
     create_student_profile,
     get_profile_by_user,
     get_profile_by_id,
     add_face_embedding,
+    set_face_embeddings,
     enroll_in_papers,
     get_all_profiles,
     update_profile,
@@ -49,7 +54,8 @@ from app.models.user import (
     reset_user_password,
 )
 from app.services.face_detection import get_detector
-from app.services.face_recognition import generate_embedding
+from app.services.face_recognition import generate_embedding, normalize_embedding
+from app.services.capture_upload import capture_faces_for_user, save_student_upload, save_cropped_face_dataset
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
 
@@ -211,6 +217,124 @@ def _safe_get_course(course_id):
         return None
 
 
+def _course_is_inactive(course):
+    if not course:
+        return True
+    return str(course.get("status") or "active").lower() != "active"
+
+
+def _get_active_course_or_error(course_id):
+    course = _safe_get_course(course_id)
+    if not course:
+        return None, (jsonify({"error": "Course not found"}), 404)
+    if _course_is_inactive(course):
+        return None, (jsonify({"error": "Course is inactive. Reassign entities to an active course first."}), 409)
+    return course, None
+
+
+def _ensure_student_course_active(user_id):
+    profile = get_profile_by_user(user_id)
+    if not profile:
+        return None, (jsonify({"error": "Student profile not found"}), 404)
+    course = _safe_get_course(profile.get("course_id"))
+    if _course_is_inactive(course):
+        return profile, (jsonify({"error": "Student is linked to an inactive course and is read-only"}), 409)
+    return profile, None
+
+
+def _ensure_paper_course_active(paper):
+    course_id = _as_text((paper or {}).get("course_id"))
+    if not course_id:
+        return jsonify({"error": "Subject is not linked to a valid course"}), 409
+    if not is_course_active(course_id):
+        return jsonify({"error": "Subject is linked to an inactive course and is read-only"}), 409
+    return None
+
+
+def _legacy_safe_name(raw_value):
+    text = _as_text(raw_value)
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
+    return cleaned.strip("_") or "unknown"
+
+
+def _resolve_dataset_dir_for_user(user_id):
+    user_id_text = _as_text(user_id)
+    dataset_dir = os.path.join("dataset", user_id_text)
+    if os.path.isdir(dataset_dir):
+        return dataset_dir
+
+    # Backward compatibility for previously created name-based dataset folders.
+    student = find_user_by_id(user_id) or {}
+    legacy_name = _as_text(student.get("name"))
+    legacy_dataset_dir = os.path.join("dataset", _legacy_safe_name(legacy_name))
+    if os.path.isdir(legacy_dataset_dir):
+        return legacy_dataset_dir
+
+    return dataset_dir
+
+
+def _train_embeddings_from_dataset_for_user(user_id):
+    dataset_dir = _resolve_dataset_dir_for_user(user_id)
+    if not os.path.isdir(dataset_dir):
+        raise ValueError(
+            f"Dataset folder not found for this student. Please run Enroll Face first to capture dataset images. Expected: {dataset_dir}"
+        )
+
+    allowed_ext = {".jpg", ".jpeg", ".png"}
+    image_files = [
+        os.path.join(dataset_dir, name)
+        for name in sorted(os.listdir(dataset_dir))
+        if os.path.splitext(name.lower())[1] in allowed_ext
+    ]
+
+    if not image_files:
+        raise ValueError("No dataset images found for training")
+
+    detector = get_detector()
+    embeddings = []
+    skipped = 0
+    seen_signatures = set()
+
+    for file_path in image_files:
+        img_bgr = cv2.imread(file_path, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            skipped += 1
+            continue
+
+        try:
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+            faces = detector.detect_faces(img_rgb)
+            if not faces:
+                skipped += 1
+                continue
+
+            embedding = normalize_embedding(generate_embedding(faces[0]["crop"]))
+            signature = tuple(np.round(np.asarray(embedding, dtype=np.float32), 3))
+            if signature in seen_signatures:
+                skipped += 1
+                continue
+
+            seen_signatures.add(signature)
+            embeddings.append(embedding)
+        except Exception:
+            skipped += 1
+            continue
+
+    if not embeddings:
+        raise ValueError("Training failed: no valid faces found in dataset images")
+
+    # Keep the strongest set of embeddings, but cap the storage size to reduce noisy duplicates.
+    if len(embeddings) > 25:
+        embeddings = embeddings[:25]
+
+    set_face_embeddings(user_id, embeddings)
+    return {
+        "dataset_dir": dataset_dir,
+        "trained_embeddings": len(embeddings),
+        "skipped_images": skipped,
+    }
+
+
 def _resolve_student_identity(student_identifier):
     """Resolve route id that may be either user_id or profile_id."""
     profile = get_profile_by_user(student_identifier)
@@ -269,6 +393,8 @@ def _enrich_paper(paper, course_map, lecturer_map):
     lecturer = lecturer_map.get(item.get("lecturer_id"))
     item["course_name"] = course.get("name") if course else None
     item["course_code"] = course.get("code") if course else None
+    item["course_status"] = _as_text((course or {}).get("status") or "active").lower() or "active"
+    item["is_course_inactive"] = item["course_status"] != "active"
     item["semester"] = item.get("semester")
     item["academic_year"] = item.get("academic_session") or item.get("academic_year")
     item["lecturer_name"] = lecturer.get("name") if lecturer else None
@@ -291,10 +417,14 @@ def list_courses(user):
     courses = sanitise_many(get_all_courses())
     q = _as_text(request.args.get("q", "")).lower()
     course_duration = _as_text(request.args.get("course_duration", ""))
+    status = _as_text(request.args.get("status", "")).lower()
 
     filtered = []
     for c in courses:
+        c["status"] = _as_text(c.get("status") or "active").lower() or "active"
         if course_duration and str(c.get("course_duration", "")) != course_duration:
+            continue
+        if status and c.get("status") != status:
             continue
         if q and not (
             q in _as_text(c.get("name")).lower()
@@ -359,6 +489,8 @@ def _normalise_course_semester(course_id, semester):
     course = _safe_get_course(cid)
     if not course:
         return None, None, "Course not found"
+    if _course_is_inactive(course):
+        return None, None, "Course is inactive. Reassign entities to an active course first"
 
     sem = _to_int(semester, 0)
     if sem <= 0:
@@ -375,10 +507,15 @@ def _normalise_course_semester(course_id, semester):
 @role_required("admin")
 def edit_course(user, cid):
     d = request.get_json(silent=True) or {}
-    allowed = {"name", "code", "department", "course_duration"}
+    allowed = {"name", "code", "department", "course_duration", "status"}
     fields = {k: v for k, v in d.items() if k in allowed}
     if "course_duration" in fields:
         fields["course_duration"] = _to_int(fields.get("course_duration"), 0)
+    if "status" in fields:
+        next_status = _as_text(fields.get("status")).lower()
+        if next_status not in {"active", "inactive"}:
+            return jsonify({"error": "status must be active or inactive"}), 400
+        fields["status"] = next_status
 
     previous = get_course_by_id(cid)
     updated = update_course(cid, fields)
@@ -395,14 +532,17 @@ def edit_course(user, cid):
 @role_required("admin")
 def remove_course(user, cid):
     previous = get_course_by_id(cid)
+    if not previous:
+        return jsonify({"error": "Course not found"}), 404
+
     delete_course(cid)
     log_action(
-        "DELETE_COURSE",
+        "DEACTIVATE_COURSE",
         str(user["_id"]),
         details=f"Course {cid}",
         rollback=_rb_restore("academic", "courses", previous) if previous else None,
     )
-    return jsonify({"message": "Deleted"}), 200
+    return jsonify({"message": "Course marked inactive"}), 200
 
 
 # ─── Papers ─────────────────────────────────────────────────────────────────
@@ -449,8 +589,8 @@ def list_papers(user):
 @role_required("admin")
 def add_paper(user):
     d = request.get_json(silent=True) or {}
-    if not d.get("name") or not d.get("code") or not d.get("course_id") or not d.get("semester"):
-        return jsonify({"error": "name, code, course_id and semester are required"}), 400
+    if not d.get("name") or not d.get("code") or not d.get("course_id") or not d.get("lecturer_id") or not d.get("semester"):
+        return jsonify({"error": "name, code, course_id, lecturer_id and semester are required"}), 400
 
     course_id, semester, error = _normalise_course_semester(d.get("course_id"), d.get("semester"))
     if error:
@@ -485,6 +625,10 @@ def edit_paper(user, pid):
     if not previous:
         return jsonify({"error": "Paper not found"}), 404
 
+    lock_error = _ensure_paper_course_active(previous)
+    if lock_error:
+        return lock_error
+
     if "course_id" in fields or "semester" in fields:
         next_course_id = fields.get("course_id", previous.get("course_id"))
         next_semester = fields.get("semester", previous.get("semester"))
@@ -508,6 +652,13 @@ def edit_paper(user, pid):
 @role_required("admin")
 def remove_paper(user, pid):
     previous = get_paper_by_id(pid)
+    if not previous:
+        return jsonify({"error": "Paper not found"}), 404
+
+    lock_error = _ensure_paper_course_active(previous)
+    if lock_error:
+        return lock_error
+
     delete_paper(pid)
     log_action(
         "DELETE_PAPER",
@@ -528,10 +679,21 @@ def bulk_assign(user):
     paper_id = d.get("paper_id")
     student_ids = d.get("student_ids") or []
     if paper_id and student_ids:
+        paper = get_paper_by_id(paper_id)
+        if not paper:
+            return jsonify({"error": "Paper not found"}), 404
+
+        lock_error = _ensure_paper_course_active(paper)
+        if lock_error:
+            return lock_error
+
         updated_count = 0
         for sid in student_ids:
             uid, _ = _resolve_student_identity(sid)
             if not uid:
+                continue
+            _, student_lock_error = _ensure_student_course_active(uid)
+            if student_lock_error:
                 continue
             enroll_in_papers(uid, [paper_id])
             updated_count += 1
@@ -551,6 +713,14 @@ def bulk_assign(user):
         return jsonify({"error": "paper_ids or (paper_id + student_ids) is required"}), 400
 
     if lecturer_id:
+        for pid in paper_ids:
+            paper = get_paper_by_id(pid)
+            if not paper:
+                continue
+            lock_error = _ensure_paper_course_active(paper)
+            if lock_error:
+                return lock_error
+
         bulk_assign_lecturer(paper_ids, lecturer_id)
         log_action("BULK_ASSIGN_LECTURER", str(user["_id"]),
                    details=f"Papers {paper_ids} → Lecturer {lecturer_id}")
@@ -558,6 +728,8 @@ def bulk_assign(user):
         course = _safe_get_course(course_id)
         if not course:
             return jsonify({"error": "Course not found"}), 404
+        if _course_is_inactive(course):
+            return jsonify({"error": "Cannot assign subjects to an inactive course"}), 409
         max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
 
         invalid = []
@@ -802,6 +974,8 @@ def list_students(user):
         item["mobile_no"] = (u or {}).get("mobile_no", "")
         item["course_name"] = (course or {}).get("name")
         item["course_code"] = (course or {}).get("code")
+        item["course_status"] = _as_text((course or {}).get("status") or "active").lower() or "active"
+        item["is_course_inactive"] = item["course_status"] != "active"
         item["course_department"] = (course or {}).get("department")
         item["course_duration"] = (course or {}).get("course_duration")
         item["current_semester"] = _to_int(item.get("current_semester"), 0) or None
@@ -864,6 +1038,8 @@ def add_student(user):
     course = _safe_get_course(course_id) if course_id else None
     if not course:
         return jsonify({"error": "Course not found or invalid."}), 404
+    if _course_is_inactive(course):
+        return jsonify({"error": "Cannot create student under inactive course"}), 409
     
     enrollment_year = _to_int(d.get("enrollment_year"), datetime.utcnow().year)
     course_duration = _to_int((course or {}).get("course_duration"), 1)
@@ -957,6 +1133,10 @@ def edit_student(user, sid):
     if not user_id:
         return jsonify({"error": "Student not found"}), 404
 
+    _, student_lock_error = _ensure_student_course_active(user_id)
+    if student_lock_error:
+        return student_lock_error
+
     prev_user = find_user_by_id(user_id)
     prev_profile = get_profile_by_user(user_id)
 
@@ -983,6 +1163,8 @@ def edit_student(user, sid):
     current_enrollment_year = _to_int((profile or {}).get("enrollment_year"), (profile or {}).get("created_at", datetime.utcnow()).year)
     next_enrollment_year = _to_int(profile_fields.get("enrollment_year"), current_enrollment_year)
     next_course = _safe_get_course(next_course_id) if next_course_id else None
+    if next_course_id and _course_is_inactive(next_course):
+        return jsonify({"error": "Cannot move student to an inactive course"}), 409
     next_course_duration = _to_int((next_course or {}).get("course_duration"), 1)
     next_session = profile_fields.get("academic_session") or _derive_academic_session(next_enrollment_year, next_course_duration)
     profile_fields["enrollment_year"] = next_enrollment_year
@@ -1025,6 +1207,10 @@ def remove_student(user, sid):
     user_id, _ = _resolve_student_identity(sid)
     if not user_id:
         return jsonify({"error": "Student not found"}), 404
+
+    _, student_lock_error = _ensure_student_course_active(user_id)
+    if student_lock_error:
+        return student_lock_error
 
     prev_user = find_user_by_id(user_id)
     prev_profile = get_profile_by_user(user_id)
@@ -1070,6 +1256,11 @@ def bulk_promote_students(user):
     for sid in student_ids:
         user_id, profile = _resolve_student_identity(_as_text(sid))
         if not user_id or not profile:
+            skipped += 1
+            continue
+
+        course_for_lock = _safe_get_course((profile or {}).get("course_id"))
+        if _course_is_inactive(course_for_lock):
             skipped += 1
             continue
 
@@ -1140,6 +1331,7 @@ def enroll_student_face(user):
     d = request.get_json(silent=True) or {}
     user_id = d.get("user_id")
     photo_b64 = d.get("photo")  # base64 encoded image
+    dataset_photos = d.get("dataset_photos") or []
 
     if not user_id or not photo_b64:
         return jsonify({"error": "user_id and photo are required"}), 400
@@ -1162,17 +1354,354 @@ def enroll_student_face(user):
     # Use the first (largest confidence) face
     face_crop = faces[0]["crop"]
     try:
-        embedding = generate_embedding(face_crop)
+        embedding = normalize_embedding(generate_embedding(face_crop))
     except Exception as exc:
         current_app.logger.exception("Embedding generation failed")
         return jsonify({"error": f"Embedding generation failed: {exc}"}), 500
     add_face_embedding(resolved_user_id, embedding)
 
+    dataset_saved_count = 0
+    dataset_warning = None
+    if isinstance(dataset_photos, list) and dataset_photos:
+        try:
+            dataset_user_key = _as_text(resolved_user_id)
+
+            dataset_crops = []
+            last_valid_crop = face_crop
+            for frame_b64 in dataset_photos[:50]:
+                if not isinstance(frame_b64, str) or not frame_b64:
+                    if last_valid_crop is not None:
+                        dataset_crops.append(last_valid_crop)
+                    continue
+                try:
+                    frame_img = decode_base64_image(frame_b64)
+                    frame_faces = detector.detect_faces(frame_img)
+                    if frame_faces:
+                        last_valid_crop = frame_faces[0]["crop"]
+                        dataset_crops.append(last_valid_crop)
+                    elif last_valid_crop is not None:
+                        dataset_crops.append(last_valid_crop)
+                except Exception:
+                    if last_valid_crop is not None:
+                        dataset_crops.append(last_valid_crop)
+                    continue
+
+            if not dataset_crops and last_valid_crop is not None:
+                dataset_crops.append(last_valid_crop)
+
+            while len(dataset_crops) < 50 and last_valid_crop is not None:
+                dataset_crops.append(last_valid_crop)
+
+            if dataset_crops:
+                saved_paths = save_cropped_face_dataset(
+                    dataset_user_key,
+                    dataset_crops,
+                    dataset_root="dataset",
+                    max_images=50,
+                )
+                dataset_saved_count = len(saved_paths)
+        except Exception as exc:
+            current_app.logger.exception("Dataset save failed during face enrollment")
+            dataset_warning = f"Dataset save failed: {exc}"
+
     log_action("ENROLL_FACE", str(user["_id"]), target_user=resolved_user_id,
                details="Face embedding added")
 
-    return jsonify({"message": "Face enrolled successfully",
-                    "faces_detected": len(faces)}), 200
+    response = {
+        "message": "Face enrolled successfully",
+        "faces_detected": len(faces),
+        "dataset_saved_count": dataset_saved_count,
+    }
+    if dataset_warning:
+        response["dataset_warning"] = dataset_warning
+
+    return jsonify(response), 200
+
+
+@admin_bp.route("/students/upload-photo", methods=["POST"])
+@role_required("admin")
+def upload_student_photo(user):
+    """Upload and store a single student photo in uploads folder."""
+    student_name = _as_text(request.form.get("student_name", ""))
+    if not student_name:
+        return jsonify({"error": "student_name is required"}), 400
+
+    if "image" not in request.files:
+        return jsonify({"error": "image file is required"}), 400
+
+    file = request.files["image"]
+    if not file or file.filename == "":
+        return jsonify({"error": "No image file selected"}), 400
+
+    file_bytes = file.read()
+    if not file_bytes:
+        return jsonify({"error": "Uploaded image is empty"}), 400
+
+    arr = np.frombuffer(file_bytes, dtype=np.uint8)
+    image = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+    if image is None:
+        return jsonify({"error": "Invalid image file"}), 400
+
+    uploads_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+    saved_path = save_student_upload(student_name, image, uploads_dir=uploads_dir)
+
+    log_action(
+        "UPLOAD_STUDENT_PHOTO",
+        str(user["_id"]),
+        details=f"Stored photo for {student_name} as {saved_path}",
+    )
+
+    return jsonify({
+        "message": "Student photo uploaded successfully",
+        "file_path": saved_path,
+        "file_name": os.path.basename(saved_path),
+    }), 201
+
+
+@admin_bp.route("/students/<sid>/train-face", methods=["POST"])
+@admin_bp.route("/students/<sid>/train", methods=["POST"])
+@admin_bp.route("/student/<sid>/train-face", methods=["POST"])
+@role_required("admin")
+def train_face_from_dataset(user, sid):
+    """Train student face embeddings from dataset/<user_id> images and save to DB."""
+    user_id, _ = _resolve_student_identity(sid)
+    if not user_id:
+        return jsonify({"error": "Student not found"}), 404
+
+    try:
+        train_result = _train_embeddings_from_dataset_for_user(user_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    log_action(
+        "TRAIN_FACE_FROM_DATASET",
+        str(user["_id"]),
+        target_user=user_id,
+        details=(
+            f"dataset={train_result['dataset_dir']}, "
+            f"trained={train_result['trained_embeddings']}, "
+            f"skipped={train_result['skipped_images']}"
+        ),
+    )
+
+    return jsonify({
+        "message": "Face training completed",
+        "trained_embeddings": train_result["trained_embeddings"],
+        "skipped_images": train_result["skipped_images"],
+        "dataset_dir": train_result["dataset_dir"],
+    }), 200
+
+
+@admin_bp.route("/students/train-face/bulk", methods=["POST"])
+@admin_bp.route("/students/bulk-train-face", methods=["POST"])
+@role_required("admin")
+def bulk_train_face_from_dataset(user):
+    """Train face embeddings in bulk for selected students from their dataset folders."""
+    d = request.get_json(silent=True) or {}
+    raw_ids = d.get("student_ids") or []
+    student_ids = [_as_text(sid) for sid in raw_ids if _as_text(sid)]
+    if not student_ids:
+        return jsonify({"error": "student_ids is required"}), 400
+
+    items = []
+    total_trained_embeddings = 0
+    success_count = 0
+
+    for sid in student_ids:
+        user_id, _ = _resolve_student_identity(sid)
+        if not user_id:
+            items.append({"student_id": sid, "success": False, "error": "Student not found"})
+            continue
+
+        try:
+            result = _train_embeddings_from_dataset_for_user(user_id)
+            total_trained_embeddings += int(result["trained_embeddings"])
+            success_count += 1
+            items.append(
+                {
+                    "student_id": _as_text(user_id),
+                    "success": True,
+                    "trained_embeddings": result["trained_embeddings"],
+                    "skipped_images": result["skipped_images"],
+                    "dataset_dir": result["dataset_dir"],
+                }
+            )
+        except ValueError as exc:
+            items.append({"student_id": _as_text(user_id), "success": False, "error": str(exc)})
+
+    failure_count = len(student_ids) - success_count
+
+    log_action(
+        "BULK_TRAIN_FACE_FROM_DATASET",
+        str(user["_id"]),
+        details=(
+            f"requested={len(student_ids)}, success={success_count}, "
+            f"failed={failure_count}, trained_embeddings={total_trained_embeddings}"
+        ),
+    )
+
+    return jsonify(
+        {
+            "message": "Bulk training completed",
+            "requested_count": len(student_ids),
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "total_trained_embeddings": total_trained_embeddings,
+            "items": items,
+        }
+    ), 200
+
+
+@admin_bp.route("/students/train-face/rebuild-all", methods=["POST"])
+@role_required("admin")
+def rebuild_all_face_embeddings(user):
+    """Rebuild face embeddings for every student profile from their dataset folders."""
+    profiles = get_all_profiles()
+    if not profiles:
+        return jsonify({"error": "No student profiles found"}), 404
+
+    items = []
+    success_count = 0
+    failure_count = 0
+    total_trained_embeddings = 0
+
+    for profile in profiles:
+        user_id = _as_text(profile.get("user_id"))
+        if not user_id:
+            failure_count += 1
+            items.append({"student_id": None, "success": False, "error": "Missing user_id"})
+            continue
+
+        try:
+            result = _train_embeddings_from_dataset_for_user(user_id)
+            success_count += 1
+            total_trained_embeddings += int(result["trained_embeddings"])
+            items.append(
+                {
+                    "student_id": user_id,
+                    "success": True,
+                    "trained_embeddings": result["trained_embeddings"],
+                    "skipped_images": result["skipped_images"],
+                    "dataset_dir": result["dataset_dir"],
+                }
+            )
+        except Exception as exc:
+            failure_count += 1
+            items.append({"student_id": user_id, "success": False, "error": str(exc)})
+
+    log_action(
+        "REBUILD_ALL_FACE_EMBEDDINGS",
+        str(user["_id"]),
+        details=(
+            f"requested={len(profiles)}, success={success_count}, failure={failure_count}, "
+            f"trained_embeddings={total_trained_embeddings}"
+        ),
+    )
+
+    return jsonify(
+        {
+            "message": "Face embeddings rebuilt",
+            "requested_count": len(profiles),
+            "success_count": success_count,
+            "failure_count": failure_count,
+            "total_trained_embeddings": total_trained_embeddings,
+            "items": items,
+        }
+    ), 200
+
+
+@admin_bp.route("/capture-faces", methods=["POST"])
+@role_required("admin")
+def capture_faces_dataset(user):
+    """Capture webcam dataset images for a named user into dataset/<user_name>."""
+    d = request.get_json(silent=True) or {}
+    user_name = _as_text(d.get("user_name", ""))
+    total_images = _to_int(d.get("total_images"), 50)
+
+    if not user_name:
+        return jsonify({"error": "user_name is required"}), 400
+    if total_images <= 0:
+        return jsonify({"error": "total_images must be greater than 0"}), 400
+
+    try:
+        saved_paths = capture_faces_for_user(
+            user_name=user_name,
+            dataset_root="dataset",
+            total_images=total_images,
+            delay_seconds=0.1,
+        )
+    except Exception as exc:
+        current_app.logger.exception("Dataset capture failed")
+        return jsonify({"error": f"Dataset capture failed: {exc}"}), 500
+
+    log_action(
+        "CAPTURE_FACE_DATASET",
+        str(user["_id"]),
+        details=f"Captured {len(saved_paths)} images for {user_name}",
+    )
+
+    return jsonify({
+        "message": "Face dataset captured successfully",
+        "captured_count": len(saved_paths),
+        "dataset_folder": os.path.dirname(saved_paths[0]) if saved_paths else "dataset",
+    }), 200
+
+
+@admin_bp.route("/courses/reassign", methods=["POST"])
+@role_required("admin")
+def reassign_course_entities(user):
+    """Batch move students/papers from one course to another active course."""
+    d = request.get_json(silent=True) or {}
+    from_course_id = _as_text(d.get("from_course_id"))
+    to_course_id = _as_text(d.get("to_course_id"))
+    move_students = _to_bool(d.get("move_students", True))
+    move_papers = _to_bool(d.get("move_papers", True))
+
+    if not from_course_id or not to_course_id:
+        return jsonify({"error": "from_course_id and to_course_id are required"}), 400
+    if from_course_id == to_course_id:
+        return jsonify({"error": "from_course_id and to_course_id must be different"}), 400
+
+    source_course = _safe_get_course(from_course_id)
+    if not source_course:
+        return jsonify({"error": "Source course not found"}), 404
+
+    target_course, target_error = _get_active_course_or_error(to_course_id)
+    if target_error:
+        return target_error
+
+    profile_col = get_collection("academic", "student_profiles")
+    paper_col = get_collection("academic", "papers")
+
+    moved_students = 0
+    moved_papers = 0
+    if move_students:
+        res = profile_col.update_many({"course_id": from_course_id}, {"$set": {"course_id": to_course_id}})
+        moved_students = int(res.modified_count)
+
+    if move_papers:
+        res = paper_col.update_many({"course_id": from_course_id}, {"$set": {"course_id": to_course_id}})
+        moved_papers = int(res.modified_count)
+
+    log_action(
+        "REASSIGN_COURSE_ENTITIES",
+        str(user["_id"]),
+        details=(
+            f"from={from_course_id}, to={to_course_id}, "
+            f"move_students={move_students}, move_papers={move_papers}, "
+            f"moved_students={moved_students}, moved_papers={moved_papers}"
+        ),
+    )
+
+    return jsonify(
+        {
+            "message": "Reassignment completed",
+            "from_course": sanitise_mongo_doc(source_course),
+            "to_course": sanitise_mongo_doc(target_course),
+            "moved_students": moved_students,
+            "moved_papers": moved_papers,
+        }
+    ), 200
 
 
 # ─── Audit Trail ────────────────────────────────────────────────────────────

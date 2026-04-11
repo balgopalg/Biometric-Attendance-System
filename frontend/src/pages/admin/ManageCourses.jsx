@@ -11,18 +11,27 @@ export default function ManageCourses() {
   const [courses, setCourses] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showReassign, setShowReassign] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
   const [search, setSearch] = useState('');
   const [durationFilter, setDurationFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [form, setForm] = useState(EMPTY_FORM);
+  const [reassignForm, setReassignForm] = useState({
+    from_course_id: '',
+    to_course_id: '',
+    move_students: true,
+    move_papers: true,
+  });
 
   const fetchCourses = () => {
     const params = {};
     if (durationFilter) params.course_duration = durationFilter;
+    if (statusFilter) params.status = statusFilter;
     api.get('/admin/courses', { params }).then((r) => setCourses(r.data)).catch(() => {});
   };
 
-  useEffect(fetchCourses, [durationFilter]);
+  useEffect(fetchCourses, [durationFilter, statusFilter]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -32,6 +41,21 @@ export default function ManageCourses() {
       || c.department?.toLowerCase().includes(q)
     );
   }, [courses, search]);
+
+  const activeCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [courses]
+  );
+
+  const inactiveCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() !== 'active'),
+    [courses]
+  );
+
+  const reassignTargetCourses = useMemo(
+    () => activeCourses.filter((c) => c._id !== reassignForm.from_course_id),
+    [activeCourses, reassignForm.from_course_id]
+  );
 
   const handleAdd = async () => {
     try {
@@ -71,13 +95,55 @@ export default function ManageCourses() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this course?')) return;
+    if (!window.confirm('Mark this course inactive? Linked students/subjects will become read-only.')) return;
     try {
       await api.delete(`/admin/courses/${id}`);
-      toast.success('Deleted');
+      toast.success('Course marked inactive');
       fetchCourses();
     } catch (err) {
       toast.error('Failed to delete');
+    }
+  };
+
+  const handleReactivate = async (id) => {
+    try {
+      await api.put(`/admin/courses/${id}`, { status: 'active' });
+      toast.success('Course reactivated');
+      fetchCourses();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reactivate');
+    }
+  };
+
+  const openReassign = (fromCourseId = '') => {
+    setReassignForm({
+      from_course_id: fromCourseId,
+      to_course_id: '',
+      move_students: true,
+      move_papers: true,
+    });
+    setShowReassign(true);
+  };
+
+  const handleReassign = async () => {
+    if (!reassignForm.from_course_id || !reassignForm.to_course_id) {
+      toast.error('Select both source and target course');
+      return;
+    }
+    if (!reassignForm.move_students && !reassignForm.move_papers) {
+      toast.error('Select at least one entity type to move');
+      return;
+    }
+
+    try {
+      const res = await api.post('/admin/courses/reassign', reassignForm);
+      const movedStudents = Number(res.data?.moved_students || 0);
+      const movedPapers = Number(res.data?.moved_papers || 0);
+      toast.success(`Reassigned successfully (students: ${movedStudents}, subjects: ${movedPapers})`);
+      setShowReassign(false);
+      fetchCourses();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to reassign');
     }
   };
 
@@ -127,7 +193,15 @@ export default function ManageCourses() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 20 }}>
+      {inactiveCourses.length > 0 && (
+        <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn-secondary" onClick={() => openReassign('')}>
+            Reassign Inactive Course Data
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -141,6 +215,11 @@ export default function ManageCourses() {
           <option value="">All Durations</option>
           {[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>{y} year{y > 1 ? 's' : ''}</option>)}
         </select>
+        <select className="input-field" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
@@ -151,6 +230,7 @@ export default function ManageCourses() {
               <th>Name</th>
               <th>Department</th>
               <th>Duration</th>
+              <th>Status</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
@@ -162,15 +242,27 @@ export default function ManageCourses() {
                 <td>{c.department || 'N/A'}</td>
                 <td>{c.course_duration ? `${c.course_duration} year${c.course_duration > 1 ? 's' : ''}` : 'N/A'}</td>
                 <td>
+                  <span className={`badge ${String(c.status || 'active').toLowerCase() === 'active' ? 'badge-success' : 'badge-warning'}`}>
+                    {String(c.status || 'active').toLowerCase()}
+                  </span>
+                </td>
+                <td>
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                     <button className="icon-btn" title="Edit" onClick={() => openEdit(c)}><HiOutlinePencil size={15} /></button>
-                    <button className="icon-btn danger" title="Delete" onClick={() => handleDelete(c._id)}><HiOutlineTrash size={15} /></button>
+                    {String(c.status || 'active').toLowerCase() === 'active' ? (
+                      <button className="icon-btn danger" title="Mark Inactive" onClick={() => handleDelete(c._id)}><HiOutlineTrash size={15} /></button>
+                    ) : (
+                      <>
+                        <button className="icon-btn" title="Reassign" onClick={() => openReassign(c._id)}>R</button>
+                        <button className="icon-btn" title="Reactivate" onClick={() => handleReactivate(c._id)}><HiOutlinePlus size={15} /></button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan="5" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No courses found.</td></tr>
+              <tr><td colSpan="6" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No courses found.</td></tr>
             )}
           </tbody>
         </table>
@@ -182,6 +274,63 @@ export default function ManageCourses() {
 
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Course" width={500}>
         {CourseForm({ onSubmit: handleUpdate, submitLabel: 'Save Changes' })}
+      </Modal>
+
+      <Modal isOpen={showReassign} onClose={() => setShowReassign(false)} title="Reassign Course Data" width={520}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            Move students and/or subjects from an inactive course to an active one.
+          </p>
+
+          <div>
+            <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>From (Inactive Course)</label>
+            <select
+              className="input-field"
+              value={reassignForm.from_course_id}
+              onChange={(e) => setReassignForm({ ...reassignForm, from_course_id: e.target.value, to_course_id: '' })}
+            >
+              <option value="">Select source course</option>
+              {inactiveCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>To (Active Course)</label>
+            <select
+              className="input-field"
+              value={reassignForm.to_course_id}
+              onChange={(e) => setReassignForm({ ...reassignForm, to_course_id: e.target.value })}
+              disabled={!reassignForm.from_course_id}
+            >
+              <option value="">Select target course</option>
+              {reassignTargetCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: 14 }}>
+            <label style={{ fontSize: '0.82rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={reassignForm.move_students}
+                onChange={(e) => setReassignForm({ ...reassignForm, move_students: e.target.checked })}
+              />
+              Move students
+            </label>
+            <label style={{ fontSize: '0.82rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={reassignForm.move_papers}
+                onChange={(e) => setReassignForm({ ...reassignForm, move_papers: e.target.checked })}
+              />
+              Move subjects
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 6 }}>
+            <button className="btn-secondary" onClick={() => setShowReassign(false)}>Cancel</button>
+            <button className="btn-primary" onClick={handleReassign}>Reassign</button>
+          </div>
+        </div>
       </Modal>
     </motion.div>
   );

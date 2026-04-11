@@ -5,8 +5,15 @@ import { HiOutlineCamera, HiOutlineX } from 'react-icons/hi';
 import { useWebcam } from '../../hooks/useWebcam';
 import WebcamFeed from '../recognition/WebcamFeed';
 
+const DATASET_CAPTURE_COUNT = 50;
+const CAPTURE_DELAY_MS = 100;
+const MAX_CAPTURE_ATTEMPTS = 120;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
   const [loading, setLoading] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState(0);
   const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam();
 
   const handleStartCamera = async () => {
@@ -16,8 +23,33 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
   const handleCapture = async () => {
     try {
       setLoading(true);
-      const photoB64 = captureFrame();
-      
+      setCaptureProgress(0);
+
+      const capturedFrames = [];
+      // Give camera stream a short warm-up so frame dimensions stabilize.
+      await sleep(350);
+
+      let attempts = 0;
+      while (capturedFrames.length < DATASET_CAPTURE_COUNT && attempts < MAX_CAPTURE_ATTEMPTS) {
+        attempts += 1;
+        const frame = captureFrame();
+        if (frame) {
+          capturedFrames.push(frame);
+          setCaptureProgress(capturedFrames.length);
+        }
+        await sleep(CAPTURE_DELAY_MS);
+      }
+
+      if (capturedFrames.length === 0) {
+        toast.error('Failed to capture dataset frames. Please ensure camera is active and face is visible.');
+        return;
+      }
+
+      if (capturedFrames.length < DATASET_CAPTURE_COUNT) {
+        toast('Warning: captured fewer frames than expected. Continuing with available frames.');
+      }
+
+      const photoB64 = capturedFrames[Math.floor(capturedFrames.length / 2)] || captureFrame();
       if (!photoB64) {
         toast.error('Failed to capture frame');
         return;
@@ -26,15 +58,23 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
       const response = await api.post('/admin/students/enroll', {
         user_id: student.user_id || student._id,
         photo: photoB64,
+        dataset_photos: capturedFrames,
       });
 
-      toast.success(response.data.message || 'Face enrolled successfully');
+      const datasetSaved = Number(response.data?.dataset_saved_count || 0);
+      const warning = response.data?.dataset_warning;
+      if (warning) {
+        toast.error(warning);
+      } else {
+        toast.success(`${response.data.message || 'Face enrolled successfully'} (dataset saved: ${datasetSaved})`);
+      }
       stopCamera();
       onSuccess();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to enroll face');
     } finally {
       setLoading(false);
+      setCaptureProgress(0);
     }
   };
 
@@ -86,7 +126,7 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
           Enroll Face for {student?.name}
         </h2>
         <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>
-          Position your face clearly in the camera frame and capture a bright, clear photo.
+          Keep your face clear and slowly move your head in a U-shape or circle while capturing for better side-profile coverage.
         </p>
 
         {/* Webcam Feed */}
@@ -145,7 +185,7 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
                 }}
               >
                 <HiOutlineCamera size={16} />
-                {loading ? 'Enrolling...' : 'Capture & Enroll'}
+                {loading ? `Capturing ${captureProgress}/${DATASET_CAPTURE_COUNT}...` : 'Capture 50 & Enroll'}
               </button>
               <button
                 onClick={() => stopCamera()}
@@ -165,6 +205,11 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
             </>
           )}
         </div>
+        {loading && (
+          <p style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Capturing dataset frames. Please keep moving your head slowly for different angles.
+          </p>
+        )}
       </div>
     </div>
   );

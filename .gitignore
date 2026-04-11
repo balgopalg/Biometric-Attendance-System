@@ -48,6 +48,7 @@ dist/
 backend/uploads/
 uploads/
 instance/
+backend/dataset/
 
 # Local environment files
 .env

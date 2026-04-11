@@ -8,6 +8,15 @@ from scipy.spatial.distance import cosine
 _model = None
 
 
+def normalize_embedding(embedding: list) -> list:
+    """Return an L2-normalized embedding vector as a Python list."""
+    vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(vector))
+    if norm <= 0.0:
+        return vector.tolist()
+    return (vector / norm).tolist()
+
+
 def _load_model():
     global _model
     if _model is not None:
@@ -52,13 +61,15 @@ def generate_embedding(face_crop: np.ndarray) -> list:
     embeddings = model.embeddings(face_crop)
     first = embeddings[0]
     if hasattr(first, "tolist"):
-        return first.tolist()
-    return list(first)
+        return normalize_embedding(first.tolist())
+    return normalize_embedding(list(first))
 
 
 def compare_embeddings(embedding_a: list, embedding_b: list) -> float:
     """Return cosine similarity (1 = identical, 0 = orthogonal)."""
-    return 1.0 - cosine(embedding_a, embedding_b)
+    a = np.asarray(normalize_embedding(embedding_a), dtype=np.float32)
+    b = np.asarray(normalize_embedding(embedding_b), dtype=np.float32)
+    return float(np.clip(1.0 - cosine(a, b), -1.0, 1.0))
 
 
 def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6):
@@ -82,9 +93,11 @@ def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6)
     best_match = None
     best_score = -1.0
 
+    normalized_query = normalize_embedding(query_embedding)
+
     for profile in stored_profiles:
         for stored_emb in profile.get("face_embeddings", []):
-            sim = compare_embeddings(query_embedding, stored_emb)
+            sim = compare_embeddings(normalized_query, stored_emb)
             if sim > best_score:
                 best_score = sim
                 best_match = profile

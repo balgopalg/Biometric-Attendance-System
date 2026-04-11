@@ -43,6 +43,8 @@
   /* Search */
   --search-bg: var(--bg-secondary);
   --search-border: var(--border-glass);
+  --soft-lock-opacity: 0.5;
+  --soft-lock-grayscale: 1;
 }
 
 /* ─── Light Mode ─── */
@@ -80,6 +82,8 @@
   --sidebar-divider: rgba(255, 255, 255, 0.12);
   --search-bg: #f8fafc;
   --search-border: #e2e8f0;
+  --soft-lock-opacity: 0.5;
+  --soft-lock-grayscale: 1;
 }
 
 /* ─── Global Reset ─── */
@@ -345,6 +349,13 @@ body {
   color: var(--accent-rose);
   border-color: rgba(244, 63, 94, 0.3);
   background: rgba(244, 63, 94, 0.06);
+}
+
+.faded-entity {
+  opacity: var(--soft-lock-opacity);
+  filter: grayscale(var(--soft-lock-grayscale));
+  pointer-events: none;
+  cursor: not-allowed;
 }
 
 /* ─── Filter Bar ─── */

@@ -8,38 +8,31 @@ export function AuthProvider({ children }) {
     const saved = localStorage.getItem('user');
     return saved ? JSON.parse(saved) : null;
   });
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('token');
+    api.post('/auth/logout').catch(() => {});
     localStorage.removeItem('user');
-    setToken(null);
     setUser(null);
   }, []);
 
   useEffect(() => {
-    if (token) {
-      api.get('/auth/me')
-        .then((res) => {
-          setUser(res.data);
-          localStorage.setItem('user', JSON.stringify(res.data));
-        })
-        .catch(() => {
-          logout();
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
-  }, [token, logout]);
+    api.get('/auth/me')
+      .then((res) => {
+        setUser(res.data);
+        localStorage.setItem('user', JSON.stringify(res.data));
+      })
+      .catch(() => {
+        localStorage.removeItem('user');
+        setUser(null);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
-    const { token: jwt, user: userData } = res.data;
-    localStorage.setItem('token', jwt);
+    const { user: userData } = res.data;
     localStorage.setItem('user', JSON.stringify(userData));
-    setToken(jwt);
     setUser(userData);
     return userData;
   };
@@ -53,12 +46,12 @@ export function AuthProvider({ children }) {
     });
   };
 
-  const isAuthenticated = !!token && !!user;
+  const isAuthenticated = !!user;
   const mustChangePassword = user?.must_change_password || false;
 
   return (
     <AuthContext.Provider value={{
-      user, token, loading, login, logout, isAuthenticated,
+      user, loading, login, logout, isAuthenticated,
       mustChangePassword, clearMustChangePassword,
     }}>
       {children}

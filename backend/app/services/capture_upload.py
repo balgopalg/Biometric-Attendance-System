@@ -1,0 +1,198 @@
+"""Utilities for face capture and image uploads."""
+
+import os
+from datetime import datetime
+
+import cv2
+
+
+def _safe_name(raw_value):
+    """Keep only filename-safe characters."""
+    text = str(raw_value or "").strip()
+    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
+    return cleaned.strip("_") or "unknown"
+
+
+def _ensure_directory(path):
+    """Create a folder path and raise a clear error on failure."""
+    try:
+        os.makedirs(path, exist_ok=True)
+    except OSError as exc:
+        raise RuntimeError(f"Failed to create directory: {path}") from exc
+
+
+def _to_grayscale_image(image):
+    """Convert image array to single-channel grayscale for consistent upload storage."""
+    if image is None or not hasattr(image, "shape"):
+        return image
+
+    if len(image.shape) == 2:
+        return image
+
+    if len(image.shape) == 3 and image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        # Input may be BGR or RGB depending on source; grayscale conversion is robust for storage.
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    return image
+
+
+def capture_faces_for_user(user_name, dataset_root="dataset", total_images=50, delay_seconds=0.1, camera_index=0):
+    """Capture grayscale face images from webcam into dataset/<user_name>/.
+
+    Returns a list of saved file paths.
+    """
+    if total_images <= 0:
+        raise ValueError("total_images must be greater than 0")
+
+    safe_user_name = _safe_name(user_name)
+    user_dir = os.path.join(dataset_root, safe_user_name)
+    _ensure_directory(user_dir)
+
+    cap = cv2.VideoCapture(camera_index)
+    if not cap.isOpened():
+        raise RuntimeError("Unable to access webcam")
+
+    print("Pro tip: Ask the admin to slowly move their head in a U-shape or circle during capture for better side-profile coverage.")
+
+    saved_paths = []
+    delay_ms = max(1, int(delay_seconds * 1000))
+
+    try:
+        for idx in range(1, total_images + 1):
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            file_name = f"{safe_user_name}_{idx}.jpg"
+            file_path = os.path.join(user_dir, file_name)
+
+            if not cv2.imwrite(file_path, gray):
+                raise RuntimeError(f"Failed to save image: {file_path}")
+
+            saved_paths.append(file_path)
+
+            cv2.imshow("Face Capture", gray)
+            if cv2.waitKey(delay_ms) & 0xFF == ord("q"):
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+    if len(saved_paths) < total_images:
+        raise RuntimeError(
+            f"Capture stopped early: saved {len(saved_paths)} of {total_images} images"
+        )
+
+    return saved_paths
+
+
+def save_student_upload(student_name, image, uploads_dir="uploads"):
+    """Save one student photo to uploads/<student_name>_<YYYYMMDD>.jpg in grayscale."""
+    if image is None:
+        raise ValueError("image is required")
+
+    _ensure_directory(uploads_dir)
+
+    safe_student_name = _safe_name(student_name)
+    date_token = datetime.now().strftime("%Y%m%d")
+    file_name = f"{safe_student_name}_{date_token}.jpg"
+    file_path = os.path.join(uploads_dir, file_name)
+
+    image_to_save = _to_grayscale_image(image)
+
+    if not cv2.imwrite(file_path, image_to_save):
+        raise RuntimeError(f"Failed to save student upload: {file_path}")
+
+    return file_path
+
+
+def save_classroom_upload(image, uploads_dir="uploads"):
+    """Save one classroom group photo copy to uploads/classroom_<timestamp>.jpg in grayscale."""
+    if image is None:
+        raise ValueError("image is required")
+
+    _ensure_directory(uploads_dir)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f"classroom_{timestamp}.jpg"
+    file_path = os.path.join(uploads_dir, file_name)
+
+    image_to_save = _to_grayscale_image(image)
+
+    if not cv2.imwrite(file_path, image_to_save):
+        raise RuntimeError(f"Failed to save classroom upload: {file_path}")
+
+    return file_path
+
+
+def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", max_images=50):
+    """Save cropped face copies to dataset/<user_name>/<user_name>_<count>.jpg."""
+    safe_user_name = _safe_name(user_name)
+    user_dir = os.path.join(dataset_root, safe_user_name)
+    _ensure_directory(user_dir)
+
+    saved_paths = []
+    for idx, crop in enumerate((face_crops or [])[:max_images], start=1):
+        if crop is None:
+            continue
+
+        image_to_save = crop
+        if hasattr(crop, "shape") and len(crop.shape) == 3 and crop.shape[2] == 4:
+            image_to_save = cv2.cvtColor(crop, cv2.COLOR_BGRA2BGR)
+
+        if hasattr(image_to_save, "shape") and len(image_to_save.shape) == 3 and image_to_save.shape[2] == 3:
+            # Detector returns RGB crops; convert to grayscale for offline dataset usage.
+            image_to_save = cv2.cvtColor(image_to_save, cv2.COLOR_RGB2GRAY)
+
+        file_name = f"{safe_user_name}_{idx}.jpg"
+        file_path = os.path.join(user_dir, file_name)
+
+        if not cv2.imwrite(file_path, image_to_save):
+            raise RuntimeError(f"Failed to save dataset image: {file_path}")
+
+        saved_paths.append(file_path)
+
+    return saved_paths
+
+
+def save_classroom_upload_bundle(subject_label, image, face_crops, uploads_dir="uploads"):
+    """Save classroom original and extracted face crops into uploads/<subject>_<timestamp>/ in grayscale."""
+    if image is None:
+        raise ValueError("image is required")
+
+    _ensure_directory(uploads_dir)
+
+    safe_subject = _safe_name(subject_label)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    folder_name = f"{safe_subject}_{timestamp}"
+    folder_path = os.path.join(uploads_dir, folder_name)
+    _ensure_directory(folder_path)
+
+    original_path = os.path.join(folder_path, "original.jpg")
+    image_to_save = _to_grayscale_image(image)
+
+    if not cv2.imwrite(original_path, image_to_save):
+        raise RuntimeError(f"Failed to save original classroom image: {original_path}")
+
+    saved_faces = []
+    for idx, crop in enumerate(face_crops or [], start=1):
+        if crop is None:
+            continue
+
+        crop_to_save = _to_grayscale_image(crop)
+
+        face_path = os.path.join(folder_path, f"face_{idx:02d}.jpg")
+        if not cv2.imwrite(face_path, crop_to_save):
+            raise RuntimeError(f"Failed to save classroom face crop: {face_path}")
+
+        saved_faces.append(face_path)
+
+    return {
+        "folder_path": folder_path,
+        "original_path": original_path,
+        "face_paths": saved_faces,
+    }
