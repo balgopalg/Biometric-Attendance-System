@@ -5,10 +5,12 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 import os
+from threading import Lock
 
 import cv2
 import numpy as np
 from flask import Blueprint, request, jsonify, current_app
+from bson import ObjectId
 
 from app.extensions import get_collection
 from app.models.audit import log_action
@@ -32,6 +34,66 @@ lecturer_bp = Blueprint("lecturer", __name__)
 # In-memory active session store (would use Redis in production)
 _sessions = {}
 ROLLBACK_MINUTES = 30
+_SESSIONS_NORMALIZED = False
+_SESSIONS_NORMALIZE_LOCK = Lock()
+
+
+def _normalize_attendance_sessions_once():
+    """One-time repair for legacy attendance_sessions documents.
+
+    Fixes missing/typed fields that can make valid committed sessions disappear
+    from history views after rollback re-commit flows.
+    """
+    global _SESSIONS_NORMALIZED
+    if _SESSIONS_NORMALIZED:
+        return
+
+    with _SESSIONS_NORMALIZE_LOCK:
+        if _SESSIONS_NORMALIZED:
+            return
+
+        sessions_col = get_collection("attendance", "attendance_sessions")
+        for doc in sessions_col.find({}):
+            session_id = doc.get("session_id")
+            if not session_id:
+                session_id = str(doc.get("_id"))
+
+            lecturer_id = doc.get("lecturer_id")
+            paper_id = doc.get("paper_id")
+            student_ids = doc.get("student_ids") or []
+            if not isinstance(student_ids, list):
+                student_ids = [student_ids]
+
+            # Normalize IDs and deduplicate while preserving order.
+            normalized_students = []
+            seen = set()
+            for sid in student_ids:
+                text = str(sid).strip() if sid is not None else ""
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                normalized_students.append(text)
+
+            committed_at = doc.get("committed_at") or doc.get("last_updated_at") or doc.get("created_at")
+            academic_session = doc.get("academic_session") or doc.get("academic_year")
+            if not academic_session and isinstance(committed_at, datetime):
+                academic_session = str(committed_at.year)
+
+            updates = {
+                "session_id": str(session_id),
+                "lecturer_id": str(lecturer_id) if lecturer_id is not None else "",
+                "paper_id": str(paper_id) if paper_id is not None else "",
+                "student_ids": normalized_students,
+                "academic_session": str(academic_session) if academic_session else "",
+                "academic_year": str(academic_session) if academic_session else "",
+                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.utcnow(),
+            }
+            if committed_at:
+                updates["committed_at"] = committed_at
+
+            sessions_col.update_one({"_id": doc.get("_id")}, {"$set": updates})
+
+        _SESSIONS_NORMALIZED = True
 
 
 def _enrich_paper(paper):
@@ -49,6 +111,36 @@ def _enrich_paper(paper):
     item["academic_year"] = item.get("academic_session") or item.get("academic_year")
     item["semester"] = item.get("semester")
     item["total_enrolled_students"] = count_profiles_for_paper(item.get("_id")) if item.get("_id") else 0
+
+    # Derive academic sessions from enrolled student profiles so lecturer dashboard
+    # reflects real enrollment session for the subject.
+    enrolled_sessions = []
+    if item.get("_id"):
+        profiles = get_profiles_for_paper(item.get("_id"))
+        session_values = set()
+        for profile in profiles:
+            session = (
+                profile.get("academic_session")
+                or profile.get("academic_year")
+                or profile.get("year")
+            )
+            text = str(session).strip() if session is not None else ""
+            if text:
+                session_values.add(text)
+        enrolled_sessions = sorted(session_values)
+
+    item["enrolled_academic_sessions"] = enrolled_sessions
+    if enrolled_sessions:
+        item["enrolled_academic_session"] = enrolled_sessions[0]
+        item["enrolled_academic_session_label"] = (
+            enrolled_sessions[0]
+            if len(enrolled_sessions) == 1
+            else f"{enrolled_sessions[0]} (+{len(enrolled_sessions) - 1} more)"
+        )
+    else:
+        item["enrolled_academic_session"] = None
+        item["enrolled_academic_session_label"] = None
+
     return item
 
 
@@ -631,12 +723,21 @@ def adjust_committed_session(user, session_id):
 @role_required("lecturer")
 def lecturer_progress(user):
     """Lecturer progress summary with paper/date filtering and class-wise attendance."""
+    _normalize_attendance_sessions_once()
+
     lecturer_id = str(user["_id"])
     paper_id = request.args.get("paper_id", "").strip()
     from_date = _parse_date(request.args.get("from_date", ""), end_of_day=False)
     to_date = _parse_date(request.args.get("to_date", ""), end_of_day=True)
 
-    query = {"lecturer_id": lecturer_id}
+    lecturer_id_variants = [lecturer_id]
+    try:
+        if ObjectId.is_valid(lecturer_id):
+            lecturer_id_variants.append(ObjectId(lecturer_id))
+    except Exception:
+        pass
+
+    query = {"lecturer_id": {"$in": lecturer_id_variants}}
     if paper_id:
         query["paper_id"] = paper_id
     if from_date or to_date:
@@ -652,13 +753,21 @@ def lecturer_progress(user):
     assigned_papers = [_enrich_paper(p) for p in get_papers_by_lecturer(lecturer_id)]
     paper_lookup = {p["_id"]: p for p in assigned_papers}
 
-    # Map committed session metadata for rollback/editability display.
-    session_ids = list({log.get("session_id") for log in logs if log.get("session_id")})
-    session_docs = {}
-    if session_ids:
-        sessions_col = get_collection("attendance", "attendance_sessions")
-        docs = list(sessions_col.find({"session_id": {"$in": session_ids}}))
-        session_docs = {doc.get("session_id"): doc for doc in docs}
+    # Load committed sessions directly so zero-attendance classes are still visible.
+    sessions_col = get_collection("attendance", "attendance_sessions")
+    session_query = {"lecturer_id": {"$in": lecturer_id_variants}}
+    if paper_id:
+        session_query["paper_id"] = paper_id
+    if from_date or to_date:
+        committed_ts = {}
+        if from_date:
+            committed_ts["$gte"] = from_date
+        if to_date:
+            committed_ts["$lt"] = to_date
+        session_query["committed_at"] = committed_ts
+
+    committed_docs = list(sessions_col.find(session_query))
+    session_docs = {doc.get("session_id"): doc for doc in committed_docs if doc.get("session_id")}
 
     # Precompute total enrolled students per paper for attended/total metrics.
     enrolled_totals_by_paper = {}
@@ -666,35 +775,56 @@ def lecturer_progress(user):
         pid = paper.get("_id")
         enrolled_totals_by_paper[pid] = len(get_profiles_for_paper(pid))
 
-    # Group by class session.
-    grouped = defaultdict(list)
+    # Group logs by session_id for enrichment.
+    logs_by_session = defaultdict(list)
     for log in logs:
-        key = (log.get("session_id"), log.get("paper_id"))
-        grouped[key].append(log)
+        sid = log.get("session_id")
+        if sid:
+            logs_by_session[sid].append(log)
 
     sessions = []
-    for (sid, pid), entries in grouped.items():
+    seen_session_ids = set()
+
+    # Source of truth: committed sessions collection.
+    for session_doc in committed_docs:
+        sid = str(session_doc.get("session_id") or session_doc.get("_id") or "")
+        if not sid or sid in seen_session_ids:
+            continue
+        seen_session_ids.add(sid)
+
+        entries = logs_by_session.get(sid, [])
+        pid = str(session_doc.get("paper_id") or "")
+        if not pid:
+            pid = str(entries[0].get("paper_id") or "") if entries else ""
+        if not pid:
+            continue
+
+        student_ids = session_doc.get("student_ids")
+        if not isinstance(student_ids, list) or len(student_ids) == 0:
+            student_ids = [entry.get("student_id") for entry in entries if entry.get("student_id")]
+
         students = []
         seen = set()
-        for entry in entries:
-            stu_id = entry.get("student_id")
-            if stu_id in seen:
+        for stu_id in student_ids:
+            stu = str(stu_id).strip() if stu_id is not None else ""
+            if not stu or stu in seen:
                 continue
-            seen.add(stu_id)
-            u = find_user_by_id(stu_id)
+            seen.add(stu)
+            u = find_user_by_id(stu)
             students.append({
-                "student_id": stu_id,
+                "student_id": stu,
                 "name": u.get("name", "Unknown") if u else "Unknown",
                 "email": u.get("email", "") if u else "",
             })
 
         paper = paper_lookup.get(pid)
-        first_ts = min((e.get("timestamp") for e in entries if e.get("timestamp")), default=None)
-        session_doc = session_docs.get(sid)
-        rollback_until = session_doc.get("rollback_until") if session_doc else None
-        editable = False
-        if session_doc:
-            editable = _within_rollback(session_doc) and not session_doc.get("finalized", False)
+        first_ts = (
+            session_doc.get("committed_at")
+            or session_doc.get("last_updated_at")
+            or min((e.get("timestamp") for e in entries if e.get("timestamp")), default=None)
+        )
+        rollback_until = session_doc.get("rollback_until")
+        editable = _within_rollback(session_doc) and not session_doc.get("finalized", False)
 
         sessions.append({
             "session_id": sid,
@@ -702,13 +832,52 @@ def lecturer_progress(user):
             "paper_name": (paper or {}).get("name") or ((get_paper_by_id(pid) or {}).get("name") if pid else "Unknown"),
             "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
             "course_name": (paper or {}).get("course_name"),
-            "academic_year": (session_doc or {}).get("academic_year") or (paper or {}).get("academic_year"),
+            "academic_year": session_doc.get("academic_year") or (paper or {}).get("academic_year"),
             "timestamp": first_ts,
             "students_count": len(students),
             "total_students": enrolled_totals_by_paper.get(pid, 0),
             "students": students,
             "rollback_until": rollback_until,
             "editable": editable,
+        })
+
+    # Fallback for legacy data where logs exist but session doc is missing.
+    for sid, entries in logs_by_session.items():
+        if sid in seen_session_ids:
+            continue
+        pid = str(entries[0].get("paper_id") or "") if entries else ""
+        if not pid:
+            continue
+
+        students = []
+        seen = set()
+        for entry in entries:
+            stu = str(entry.get("student_id") or "").strip()
+            if not stu or stu in seen:
+                continue
+            seen.add(stu)
+            u = find_user_by_id(stu)
+            students.append({
+                "student_id": stu,
+                "name": u.get("name", "Unknown") if u else "Unknown",
+                "email": u.get("email", "") if u else "",
+            })
+
+        paper = paper_lookup.get(pid)
+        first_ts = min((e.get("timestamp") for e in entries if e.get("timestamp")), default=None)
+        sessions.append({
+            "session_id": sid,
+            "paper_id": pid,
+            "paper_name": (paper or {}).get("name") or ((get_paper_by_id(pid) or {}).get("name") if pid else "Unknown"),
+            "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
+            "course_name": (paper or {}).get("course_name"),
+            "academic_year": (paper or {}).get("academic_year"),
+            "timestamp": first_ts,
+            "students_count": len(students),
+            "total_students": enrolled_totals_by_paper.get(pid, 0),
+            "students": students,
+            "rollback_until": None,
+            "editable": False,
         })
 
     sessions.sort(key=lambda x: x.get("timestamp") or datetime.min, reverse=True)

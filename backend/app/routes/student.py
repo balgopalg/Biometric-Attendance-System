@@ -1,7 +1,11 @@
 """Student dashboard routes — attendance summary, predictions, exam eligibility."""
 
-from flask import Blueprint, jsonify
+from datetime import datetime
 
+from flask import Blueprint, jsonify
+from bson import ObjectId
+
+from app.extensions import get_collection
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc
 from app.models.enrollment import get_profile_by_user
@@ -17,6 +21,30 @@ def _to_int(value, default=0):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _as_text(value):
+    return str(value or "").strip()
+
+
+def _to_bool(value):
+    if isinstance(value, bool):
+        return value
+    return _as_text(value).lower() in {"1", "true", "yes", "y"}
+
+
+def _id_variants(value):
+    variants = []
+    text = _as_text(value)
+    if text:
+        variants.append(text)
+    try:
+        oid = ObjectId(text)
+        if oid not in variants:
+            variants.append(oid)
+    except Exception:
+        pass
+    return variants
 
 
 @student_bp.route("/profile", methods=["GET"])
@@ -69,6 +97,8 @@ def my_profile(user):
                 "course_id": profile.get("course_id", ""),
             },
             "course": sanitise_mongo_doc(course) if course else None,
+            "course_status": _as_text((course or {}).get("status") or "active").lower() or "active",
+            "is_course_inactive": _as_text((course or {}).get("status") or "active").lower() != "active",
             "subjects": subjects,
             "papers": subjects,
         }
@@ -78,18 +108,63 @@ def my_profile(user):
 @student_bp.route("/attendance", methods=["GET"])
 @role_required("student")
 def attendance_summary(user):
-    """Per-paper attendance percentage summary."""
+    """Per-paper attendance percentage summary with per-class session breakdown."""
     profile = get_profile_by_user(str(user["_id"]))
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404
 
+    sessions_col = get_collection("attendance", "attendance_sessions")
+
     summary = []
     for paper_id in profile.get("enrolled_papers", []):
-        paper = get_paper_by_id(paper_id)
+        paper_id_text = str(paper_id)
+        paper = get_paper_by_id(paper_id_text)
         if not paper:
             continue
-        attended = count_attendance(str(user["_id"]), paper_id)
-        total = paper.get("total_classes", 0)
+
+        paper_id_variants = [paper_id_text]
+        try:
+            paper_id_variants.append(ObjectId(paper_id_text))
+        except Exception:
+            pass
+
+        committed_sessions = list(
+            sessions_col.find(
+                {"paper_id": {"$in": paper_id_variants}},
+                {"session_id": 1, "student_ids": 1, "committed_at": 1, "last_updated_at": 1, "finalized": 1},
+            )
+        )
+        committed_sessions.sort(
+            key=lambda d: d.get("committed_at") or d.get("last_updated_at") or datetime.min,
+            reverse=True,
+        )
+
+        attended = 0
+        class_rows = []
+        for session_doc in committed_sessions:
+            session_student_ids = session_doc.get("student_ids") or []
+            present = str(user["_id"]) in [str(sid) for sid in session_student_ids]
+            attended += 1 if present else 0
+
+            raw_date = session_doc.get("committed_at") or session_doc.get("last_updated_at")
+            if isinstance(raw_date, datetime):
+                date_label = raw_date.strftime("%d/%m/%Y")
+                date_time_label = raw_date.strftime("%d/%m/%Y, %H:%M:%S")
+            else:
+                date_label = str(raw_date) if raw_date else "N/A"
+                date_time_label = date_label
+
+            class_rows.append({
+                "session_id": session_doc.get("session_id"),
+                "date": date_label,
+                "date_time": date_time_label,
+                "timestamp": raw_date,
+                "status": "Present" if present else "Absent",
+                "present": present,
+                "students_marked": len(session_student_ids),
+            })
+
+        total = len(committed_sessions) or paper.get("total_classes", 0)
         pct = round((attended / total) * 100, 2) if total > 0 else 0
         summary.append({
             "paper_id": paper_id,
@@ -98,6 +173,7 @@ def attendance_summary(user):
             "attended": attended,
             "total_classes": total,
             "percentage": pct,
+            "sessions": class_rows,
         })
 
     return jsonify(summary)
@@ -165,6 +241,27 @@ def exam_eligibility(user):
     uid = str(user["_id"])
     enrolled_papers = profile.get("enrolled_papers", [])
 
+    overrides_col = get_collection("attendance", "exam_eligibility_overrides")
+    uid_variants = _id_variants(uid)
+    paper_variants = []
+    for pid in enrolled_papers:
+        paper_variants.extend(_id_variants(pid))
+
+    override_map = {}
+    if uid_variants and paper_variants:
+        for override in overrides_col.find(
+            {
+                "student_id": {"$in": uid_variants},
+                "paper_id": {"$in": paper_variants},
+            },
+            {
+                "_id": 0,
+                "paper_id": 1,
+                "override_status": 1,
+            },
+        ):
+            override_map[_as_text(override.get("paper_id"))] = _to_bool(override.get("override_status"))
+
     total_attended = 0
     total_classes = 0
     for paper_id in enrolled_papers:
@@ -185,6 +282,18 @@ def exam_eligibility(user):
         paper = get_paper_by_id(paper_id)
         if not paper:
             continue
+
+        paper_key = _as_text(paper_id)
+        has_override = paper_key in override_map
+        final_eligible = override_map.get(paper_key) if has_override else overall_eligible
+
+        if has_override:
+            approval_source = "Admin approved" if final_eligible else "Admin blocked"
+        elif final_eligible is None:
+            approval_source = "Auto pending"
+        else:
+            approval_source = "Auto approved" if final_eligible else "Auto blocked"
+
         result.append({
             "paper_id": paper_id,
             "paper_name": paper.get("name", ""),
@@ -193,8 +302,9 @@ def exam_eligibility(user):
             "overall_attendance_percentage": overall_pct,
             "overall_attended_classes": total_attended,
             "overall_total_classes": total_classes,
-            "eligible": overall_eligible,
-            "status": "No Lectures Yet" if overall_eligible is None else ("Eligible" if overall_eligible else "Not Eligible"),
+            "eligible": final_eligible,
+            "status": "No Lectures Yet" if final_eligible is None else ("Eligible" if final_eligible else "Not Eligible"),
+            "approval_source": approval_source,
         })
 
     return jsonify(result)

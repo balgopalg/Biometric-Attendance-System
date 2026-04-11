@@ -63,18 +63,54 @@ export default function Login() {
       >
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 16,
-            background: 'var(--gradient-primary)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            marginBottom: 16,
-          }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-              <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
-              <circle cx="12" cy="10" r="3" />
-              <path d="M7 16.5c0-1.4 2.2-2.5 5-2.5s5 1.1 5 2.5" />
-            </svg>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.85, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.05, ease: 'easeOut' }}
+            style={{
+              position: 'relative',
+              width: 70,
+              height: 70,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <motion.div
+              animate={{ scale: [1, 1.08, 1], opacity: [0.45, 0.22, 0.45] }}
+              transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: 20,
+                background: 'radial-gradient(circle at 30% 30%, rgba(139,92,246,0.45), rgba(6,182,212,0.18) 60%, transparent 85%)',
+                filter: 'blur(2px)',
+              }}
+            />
+
+            <div style={{
+              width: 58,
+              height: 58,
+              borderRadius: 18,
+              background: 'linear-gradient(145deg, rgba(139,92,246,0.95), rgba(6,182,212,0.95))',
+              border: '1px solid rgba(255,255,255,0.35)',
+              boxShadow: '0 12px 28px rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.25)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              zIndex: 1,
+            }}>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="5" />
+                <circle cx="12" cy="10" r="2.7" />
+                <path d="M7.6 16.4c1-1.8 2.6-2.8 4.4-2.8s3.4 1 4.4 2.8" />
+                <path d="M8.2 7.4h.01M15.8 7.4h.01" />
+              </svg>
+            </div>
+          </motion.div>
+
           <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }} className="gradient-text">FaceAttend</h1>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 6 }}>
             Biometric Attendance Management System

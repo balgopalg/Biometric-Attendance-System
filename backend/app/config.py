@@ -45,5 +45,14 @@ class Config:
     # Lower = lenient matching, may have false positives
     FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.60"))
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
+    SLOW_REQUEST_THRESHOLD_MS = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "500"))
+    TASK_QUEUE_ENABLED = _env_bool("TASK_QUEUE_ENABLED", False)
+    TASK_QUEUE_REDIS_URL = os.getenv("TASK_QUEUE_REDIS_URL", "redis://localhost:6379/0")
+    TASK_QUEUE_NAME = os.getenv("TASK_QUEUE_NAME", "biometric:jobs")
+    TASK_QUEUE_MAX_RETRIES = int(os.getenv("TASK_QUEUE_MAX_RETRIES", "3"))
+    TASK_QUEUE_BASE_BACKOFF_SECONDS = int(os.getenv("TASK_QUEUE_BASE_BACKOFF_SECONDS", "10"))
+    TASK_QUEUE_MAX_BACKOFF_SECONDS = int(os.getenv("TASK_QUEUE_MAX_BACKOFF_SECONDS", "300"))
+    TASK_QUEUE_BACKOFF_JITTER_RATIO = float(os.getenv("TASK_QUEUE_BACKOFF_JITTER_RATIO", "0.25"))
+    TASK_QUEUE_RUNNING_TIMEOUT_SECONDS = int(os.getenv("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", "900"))
 
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB max upload

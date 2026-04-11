@@ -49,7 +49,7 @@ def identify_faces():
     if not faces:
         return jsonify({"matches": [], "faces_detected": 0})
 
-    profiles = get_all_profiles()
+    profiles = get_all_profiles(["user_id", "face_embeddings", "roll_number"])
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
 
     matches = []

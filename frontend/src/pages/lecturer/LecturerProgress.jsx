@@ -5,6 +5,7 @@ import StatsCard from '../../components/ui/StatsCard';
 import { HiOutlineCalendar, HiOutlineChartBar, HiOutlineUsers } from 'react-icons/hi';
 import Modal from '../../components/ui/Modal';
 import PinCommitModal from './PinCommitModal';
+import { formatCourseName } from '../../utils/courseDisplay';
 
 function formatDateTime(value) {
   if (!value) return 'N/A';
@@ -73,7 +74,7 @@ export default function LecturerProgress() {
   }, [sessionReview]);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="lecturer-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
@@ -116,7 +117,7 @@ export default function LecturerProgress() {
               {perPaperSorted.map((p) => (
                 <tr key={p.paper_id}>
                   <td><span className="badge badge-info">{p.paper_code}</span> {p.paper_name}</td>
-                  <td>{p.course_name || 'N/A'}</td>
+                  <td>{formatCourseName(p.course_name || 'N/A', { isInactive: p.is_course_inactive, status: p.course_status })}</td>
                   <td>{p.academic_year || 'N/A'}</td>
                   <td>{p.classes_taken}</td>
                   <td>{p.attendance_marks}</td>
@@ -148,7 +149,7 @@ export default function LecturerProgress() {
                 <tr key={`${s.session_id}-${s.paper_id}`}>
                   <td>{formatDateTime(s.timestamp)}</td>
                   <td><span className="badge badge-purple">{s.paper_code}</span> {s.paper_name}</td>
-                  <td>{s.course_name || 'N/A'}</td>
+                  <td>{formatCourseName(s.course_name || 'N/A', { isInactive: s.is_course_inactive, status: s.course_status })}</td>
                   <td>{s.academic_year || 'N/A'}</td>
                   <td>{s.students_count} / {s.total_students ?? 0}</td>
                   <td>

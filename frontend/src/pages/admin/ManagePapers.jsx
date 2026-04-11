@@ -1,15 +1,21 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
+import useAdminPreference from '../../hooks/useAdminPreference';
+import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
+import Pagination from '../../components/ui/Pagination';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil } from 'react-icons/hi';
 
 const EMPTY_FORM = { name: '', code: '', course_id: '', lecturer_id: '', semester: '' };
+const PAGE_SIZE = 10;
 
 export default function ManagePapers() {
   const [papers, setPapers] = useState([]);
+  const [totalPapers, setTotalPapers] = useState(0);
+  const [page, setPage] = useState(1);
   const [courses, setCourses] = useState([]);
   const [lecturers, setLecturers] = useState([]);
 
@@ -19,6 +25,7 @@ export default function ManagePapers() {
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ course_id: '', lecturer_id: '', semester: '' });
+  const [showInactiveRows, setShowInactiveRows] = useAdminPreference('show_inactive_faded_rows', true);
 
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -27,12 +34,26 @@ export default function ManagePapers() {
     api.get('/admin/lecturers').then((r) => setLecturers(r.data)).catch(() => {});
   };
 
-  const fetchPapers = () => {
+  const fetchPapers = (nextPage = 1) => {
     const params = {};
+    params.page = nextPage;
+    params.per_page = PAGE_SIZE;
+    if (search) params.q = search;
     if (filters.course_id) params.course_id = filters.course_id;
     if (filters.lecturer_id) params.lecturer_id = filters.lecturer_id;
     if (filters.semester) params.semester = filters.semester;
-    api.get('/admin/papers', { params }).then((r) => setPapers(r.data)).catch(() => {});
+    api.get('/admin/papers', { params }).then((r) => {
+      const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+      const resolvedTotal = Number(r.data?.total || items.length || 0);
+      const maxPage = Math.max(1, Math.ceil(resolvedTotal / PAGE_SIZE));
+      if (resolvedTotal > 0 && nextPage > maxPage) {
+        fetchPapers(maxPage);
+        return;
+      }
+      setPapers(items);
+      setTotalPapers(resolvedTotal);
+      setPage(Number(r.data?.page || nextPage));
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -40,18 +61,8 @@ export default function ManagePapers() {
   }, []);
 
   useEffect(() => {
-    fetchPapers();
-  }, [filters.course_id, filters.lecturer_id, filters.semester]);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return papers.filter((p) =>
-      p.name?.toLowerCase().includes(q)
-      || p.code?.toLowerCase().includes(q)
-      || p.course_name?.toLowerCase().includes(q)
-      || p.lecturer_name?.toLowerCase().includes(q)
-    );
-  }, [papers, search]);
+    fetchPapers(1);
+  }, [filters.course_id, filters.lecturer_id, filters.semester, search]);
 
   const selectedCourse = useMemo(
     () => courses.find((c) => c._id === form.course_id) || null,
@@ -61,6 +72,23 @@ export default function ManagePapers() {
   const selectedFilterCourse = useMemo(
     () => courses.find((c) => c._id === filters.course_id) || null,
     [courses, filters.course_id]
+  );
+
+  const isInactiveCourseSelected = useMemo(
+    () => String(selectedFilterCourse?.status || 'active').toLowerCase() !== 'active',
+    [selectedFilterCourse]
+  );
+
+  const effectiveShowInactiveRows = showInactiveRows || isInactiveCourseSelected;
+
+  const filtered = useMemo(
+    () => (effectiveShowInactiveRows ? papers : papers.filter((p) => !p.is_course_inactive)),
+    [papers, effectiveShowInactiveRows]
+  );
+
+  const hiddenInactiveCount = useMemo(
+    () => papers.filter((p) => p.is_course_inactive).length,
+    [papers]
   );
 
   const filteredLecturers = useMemo(() => {
@@ -92,6 +120,15 @@ export default function ManagePapers() {
     () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
     [courses]
   );
+
+  const visibleCourses = showInactiveRows ? courses : activeCourses;
+
+  useEffect(() => {
+    if (showInactiveRows) return;
+    if (filters.course_id && !activeCourses.some((course) => course._id === filters.course_id)) {
+      setFilters((prev) => ({ ...prev, course_id: '', semester: '', lecturer_id: '' }));
+    }
+  }, [activeCourses, filters.course_id, showInactiveRows]);
 
   useEffect(() => {
     if (!form.course_id && form.semester) {
@@ -135,7 +172,7 @@ export default function ManagePapers() {
       toast.success('Subject created');
       setShowAdd(false);
       setForm(EMPTY_FORM);
-      fetchPapers();
+      fetchPapers(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed');
     }
@@ -161,7 +198,7 @@ export default function ManagePapers() {
       setShowEdit(false);
       setEditingPaper(null);
       setForm(EMPTY_FORM);
-      fetchPapers();
+      fetchPapers(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update subject');
     }
@@ -172,7 +209,7 @@ export default function ManagePapers() {
     try {
       await api.delete(`/admin/papers/${id}`);
       toast.success('Deleted');
-      fetchPapers();
+      fetchPapers(1);
     } catch (err) {
       toast.error('Failed to delete');
     }
@@ -200,7 +237,7 @@ export default function ManagePapers() {
             onChange={(e) => setForm({ ...form, course_id: e.target.value, semester: '', lecturer_id: '' })}
           >
             <option value="">Select course</option>
-            {activeCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
           </select>
           <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 6 }}>
             Pick any lecturer. Course-linked filtering is used only when available.
@@ -236,13 +273,13 @@ export default function ManagePapers() {
   );
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Papers</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{papers.length} papers in current filter</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalPapers} papers in current filter</p>
         </div>
         <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
           <HiOutlinePlus size={16} /> Add Subject
@@ -265,7 +302,7 @@ export default function ManagePapers() {
           })}
         >
           <option value="">All Courses</option>
-          {courses.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+          {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
         </select>
         <select
           className="input-field"
@@ -281,6 +318,23 @@ export default function ManagePapers() {
           {filteredLecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
         </select>
       </div>
+
+      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+        <label style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={showInactiveRows}
+            onChange={(e) => setShowInactiveRows(e.target.checked)}
+          />
+          Show faded rows (inactive-course subjects)
+        </label>
+      </div>
+
+      {!showInactiveRows && isInactiveCourseSelected && (
+        <div className="glass-card" style={{ padding: '10px 12px', marginBottom: 12, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          Showing subjects for selected inactive course.
+        </div>
+      )}
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
         <table className="data-table">
@@ -300,7 +354,7 @@ export default function ManagePapers() {
               <tr key={p._id} className={p.is_course_inactive ? 'faded-entity' : ''}>
                 <td><span className="badge badge-purple">{p.code}</span></td>
                 <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{p.name}</td>
-                <td>{p.course_name || 'Unassigned'}</td>
+                <td>{p.course_name ? formatCourseName(p.course_name, { isInactive: p.is_course_inactive }) : 'Unassigned'}</td>
                 <td>{p.lecturer_name || 'Unassigned'}</td>
                 <td>{p.semester ? `Semester ${p.semester}` : 'N/A'}</td>
                 <td>{p.total_classes}</td>
@@ -320,6 +374,8 @@ export default function ManagePapers() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} total={totalPapers} perPage={PAGE_SIZE} onPageChange={fetchPapers} />
 
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Subject" width={520}>
         {PaperForm({ onSubmit: handleAdd, submitLabel: 'Create Subject' })}

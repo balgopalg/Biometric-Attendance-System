@@ -15,6 +15,7 @@ const titleMap = {
   '/admin/enrollment': 'Student Enrollment',
   '/admin/exam-eligibility': 'Exam Eligibility',
   '/admin/audit': 'Audit Trail',
+  '/admin/dead-letter': 'Dead-Letter Jobs',
   '/lecturer': 'Lecturer Dashboard',
   '/lecturer/session': 'Attendance Session',
   '/lecturer/progress': 'Attendance History',
@@ -74,7 +75,7 @@ export default function DashboardLayout() {
         isOpen={isSidebarOpen}
         onNavigate={closeSidebarOnMobile}
       />
-      <div style={{ flex: 1, marginLeft: contentMarginLeft, display: 'flex', flexDirection: 'column', transition: 'margin-left 0.2s ease' }}>
+      <div style={{ flex: 1, marginLeft: contentMarginLeft, display: 'flex', flexDirection: 'column', transition: 'margin-left 320ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
         <Topbar
           title={title}
           onToggleSidebar={toggleSidebar}
@@ -85,10 +86,18 @@ export default function DashboardLayout() {
           <Outlet />
         </main>
       </div>
-      {isMobile && isSidebarOpen && (
+      {isMobile && (
         <div
           onClick={closeSidebarOnMobile}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 45 }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            zIndex: 45,
+            opacity: isSidebarOpen ? 1 : 0,
+            pointerEvents: isSidebarOpen ? 'auto' : 'none',
+            transition: 'opacity 260ms ease',
+          }}
         />
       )}
     </div>

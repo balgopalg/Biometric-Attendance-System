@@ -1,8 +1,12 @@
 import { useMemo, useState, useEffect } from 'react';
 import api from '../../api/axios';
+import useAdminPreference from '../../hooks/useAdminPreference';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
+import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
 import FaceEnrollmentModal from '../../components/admin/FaceEnrollmentModal';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
+import Pagination from '../../components/ui/Pagination';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
@@ -25,9 +29,12 @@ const EMPTY_FORM = {
   course_id: '',
   mobile_no: '',
 };
+const PAGE_SIZE = 10;
 
 export default function ManageStudents() {
   const [students, setStudents] = useState([]);
+  const [totalStudents, setTotalStudents] = useState(0);
+  const [page, setPage] = useState(1);
   const [courses, setCourses] = useState([]);
   const [papers, setPapers] = useState([]);
 
@@ -43,7 +50,10 @@ export default function ManageStudents() {
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ course_id: '', paper_id: '', semester: '' });
+  const [showInactiveRows, setShowInactiveRows] = useAdminPreference('show_inactive_faded_rows', true);
   const [filterSemesters, setFilterSemesters] = useState([]);
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const debouncedFilters = useDebouncedValue(filters, 250);
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [bulkForm, setBulkForm] = useState({ course_id: '', semester: '', paper_id: '', student_ids: [] });
@@ -54,18 +64,37 @@ export default function ManageStudents() {
   const [trainingStudentId, setTrainingStudentId] = useState('');
   const [bulkTraining, setBulkTraining] = useState(false);
   const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
+  const [hiddenInactiveStudentCount, setHiddenInactiveStudentCount] = useState(0);
 
   const fetchMetadata = () => {
     api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
     api.get('/admin/papers').then((r) => setPapers(r.data)).catch(() => {});
   };
 
-  const fetchStudents = () => {
+  const fetchStudents = (nextPage = 1, options = {}) => {
+    const signal = options.signal;
     const params = {};
-    if (filters.course_id) params.course_id = filters.course_id;
-    if (filters.paper_id) params.paper_id = filters.paper_id;
-    if (filters.semester) params.semester = filters.semester;
-    api.get('/admin/students', { params }).then((r) => setStudents(r.data)).catch(() => {});
+    params.page = nextPage;
+    params.per_page = PAGE_SIZE;
+    if (debouncedSearch) params.q = debouncedSearch;
+    if (debouncedFilters.course_id) params.course_id = debouncedFilters.course_id;
+    if (debouncedFilters.paper_id) params.paper_id = debouncedFilters.paper_id;
+    if (debouncedFilters.semester) params.semester = debouncedFilters.semester;
+    if (showInactiveRows) params.include_inactive = true;
+    api.get('/admin/students', { params, signal }).then((r) => {
+      const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+      const resolvedTotal = Number(r.data?.total || items.length || 0);
+      const maxPage = Math.max(1, Math.ceil(resolvedTotal / PAGE_SIZE));
+      if (resolvedTotal > 0 && nextPage > maxPage) {
+        fetchStudents(maxPage, options);
+        return;
+      }
+      setStudents(items);
+      setTotalStudents(resolvedTotal);
+      setPage(Number(r.data?.page || nextPage));
+    }).catch((err) => {
+      if (err?.code === 'ERR_CANCELED') return;
+    });
   };
 
   useEffect(() => {
@@ -73,8 +102,41 @@ export default function ManageStudents() {
   }, []);
 
   useEffect(() => {
-    fetchStudents();
-  }, [filters.course_id, filters.paper_id, filters.semester]);
+    const controller = new AbortController();
+    fetchStudents(1, { signal: controller.signal });
+    return () => controller.abort();
+  }, [debouncedFilters, debouncedSearch, showInactiveRows]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (showInactiveRows) {
+      setHiddenInactiveStudentCount(0);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const params = { page: 1, per_page: 1, include_inactive: true };
+    if (debouncedSearch) params.q = debouncedSearch;
+    if (debouncedFilters.course_id) params.course_id = debouncedFilters.course_id;
+    if (debouncedFilters.paper_id) params.paper_id = debouncedFilters.paper_id;
+    if (debouncedFilters.semester) params.semester = debouncedFilters.semester;
+
+    api.get('/admin/students', { params })
+      .then((r) => {
+        if (cancelled) return;
+        const totalAll = Number(r.data?.total || 0);
+        setHiddenInactiveStudentCount(Math.max(0, totalAll - totalStudents));
+      })
+      .catch(() => {
+        if (!cancelled) setHiddenInactiveStudentCount(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedFilters, debouncedSearch, showInactiveRows, totalStudents]);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,7 +207,13 @@ export default function ManageStudents() {
         if (!cancelled) setBulkPapers([]);
       });
 
-    api.get('/admin/students', { params: { course_id: bulkForm.course_id, semester: bulkForm.semester } })
+    api.get('/admin/students', {
+      params: {
+        course_id: bulkForm.course_id,
+        semester: bulkForm.semester,
+        ...(showInactiveRows ? { include_inactive: true } : {}),
+      },
+    })
       .then((r) => {
         if (!cancelled) setBulkStudents(r.data || []);
       })
@@ -156,16 +224,12 @@ export default function ManageStudents() {
     return () => {
       cancelled = true;
     };
-  }, [showBulk, bulkForm.course_id, bulkForm.semester]);
+  }, [showBulk, bulkForm.course_id, bulkForm.semester, showInactiveRows]);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return students.filter((s) =>
-      s.name?.toLowerCase().includes(q)
-      || s.email?.toLowerCase().includes(q)
-      || s.reg_number?.toLowerCase().includes(q)
-    );
-  }, [students, search]);
+  const filtered = useMemo(
+    () => (showInactiveRows ? students : students.filter((s) => !s.is_course_inactive)),
+    [students, showInactiveRows]
+  );
 
   const subjectOptions = useMemo(() => {
     return papers.filter((p) => {
@@ -179,6 +243,25 @@ export default function ManageStudents() {
     () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
     [courses]
   );
+
+  const inactiveCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() !== 'active'),
+    [courses]
+  );
+
+  const visibleCourses = showInactiveRows ? courses : activeCourses;
+
+  useEffect(() => {
+    if (showInactiveRows) return;
+
+    if (filters.course_id && !activeCourses.some((course) => course._id === filters.course_id)) {
+      setFilters((prev) => ({ ...prev, course_id: '', semester: '', paper_id: '' }));
+    }
+
+    if (bulkForm.course_id && !activeCourses.some((course) => course._id === bulkForm.course_id)) {
+      setBulkForm({ course_id: '', semester: '', paper_id: '', student_ids: [] });
+    }
+  }, [activeCourses, bulkForm.course_id, filters.course_id, showInactiveRows]);
 
   const eligibleBulkStudents = useMemo(
     () => bulkStudents.filter((s) => !s.is_course_inactive),
@@ -227,7 +310,7 @@ export default function ManageStudents() {
         name: data.name,
       });
       setShowCreds(true);
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       console.error('Student creation error:', err.response?.data, err.message);
       const errorMsg = err.response?.data?.error || err.message || 'Failed to create student';
@@ -270,7 +353,7 @@ export default function ManageStudents() {
       setShowEdit(false);
       setEditingStudent(null);
       setForm(EMPTY_FORM);
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update student');
     }
@@ -282,7 +365,7 @@ export default function ManageStudents() {
     try {
       await api.delete(`/admin/students/${sid}`);
       toast.success('Deleted');
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to delete');
     }
@@ -313,7 +396,7 @@ export default function ManageStudents() {
   const handleFaceEnrollSuccess = () => {
     setShowFaceEnroll(false);
     setEnrollingStudent(null);
-    fetchStudents();
+    fetchStudents(1);
   };
 
   const handleTrainFace = async (student) => {
@@ -332,7 +415,7 @@ export default function ManageStudents() {
       const trained = Number(res.data?.trained_embeddings || 0);
       const skipped = Number(res.data?.skipped_images || 0);
       toast.success(`Training done. Embeddings: ${trained}, skipped images: ${skipped}`);
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       if (err.response?.status === 404) {
         toast.error('Train Face endpoint not active. Restart backend server once and retry.');
@@ -359,7 +442,13 @@ export default function ManageStudents() {
       setBulkTraining(true);
       const res = await api.post('/admin/students/train-face/bulk', {
         student_ids: selectedStudentIds,
+        async: true,
       });
+
+      if (res.status === 202 || res.data?.job_id) {
+        toast.success(`Bulk training queued. Job: ${res.data?.job_id}`);
+        return;
+      }
 
       const success = Number(res.data?.success_count || 0);
       const failed = Number(res.data?.failure_count || 0);
@@ -372,7 +461,7 @@ export default function ManageStudents() {
         toast.success(`Bulk train complete. Success: ${success}, Embeddings: ${totalEmbeddings}`);
       }
 
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       if (err.response?.status === 404) {
         toast.error('Bulk train endpoint not active. Restart backend server once and retry.');
@@ -390,12 +479,18 @@ export default function ManageStudents() {
 
     try {
       setRebuildingAllFaces(true);
-      const res = await api.post('/admin/students/train-face/rebuild-all');
+      const res = await api.post('/admin/students/train-face/rebuild-all', { async: true });
+
+      if (res.status === 202 || res.data?.job_id) {
+        toast.success(`Rebuild queued. Job: ${res.data?.job_id}`);
+        return;
+      }
+
       const success = Number(res.data?.success_count || 0);
       const failed = Number(res.data?.failure_count || 0);
       const totalEmbeddings = Number(res.data?.total_trained_embeddings || 0);
       toast.success(`Rebuild complete. Success: ${success}, Failed: ${failed}, Embeddings: ${totalEmbeddings}`);
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to rebuild all face embeddings');
     } finally {
@@ -416,7 +511,7 @@ export default function ManageStudents() {
       setBulkSemesters([]);
       setBulkPapers([]);
       setBulkStudents([]);
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Enrollment failed');
     }
@@ -440,7 +535,7 @@ export default function ManageStudents() {
       });
       toast.success(res.data?.message || 'Students promoted');
       setSelectedStudentIds([]);
-      fetchStudents();
+      fetchStudents(1);
     } catch (err) {
       if (err.response?.status === 404 || err.response?.status === 405) {
         toast.error('Bulk promote endpoint not active. Please restart backend server once.');
@@ -475,7 +570,7 @@ export default function ManageStudents() {
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course</label>
           <select className="input-field" value={form.course_id} onChange={(e) => setForm({ ...form, course_id: e.target.value })}>
             <option value="">Select course</option>
-            {activeCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
           </select>
         </div>
 
@@ -493,13 +588,13 @@ export default function ManageStudents() {
   );
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Students</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{students.length} students in current filter</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalStudents} students in current filter</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button className="btn-secondary" onClick={handleRebuildAllFaces} disabled={rebuildingAllFaces}>
@@ -526,6 +621,8 @@ export default function ManageStudents() {
         </div>
       </div>
 
+      <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
+
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -543,7 +640,7 @@ export default function ManageStudents() {
           onChange={(e) => setFilters({ course_id: e.target.value, semester: '', paper_id: '' })}
         >
           <option value="">All Courses</option>
-          {courses.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+          {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
         </select>
 
         <select
@@ -566,6 +663,17 @@ export default function ManageStudents() {
           {subjectOptions.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
         </select>
 
+      </div>
+
+      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+        <label style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={showInactiveRows}
+            onChange={(e) => setShowInactiveRows(e.target.checked)}
+          />
+          Show faded rows (inactive-course students)
+        </label>
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
@@ -637,7 +745,7 @@ export default function ManageStudents() {
                 <td>{s.email}</td>
                 <td>{s.mobile_no || 'N/A'}</td>
                 <td>{s.current_semester ? `Semester ${s.current_semester}` : 'N/A'}</td>
-                <td>{s.course_name ? `${s.course_name} · ${s.academic_session || 'N/A'}` : 'N/A'}</td>
+                <td>{s.course_name ? `${formatCourseName(s.course_name, { isInactive: s.is_course_inactive })} · ${s.academic_session || 'N/A'}` : 'N/A'}</td>
                 <td>{(s.enrolled_papers || []).length}</td>
                 <td>
                   <span className={`badge ${s.has_face ? 'badge-success' : 'badge-warning'}`}>
@@ -736,7 +844,7 @@ export default function ManageStudents() {
             onChange={(e) => setBulkForm({ course_id: e.target.value, semester: '', paper_id: '', student_ids: [] })}
           >
             <option value="">Select course</option>
-            {courses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
           </select>
         </div>
 

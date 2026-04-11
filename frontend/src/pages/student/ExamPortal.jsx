@@ -63,6 +63,9 @@ export default function ExamPortal() {
                 {e.status}
               </span>
             </div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 8 }}>
+              {e.approval_source || 'Auto approved'}
+            </p>
             {!isEligible && !isNoLecturesYet && (
               <p style={{ fontSize: '0.72rem', color: 'var(--accent-rose)', marginTop: 10, padding: '6px 10px', background: 'rgba(244,63,94,0.06)', borderRadius: 6 }}>
                 ⚠ You need at least 75% attendance for exam eligibility.

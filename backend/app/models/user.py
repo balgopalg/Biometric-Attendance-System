@@ -7,6 +7,7 @@ import bcrypt
 from bson import ObjectId
 
 from app.extensions import get_collection
+from app.repositories import find_many_by_ids
 from app.utils.helpers import sanitise_mongo_doc
 
 
@@ -47,6 +48,11 @@ def find_user_by_id(user_id):
 def get_users_by_role(role):
     users = get_collection("auth", "users")
     return list(users.find({"role": role}))
+
+
+def get_users_by_ids(user_ids):
+    """Return users keyed by stringified _id for a list of ids."""
+    return find_many_by_ids("auth", "users", user_ids)
 
 
 def update_user(user_id, update_fields):

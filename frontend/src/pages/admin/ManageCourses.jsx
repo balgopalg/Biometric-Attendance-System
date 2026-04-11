@@ -1,14 +1,20 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
+import Pagination from '../../components/ui/Pagination';
+import { formatCourseName } from '../../utils/courseDisplay';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlinePencil, HiOutlineTrash } from 'react-icons/hi';
 
 const EMPTY_FORM = { name: '', code: '', department: '', course_duration: '' };
+const PAGE_SIZE = 10;
 
 export default function ManageCourses() {
   const [courses, setCourses] = useState([]);
+  const [allCourses, setAllCourses] = useState([]);
+  const [totalCourses, setTotalCourses] = useState(0);
+  const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
@@ -24,32 +30,49 @@ export default function ManageCourses() {
     move_papers: true,
   });
 
-  const fetchCourses = () => {
-    const params = {};
-    if (durationFilter) params.course_duration = durationFilter;
-    if (statusFilter) params.status = statusFilter;
-    api.get('/admin/courses', { params }).then((r) => setCourses(r.data)).catch(() => {});
+  const fetchMetadata = () => {
+    api.get('/admin/courses').then((r) => setAllCourses(r.data)).catch(() => {});
   };
 
-  useEffect(fetchCourses, [durationFilter, statusFilter]);
+  const fetchCourses = (nextPage = 1) => {
+    const params = {};
+    params.page = nextPage;
+    params.per_page = PAGE_SIZE;
+    if (search) params.q = search;
+    if (durationFilter) params.course_duration = durationFilter;
+    if (statusFilter) params.status = statusFilter;
+    api.get('/admin/courses', { params }).then((r) => {
+      const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+      const resolvedTotal = Number(r.data?.total || items.length || 0);
+      const maxPage = Math.max(1, Math.ceil(resolvedTotal / PAGE_SIZE));
+      if (resolvedTotal > 0 && nextPage > maxPage) {
+        fetchCourses(maxPage);
+        return;
+      }
+      setCourses(items);
+      setTotalCourses(resolvedTotal);
+      setPage(Number(r.data?.page || nextPage));
+    }).catch(() => {});
+  };
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return courses.filter((c) =>
-      c.name?.toLowerCase().includes(q)
-      || c.code?.toLowerCase().includes(q)
-      || c.department?.toLowerCase().includes(q)
-    );
-  }, [courses, search]);
+  useEffect(() => {
+    fetchMetadata();
+  }, []);
+
+  useEffect(() => {
+    fetchCourses(1);
+  }, [durationFilter, statusFilter, search]);
+
+  const filtered = courses;
 
   const activeCourses = useMemo(
-    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
-    [courses]
+    () => allCourses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [allCourses]
   );
 
   const inactiveCourses = useMemo(
-    () => courses.filter((c) => String(c.status || 'active').toLowerCase() !== 'active'),
-    [courses]
+    () => allCourses.filter((c) => String(c.status || 'active').toLowerCase() !== 'active'),
+    [allCourses]
   );
 
   const reassignTargetCourses = useMemo(
@@ -63,7 +86,8 @@ export default function ManageCourses() {
       toast.success('Course created');
       setShowAdd(false);
       setForm(EMPTY_FORM);
-      fetchCourses();
+      fetchMetadata();
+      fetchCourses(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed');
     }
@@ -88,7 +112,8 @@ export default function ManageCourses() {
       setShowEdit(false);
       setEditingCourse(null);
       setForm(EMPTY_FORM);
-      fetchCourses();
+      fetchMetadata();
+      fetchCourses(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update course');
     }
@@ -97,9 +122,11 @@ export default function ManageCourses() {
   const handleDelete = async (id) => {
     if (!window.confirm('Mark this course inactive? Linked students/subjects will become read-only.')) return;
     try {
-      await api.delete(`/admin/courses/${id}`);
-      toast.success('Course marked inactive');
-      fetchCourses();
+      const res = await api.delete(`/admin/courses/${id}`);
+      const detachedCount = Number(res.data?.detached_lecturer_assignments || 0);
+      toast.success(`Course marked inactive. Removed ${detachedCount} lecturer subject assignment(s).`);
+      fetchMetadata();
+      fetchCourses(1);
     } catch (err) {
       toast.error('Failed to delete');
     }
@@ -109,7 +136,8 @@ export default function ManageCourses() {
     try {
       await api.put(`/admin/courses/${id}`, { status: 'active' });
       toast.success('Course reactivated');
-      fetchCourses();
+      fetchMetadata();
+      fetchCourses(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to reactivate');
     }
@@ -141,7 +169,8 @@ export default function ManageCourses() {
       const movedPapers = Number(res.data?.moved_papers || 0);
       toast.success(`Reassigned successfully (students: ${movedStudents}, subjects: ${movedPapers})`);
       setShowReassign(false);
-      fetchCourses();
+      fetchMetadata();
+      fetchCourses(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to reassign');
     }
@@ -180,13 +209,13 @@ export default function ManageCourses() {
   );
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Courses</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{courses.length} courses in current filter</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalCourses} courses in current filter</p>
         </div>
         <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
           <HiOutlinePlus size={16} /> Add Course
@@ -238,7 +267,7 @@ export default function ManageCourses() {
             {filtered.map((c) => (
               <tr key={c._id}>
                 <td><span className="badge badge-info">{c.code}</span></td>
-                <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{c.name}</td>
+                <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{formatCourseName(c.name, { status: c.status })}</td>
                 <td>{c.department || 'N/A'}</td>
                 <td>{c.course_duration ? `${c.course_duration} year${c.course_duration > 1 ? 's' : ''}` : 'N/A'}</td>
                 <td>
@@ -268,6 +297,8 @@ export default function ManageCourses() {
         </table>
       </div>
 
+      <Pagination page={page} total={totalCourses} perPage={PAGE_SIZE} onPageChange={fetchCourses} />
+
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Course" width={500}>
         {CourseForm({ onSubmit: handleAdd, submitLabel: 'Create Course' })}
       </Modal>
@@ -290,7 +321,7 @@ export default function ManageCourses() {
               onChange={(e) => setReassignForm({ ...reassignForm, from_course_id: e.target.value, to_course_id: '' })}
             >
               <option value="">Select source course</option>
-              {inactiveCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+              {inactiveCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
             </select>
           </div>
 
@@ -303,7 +334,7 @@ export default function ManageCourses() {
               disabled={!reassignForm.from_course_id}
             >
               <option value="">Select target course</option>
-              {reassignTargetCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+              {reassignTargetCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
             </select>
           </div>
 

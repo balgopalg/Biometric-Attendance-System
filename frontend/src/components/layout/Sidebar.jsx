@@ -3,19 +3,20 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlineAcademicCap, HiOutlineUsers, HiOutlineBookOpen,
   HiOutlineClipboardList, HiOutlineShieldCheck, HiOutlineLogout,
-  HiOutlineHome, HiOutlineCamera, HiOutlineChartBar, HiOutlineDocumentText, HiOutlineCheckCircle,
+  HiOutlineHome, HiOutlineCamera, HiOutlineChartBar, HiOutlineDocumentText, HiOutlineCheckCircle, HiOutlineExclamationCircle,
 } from 'react-icons/hi';
 
 const navMap = {
   admin: [
     { to: '/admin', icon: HiOutlineHome, label: 'Dashboard' },
-    { to: '/admin/students', icon: HiOutlineClipboardList, label: 'Students' },
-    { to: '/admin/lecturers', icon: HiOutlineUsers, label: 'Lecturers' },
-    { to: '/admin/courses', icon: HiOutlineAcademicCap, label: 'Courses' },
-    { to: '/admin/papers', icon: HiOutlineBookOpen, label: 'Papers' },
+    { to: '/admin/students', icon: HiOutlineUsers, label: 'Students' },
+    { to: '/admin/lecturers', icon: HiOutlineAcademicCap, label: 'Lecturers' },
+    { to: '/admin/courses', icon: HiOutlineBookOpen, label: 'Courses' },
+    { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
     { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
     { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
-    { to: '/admin/audit', icon: HiOutlineShieldCheck, label: 'Audit Log' },
+    { to: '/admin/audit', icon: HiOutlineClipboardList, label: 'Audit Log' },
+    { to: '/admin/dead-letter', icon: HiOutlineExclamationCircle, label: 'Dead-Letter Jobs' },
   ],
   lecturer: [
     { to: '/lecturer', icon: HiOutlineHome, label: 'Dashboard' },
@@ -43,6 +44,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
   const initials = user?.name
     ? user.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
+  const textVisible = !isCollapsed;
 
   return (
     <aside
@@ -58,7 +60,8 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
         zIndex: 50,
         overflow: 'hidden',
         transform: isMobile ? (isOpen ? 'translateX(0)' : 'translateX(-100%)') : 'translateX(0)',
-        transition: 'width 0.2s ease, transform 0.2s ease',
+        transition: 'width 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 300ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 240ms ease',
+        boxShadow: isMobile && isOpen ? '0 16px 40px rgba(0,0,0,0.35)' : 'none',
       }}
     >
       {/* Logo */}
@@ -76,7 +79,22 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
             <path d="M7.5 17c1.2-2 2.8-3 4.5-3s3.3 1 4.5 3" strokeLinecap="round" />
           </svg>
         </div>
-        {!isCollapsed && <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#fff', letterSpacing: '-0.01em' }}>FaceAttend</span>}
+        <span
+          style={{
+            fontWeight: 800,
+            fontSize: '1.05rem',
+            color: '#fff',
+            letterSpacing: '-0.01em',
+            opacity: textVisible ? 1 : 0,
+            transform: textVisible ? 'translateX(0)' : 'translateX(-6px)',
+            maxWidth: textVisible ? 120 : 0,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            transition: 'opacity 180ms ease, transform 220ms ease, max-width 220ms ease',
+          }}
+        >
+          FaceAttend
+        </span>
       </div>
 
       {/* User Profile */}
@@ -93,8 +111,15 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
         }}>
           {initials}
         </div>
-        {!isCollapsed && (
-          <>
+        <div
+          style={{
+            opacity: textVisible ? 1 : 0,
+            transform: textVisible ? 'translateY(0)' : 'translateY(-4px)',
+            maxHeight: textVisible ? 120 : 0,
+            overflow: 'hidden',
+            transition: 'opacity 180ms ease, transform 220ms ease, max-height 240ms ease',
+          }}
+        >
             <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff', lineHeight: 1.3 }}>{user?.name || 'User'}</p>
             <p style={{ fontSize: '0.7rem', color: 'var(--sidebar-text-muted)', marginTop: 2 }}>
               {user?.email || ''}
@@ -109,13 +134,12 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
             }}>
               {role}
             </span>
-          </>
-        )}
+        </div>
       </div>
 
       {/* Navigation */}
       <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, padding: '12px 10px', overflowY: 'auto' }}>
-        {links.map((link) => (
+        {links.map((link, index) => (
           <NavLink
             key={link.to}
             to={link.to}
@@ -134,11 +158,23 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
               color: isActive ? '#fff' : 'var(--sidebar-text)',
               background: isActive ? 'var(--sidebar-active-bg)' : 'transparent',
               textDecoration: 'none',
-              transition: 'all 0.2s',
+              transition: 'all 220ms ease',
             })}
           >
             <link.icon size={18} style={{ opacity: 0.9, flexShrink: 0 }} />
-            {!isCollapsed && link.label}
+            <span
+              style={{
+                opacity: textVisible ? 1 : 0,
+                transform: textVisible ? 'translateX(0)' : 'translateX(-6px)',
+                maxWidth: textVisible ? 140 : 0,
+                overflow: 'hidden',
+                whiteSpace: 'nowrap',
+                transition: 'opacity 180ms ease, transform 220ms ease, max-width 220ms ease',
+                transitionDelay: textVisible ? `${Math.min(index * 16, 96)}ms` : '0ms',
+              }}
+            >
+              {link.label}
+            </span>
           </NavLink>
         ))}
       </nav>
@@ -160,7 +196,18 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
           }}
         >
           <HiOutlineLogout size={18} style={{ opacity: 0.9 }} />
-          {!isCollapsed && 'Log out'}
+          <span
+            style={{
+              opacity: textVisible ? 1 : 0,
+              transform: textVisible ? 'translateX(0)' : 'translateX(-6px)',
+              maxWidth: textVisible ? 80 : 0,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              transition: 'opacity 180ms ease, transform 220ms ease, max-width 220ms ease',
+            }}
+          >
+            Log out
+          </span>
         </button>
       </div>
     </aside>

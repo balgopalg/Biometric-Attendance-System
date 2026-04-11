@@ -3,6 +3,8 @@ import api from '../../api/axios';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
+import { formatCourseName } from '../../utils/courseDisplay';
 
 export default function ExamEligibility() {
   const [courses, setCourses] = useState([]);
@@ -17,27 +19,35 @@ export default function ExamEligibility() {
     semester: '',
     final_eligible: '',
   });
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const debouncedFilters = useDebouncedValue(filters, 250);
+
+  const activeCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [courses]
+  );
 
   const fetchMeta = () => {
     api.get('/admin/courses').then((r) => setCourses(r.data || [])).catch(() => setCourses([]));
   };
 
-  const fetchEligibility = () => {
+  const fetchEligibility = (signal, activeFilters = filters, activeSearch = search) => {
     setLoading(true);
-    const params = { ...filters };
-    if (search) params.q = search;
+    const params = { ...activeFilters };
+    if (activeSearch) params.q = activeSearch;
     delete params.final_eligible;
 
     Object.keys(params).forEach((k) => {
       if (params[k] === '') delete params[k];
     });
 
-    api.get('/admin/exam-eligibility-summary', { params })
+    api.get('/admin/exam-eligibility-summary', { params, signal })
       .then((r) => {
         const payload = r.data || {};
         setRows(payload.items || []);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err?.code === 'ERR_CANCELED') return;
         setRows([]);
       })
       .finally(() => setLoading(false));
@@ -48,8 +58,10 @@ export default function ExamEligibility() {
   }, []);
 
   useEffect(() => {
-    fetchEligibility();
-  }, [filters.course_id, filters.academic_session, filters.semester, search]);
+    const controller = new AbortController();
+    fetchEligibility(controller.signal, debouncedFilters, debouncedSearch);
+    return () => controller.abort();
+  }, [debouncedFilters, debouncedSearch]);
 
   const uniqueRows = useMemo(() => {
     const byStudent = new Map();
@@ -155,6 +167,14 @@ export default function ExamEligibility() {
     }
   }, [semesterOptions, filters.semester]);
 
+  useEffect(() => {
+    if (!filters.course_id) return;
+    const stillActive = activeCourses.some((course) => course._id === filters.course_id);
+    if (!stillActive) {
+      setFilters((prev) => ({ ...prev, course_id: '', academic_session: '', semester: '' }));
+    }
+  }, [activeCourses, filters.course_id]);
+
   const handleOverride = async (row, overrideStatus) => {
     const targetPaperIds = Array.from(new Set((row.paper_ids || []).filter(Boolean)));
     if (targetPaperIds.length === 0) {
@@ -216,9 +236,11 @@ export default function ExamEligibility() {
       const studentId = String(row.student_id || '').trim();
       const paperIds = Array.from(new Set((row.paper_ids || []).filter(Boolean)));
       paperIds.forEach((paperId) => {
+        const normalizedPaperId = String(paperId || '').trim();
+        if (!studentId || !normalizedPaperId) return;
         requests.push({
           student_id: studentId,
-          paper_id: paperId,
+          paper_id: normalizedPaperId,
           override_status: overrideStatus,
           reason,
         });
@@ -237,8 +259,30 @@ export default function ExamEligibility() {
 
     setBulkUpdating(true);
     try {
-      await Promise.all(requests.map((payload) => api.put('/admin/exam-eligibility-override', payload)));
+      let updatedCount = requests.length;
+      try {
+        const response = await api.put('/admin/exam-eligibility-override/bulk', {
+          overrides: requests,
+        });
+        updatedCount = Number(response?.data?.updated || requests.length);
+      } catch (err) {
+        // Backward-compatible fallback for servers that do not yet expose the bulk endpoint.
+        if (err?.response?.status !== 404) {
+          throw err;
+        }
+        const fallbackResults = await Promise.allSettled(
+          requests.map((payload) => api.put('/admin/exam-eligibility-override', payload))
+        );
+        updatedCount = fallbackResults.filter((r) => r.status === 'fulfilled').length;
+        if (updatedCount === 0) {
+          const firstRejected = fallbackResults.find((r) => r.status === 'rejected');
+          throw firstRejected?.reason || err;
+        }
+      }
       toast.success(`Bulk ${overrideStatus ? 'allow' : 'block'} applied (${targetRows.length} students, ${requests.length} overrides)`);
+      if (updatedCount < requests.length) {
+        toast(`Applied ${updatedCount}/${requests.length} override mappings.`);
+      }
       setSelectedStudentIds([]);
       fetchEligibility();
     } catch (err) {
@@ -252,7 +296,7 @@ export default function ExamEligibility() {
   const handleBulkBlock = () => handleBulkOverride(false);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -298,7 +342,7 @@ export default function ExamEligibility() {
             })}
           >
             <option value="">All Courses</option>
-            {courses.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+            {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
           </select>
 
           <select className="input-field" value={filters.academic_session} onChange={(e) => setFilters({ ...filters, academic_session: e.target.value })}>
@@ -388,7 +432,7 @@ export default function ExamEligibility() {
                 </td>
                 <td>{row.reg_number || 'N/A'}</td>
                 <td>
-                  {(row.course_name || 'N/A')} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
+                  {formatCourseName(row.course_name || 'N/A', { isInactive: row.is_course_inactive, status: row.course_status })} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
                 </td>
                 <td>
                   {(row.overall_attendance_percentage ?? row.attendance_percentage ?? 0)}% ({row.overall_attended_classes ?? row.attended_classes ?? 0}/{row.overall_total_classes ?? row.classes_happened ?? 0})
@@ -458,7 +502,7 @@ export default function ExamEligibility() {
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Course/Session/Sem</span>
                 <span style={{ fontSize: '0.8rem', textAlign: 'right' }}>
-                  {(row.course_name || 'N/A')} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
+                  {formatCourseName(row.course_name || 'N/A', { isInactive: row.is_course_inactive, status: row.course_status })} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
                 </span>
               </div>
               <div className="mobile-card-row">

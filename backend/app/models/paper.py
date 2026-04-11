@@ -21,9 +21,14 @@ def create_paper(name, code, course_id, lecturer_id=None, semester=None, total_c
     return doc
 
 
-def get_all_papers():
+def get_all_papers(fields=None):
     papers = get_collection("academic", "papers")
-    return list(papers.find())
+    projection = None
+    if fields:
+        projection = {field: 1 for field in fields}
+        projection["_id"] = 1
+    cursor = papers.find({}, projection) if projection else papers.find()
+    return list(cursor)
 
 
 def get_paper_by_id(paper_id):
