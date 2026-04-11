@@ -2089,6 +2089,53 @@ def set_exam_eligibility_override(user):
 @admin_bp.route("/stats", methods=["GET"])
 @role_required("admin")
 def dashboard_stats(user):
+    def _month_start(dt):
+        return datetime(dt.year, dt.month, 1)
+
+    def _shift_month(dt, delta):
+        year = dt.year + ((dt.month - 1 + delta) // 12)
+        month = ((dt.month - 1 + delta) % 12) + 1
+        return datetime(year, month, 1)
+
+    def _monthly_attendance(attendance_col, months=6):
+        now = datetime.utcnow()
+        current_month = _month_start(now)
+        start_month = _shift_month(current_month, -(months - 1))
+
+        # Use Python-side aggregation for resilience against legacy/mixed timestamp types.
+        # Some old records may contain string timestamps, which can break Mongo $year/$month.
+        docs = attendance_col.find({}, {"timestamp": 1})
+        count_map = {}
+        for doc in docs:
+            ts = doc.get("timestamp")
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).replace(tzinfo=None)
+                except Exception:
+                    continue
+
+            if not isinstance(ts, datetime):
+                continue
+            if ts < start_month:
+                continue
+
+            key = f"{ts.year}-{ts.month:02d}"
+            count_map[key] = count_map.get(key, 0) + 1
+
+        points = []
+        for i in range(months):
+            month_dt = _shift_month(start_month, i)
+            key = f"{month_dt.year}-{month_dt.month:02d}"
+            points.append(
+                {
+                    "key": key,
+                    "label": month_dt.strftime("%b"),
+                    "total": count_map.get(key, 0),
+                }
+            )
+
+        return points
+
     profiles = get_all_profiles()
     by_course = {}
     by_year = {}
@@ -2119,4 +2166,5 @@ def dashboard_stats(user):
         "total_audit_logs": audit_col.count_documents({}),
         "students_by_course": by_course,
         "students_by_year": by_year,
+        "monthly_attendance": _monthly_attendance(attendance_col, months=6),
     })
