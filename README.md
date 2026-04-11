@@ -57,7 +57,11 @@ This system provides:
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── quality.yml   # CI checks (frontend lint/build + backend compile)
 ├── backend/
+│   ├── .env.example      # Environment template
 │   ├── app/
 │   │   ├── models/        # Data access helpers
 │   │   ├── routes/        # Auth/Admin/Lecturer/Student APIs
@@ -66,6 +70,7 @@ This system provides:
 │   │   ├── config.py
 │   │   ├── extensions.py
 │   │   └── __init__.py
+│   ├── delete.py          # Full reset utility (DB + runtime folders)
 │   ├── requirements.txt
 │   ├── seedAdmin.py
 │   └── run.py
@@ -102,7 +107,14 @@ python seedAdmin.py
 python run.py
 ```
 
-Create a `backend/.env` file (or copy from `backend/.env.example`) with:
+Create `backend/.env` from `backend/.env.example`:
+
+```bash
+cd backend
+copy .env.example .env
+```
+
+Then set values in `backend/.env`:
 
 ```dotenv
 MONGO_URI=mongodb://localhost:27017/biometric_attendance
@@ -158,6 +170,39 @@ Notes:
 - It only creates an admin if no admin exists.
 - It stops if the email is already used.
 - If you skip this step, backend startup can still auto-seed a default admin (`admin@system.com` / `admin123`) when no admin exists.
+
+## Maintenance Utilities
+
+### Full Reset Utility (`delete.py`)
+
+Use this script when you want a clean project state for fresh testing.
+
+From `backend/`:
+
+```bash
+python delete.py --yes
+```
+
+What it does:
+
+- Drops all project MongoDB databases configured via app config.
+- Clears generated runtime folders:
+	- `uploads/` and `dataset/` at project root (if present)
+	- `backend/uploads/`, `backend/dataset/`, `backend/instance/`
+- Recreates the cleared directories so the app can start cleanly.
+
+Safer mode (database only, keep files):
+
+```bash
+python delete.py --yes --mongo-only
+```
+
+After reset:
+
+```bash
+python seedAdmin.py
+python run.py
+```
 
 ## Authentication Transport
 
