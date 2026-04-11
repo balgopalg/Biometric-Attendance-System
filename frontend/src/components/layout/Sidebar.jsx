@@ -15,6 +15,7 @@ const navMap = {
     { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
     { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
     { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
+    { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
     { to: '/admin/audit', icon: HiOutlineClipboardList, label: 'Audit Log' },
     { to: '/admin/dead-letter', icon: HiOutlineExclamationCircle, label: 'Dead-Letter Jobs' },
   ],

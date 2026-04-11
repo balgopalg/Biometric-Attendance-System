@@ -33,6 +33,12 @@ This system provides:
 - Student paper bulk assignment
 - Lecturer-paper assignment management
 - Face enrollment (upload photo -> detect face -> store embedding)
+- Attendance Matrix module:
+	- Filtered by Course + Academic Session + Semester
+	- Date-grouped attendance table with per-day subject sub-columns
+	- Student-wise sequential attendance numbering (absent = `X`)
+	- Sticky left identity columns and right summary columns (`TCA`, `TCH`, `%`)
+	- CSV/Excel export with date-wise grouped headers and totals
 - Audit Trail with 1-day rollback for eligible create/update/delete operations
 
 ### Lecturer
@@ -174,6 +180,11 @@ Queue behavior in this mode:
 - Replay dead-letter jobs: `POST /api/admin/jobs/<job_id>/replay`
 - Bulk replay dead-letter jobs: `POST /api/admin/jobs/dead-letter/replay-bulk`
 - Replay all currently filtered dead-letter jobs: `POST /api/admin/jobs/dead-letter/replay-filtered`
+
+When Redis is unavailable or disabled:
+
+- App falls back to local in-process background execution mode.
+- Set `TASK_QUEUE_ENABLED=0` to disable Redis queue mode explicitly in local/dev.
 
 Vite proxy forwards `/api/*` to backend port `5000`.
 Optional override:
