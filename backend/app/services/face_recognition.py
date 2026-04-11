@@ -1,7 +1,6 @@
 """Face recognition service using FaceNet embeddings + cosine similarity."""
 
 import numpy as np
-from scipy.spatial.distance import cosine
 
 # We use keras-facenet which provides a ready-to-use InceptionResNetV1 model.
 # It will be lazily loaded on first call to avoid slow startup.
@@ -69,7 +68,57 @@ def compare_embeddings(embedding_a: list, embedding_b: list) -> float:
     """Return cosine similarity (1 = identical, 0 = orthogonal)."""
     a = np.asarray(normalize_embedding(embedding_a), dtype=np.float32)
     b = np.asarray(normalize_embedding(embedding_b), dtype=np.float32)
-    return float(np.clip(1.0 - cosine(a, b), -1.0, 1.0))
+    return float(np.clip(np.dot(a, b), -1.0, 1.0))
+
+
+def prepare_profile_candidates(stored_profiles: list) -> list:
+    """Pre-normalize embeddings once for repeated matching in a session."""
+    prepared = []
+    for profile in stored_profiles:
+        vectors = []
+        for emb in profile.get("face_embeddings", []):
+            vectors.append(np.asarray(normalize_embedding(emb), dtype=np.float32))
+
+        if not vectors:
+            continue
+
+        prepared.append(
+            {
+                "user_id": str(profile.get("user_id", profile.get("_id"))),
+                "roll_number": profile.get("roll_number", ""),
+                "vectors": vectors,
+            }
+        )
+    return prepared
+
+
+def find_best_match_cached(query_embedding: list, prepared_candidates: list, threshold=0.6):
+    """Match against pre-normalized candidates. Returns (match_dict_or_none, best_score)."""
+    if not prepared_candidates:
+        return None, -1.0
+
+    query = np.asarray(normalize_embedding(query_embedding), dtype=np.float32)
+    best_candidate = None
+    best_score = -1.0
+
+    for candidate in prepared_candidates:
+        for vec in candidate["vectors"]:
+            sim = float(np.dot(query, vec))
+            if sim > best_score:
+                best_score = sim
+                best_candidate = candidate
+
+    if best_candidate and best_score >= threshold:
+        return (
+            {
+                "user_id": best_candidate["user_id"],
+                "similarity": round(best_score, 4),
+                "roll_number": best_candidate.get("roll_number", ""),
+            },
+            best_score,
+        )
+
+    return None, best_score
 
 
 def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6):
