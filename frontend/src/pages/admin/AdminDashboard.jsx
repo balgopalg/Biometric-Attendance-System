@@ -30,7 +30,7 @@ function formatUptime(totalSeconds) {
 
 function parseUtcTimestamp(value) {
   if (!value || typeof value !== 'string') return null;
-  const hasTimezone = /([zZ]|[+\-]\d{2}:?\d{2})$/.test(value);
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(value);
   const normalized = hasTimezone ? value : `${value}Z`;
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;

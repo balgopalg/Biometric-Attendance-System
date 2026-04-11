@@ -86,11 +86,6 @@ export default function ManagePapers() {
     [papers, effectiveShowInactiveRows]
   );
 
-  const hiddenInactiveCount = useMemo(
-    () => papers.filter((p) => p.is_course_inactive).length,
-    [papers]
-  );
-
   const filteredLecturers = useMemo(() => {
     if (!filters.course_id) return lecturers;
     return lecturers.filter((l) => (l.assigned_course_ids || []).includes(filters.course_id));
