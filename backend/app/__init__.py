@@ -70,7 +70,14 @@ def _validate_security_config(app):
     if not strict_always and env in local_envs:
         return
 
-    insecure_secrets = {"change-me", "admin123", "", None}
+    insecure_secrets = {
+        "change-me",
+        "dev-only-change-this-secret",
+        "replace-with-a-strong-random-secret",
+        "admin123",
+        "",
+        None,
+    }
     if app.config.get("JWT_SECRET_KEY") in insecure_secrets:
         raise RuntimeError(
             "JWT_SECRET_KEY is weak. Set a strong value for non-local environments "

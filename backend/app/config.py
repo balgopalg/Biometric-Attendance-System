@@ -22,7 +22,8 @@ class Config:
     MONGO_DB_ACADEMIC = os.getenv("MONGO_DB_ACADEMIC", "biometric_academic")
     MONGO_DB_ATTENDANCE = os.getenv("MONGO_DB_ATTENDANCE", "biometric_attendance_ops")
     MONGO_DB_AUDIT = os.getenv("MONGO_DB_AUDIT", "biometric_audit")
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
+    # Keep an explicit dev fallback while requiring strong secrets outside local envs.
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-only-change-this-secret")
     STRICT_JWT_SECRET = _env_bool("STRICT_JWT_SECRET", False)
     CORS_ORIGINS = [
         origin.strip()
