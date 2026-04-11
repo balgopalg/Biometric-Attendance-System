@@ -94,6 +94,7 @@ This system provides:
 
 ```bash
 cd backend
+# You can use either backend/.venv or the workspace-level .venv
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
@@ -101,7 +102,7 @@ python seedAdmin.py
 python run.py
 ```
 
-Create a `backend/.env` file with:
+Create a `backend/.env` file (or copy from `backend/.env.example`) with:
 
 ```dotenv
 MONGO_URI=mongodb://localhost:27017/biometric_attendance
@@ -109,12 +110,14 @@ MONGO_DB_AUTH=biometric_auth
 MONGO_DB_ACADEMIC=biometric_academic
 MONGO_DB_ATTENDANCE=biometric_attendance_ops
 MONGO_DB_AUDIT=biometric_audit
-JWT_SECRET_KEY=dd29382bc1f40da4ee3817eeedaef0e5123bdc9fdcd63a5d4caf5770d5f1fa2a
+JWT_SECRET_KEY=replace-with-a-strong-random-secret
 STRICT_JWT_SECRET=0
 FACENET_THRESHOLD=0.60
 CORS_ORIGINS=http://localhost:5173
 UPLOAD_FOLDER=uploads
 ```
+
+Use your own strong JWT secret. Do not reuse sample values in production.
 
 Backend runs on `http://localhost:5000`.
 
@@ -129,6 +132,11 @@ npm run dev
 Frontend runs on `http://localhost:5173`.
 
 Vite proxy forwards `/api/*` to backend port `5000`.
+Optional override:
+
+```dotenv
+VITE_API_PROXY_URL=http://localhost:5000
+```
 
 ## Admin Seeding
 

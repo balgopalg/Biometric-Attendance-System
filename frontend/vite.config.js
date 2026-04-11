@@ -1,8 +1,12 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', '')
+  const apiProxyTarget = env.VITE_API_PROXY_URL || 'http://localhost:5000'
+
+  return {
   plugins: [react(), tailwindcss()],
   build: {
     rollupOptions: {
@@ -24,7 +28,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:5000',
+      '/api': apiProxyTarget,
     },
   },
+  }
 })
