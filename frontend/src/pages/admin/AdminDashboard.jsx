@@ -1,277 +1,122 @@
-import { useState, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import StatsCard from '../../components/ui/StatsCard';
 import { motion } from 'framer-motion';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
+import { formatCourseName } from '../../utils/courseDisplay';
 import {
   HiOutlineUsers,
   HiOutlineAcademicCap,
   HiOutlineBookOpen,
   HiOutlineClipboardList,
-  HiOutlineClock,
   HiOutlineShieldCheck,
+  HiOutlineClock,
 } from 'react-icons/hi';
+const MonthlyAttendanceTrend = lazy(() => import('../../components/admin/dashboard/MonthlyAttendanceTrend'));
+const DashboardInsightsPanel = lazy(() => import('../../components/admin/dashboard/DashboardInsightsPanel'));
 
-function EligibilityDonutChart({ eligible, ineligible }) {
-  const total = eligible + ineligible;
-  const safeTotal = total || 1;
-  const eligibleRatio = eligible / safeTotal;
-  const ineligibleRatio = ineligible / safeTotal;
-  const radius = 50;
-  const circumference = 2 * Math.PI * radius;
-  const eligibleStroke = circumference * eligibleRatio;
-  const ineligibleStroke = circumference * ineligibleRatio;
+function formatUptime(totalSeconds) {
+  const safe = Math.max(0, Number(totalSeconds) || 0);
+  const days = Math.floor(safe / 86400);
+  const hours = Math.floor((safe % 86400) / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
 
-  return (
-    <div className="glass-card" style={{ padding: 14 }}>
-      <p style={{ fontSize: '0.84rem', fontWeight: 700, marginBottom: 10 }}>Eligibility Ratio</p>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-        <div style={{ width: 130, height: 130, position: 'relative', flexShrink: 0 }}>
-          <svg width="130" height="130" viewBox="0 0 130 130" role="img" aria-label="Eligibility ratio donut chart">
-            <circle cx="65" cy="65" r={radius} fill="none" stroke="var(--border-glass)" strokeWidth="14" />
-            <circle
-              cx="65"
-              cy="65"
-              r={radius}
-              fill="none"
-              stroke="var(--accent-emerald)"
-              strokeWidth="14"
-              strokeLinecap="round"
-              strokeDasharray={`${eligibleStroke} ${circumference - eligibleStroke}`}
-              transform="rotate(-90 65 65)"
-            />
-            <circle
-              cx="65"
-              cy="65"
-              r={radius}
-              fill="none"
-              stroke="var(--accent-rose)"
-              strokeWidth="14"
-              strokeLinecap="round"
-              strokeDasharray={`${ineligibleStroke} ${circumference - ineligibleStroke}`}
-              strokeDashoffset={-eligibleStroke}
-              transform="rotate(-90 65 65)"
-            />
-          </svg>
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'grid',
-              placeItems: 'center',
-              textAlign: 'center',
-              pointerEvents: 'none',
-            }}
-          >
-            <div>
-              <p style={{ fontSize: '1rem', fontWeight: 800, lineHeight: 1 }}>{total}</p>
-              <p style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>Students</p>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
-            <span style={{ color: 'var(--accent-emerald)' }}>Eligible</span>
-            <b>{eligible}</b>
-          </div>
-          <div style={{ height: 8, borderRadius: 999, background: 'var(--bg-glass)', overflow: 'hidden' }}>
-            <div style={{ width: `${Math.round(eligibleRatio * 100)}%`, height: '100%', background: 'var(--accent-emerald)' }} />
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem' }}>
-            <span style={{ color: 'var(--accent-rose)' }}>Ineligible</span>
-            <b>{ineligible}</b>
-          </div>
-          <div style={{ height: 8, borderRadius: 999, background: 'var(--bg-glass)', overflow: 'hidden' }}>
-            <div style={{ width: `${Math.round(ineligibleRatio * 100)}%`, height: '100%', background: 'var(--accent-rose)' }} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0 || days > 0) parts.push(`${hours}h`);
+  parts.push(`${minutes}m`);
+  return parts.join(' ');
 }
 
-function DistributionBars({ title, rows, labelKey, valueKey }) {
-  const maxValue = rows.reduce((max, row) => Math.max(max, Number(row[valueKey]) || 0), 0) || 1;
-
-  return (
-    <div className="glass-card" style={{ padding: 14 }}>
-      <p style={{ fontSize: '0.84rem', fontWeight: 700, marginBottom: 12 }}>{title}</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rows.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>No chart data for current filters.</p>
-        ) : rows.map((row) => {
-          const value = Number(row[valueKey]) || 0;
-          const width = value === 0 ? 0 : Math.max(8, Math.round((value / maxValue) * 100));
-          return (
-            <div key={String(row[labelKey])}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', marginBottom: 4 }}>
-                <span style={{ color: 'var(--text-muted)' }}>{row[labelKey]}</span>
-                <b>{value}</b>
-              </div>
-              <div style={{ height: 9, borderRadius: 999, background: 'var(--bg-glass)', overflow: 'hidden' }}>
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${width}%` }}
-                  transition={{ duration: 0.45 }}
-                  style={{ height: '100%', background: 'var(--gradient-primary)' }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function MonthlyAttendanceTrend({ points }) {
-  const width = 620;
-  const height = 210;
-  const padding = { top: 16, right: 16, bottom: 26, left: 16 };
-  const innerWidth = width - padding.left - padding.right;
-  const innerHeight = height - padding.top - padding.bottom;
-  const maxValue = Math.max(...points.map((p) => Number(p.total) || 0), 1);
-
-  const mapped = points.map((point, index) => {
-    const x = padding.left + (points.length > 1 ? (index / (points.length - 1)) * innerWidth : innerWidth / 2);
-    const ratio = (Number(point.total) || 0) / maxValue;
-    const y = padding.top + (innerHeight - ratio * innerHeight);
-    return { ...point, x, y, value: Number(point.total) || 0 };
-  });
-
-  const linePath = mapped
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
-    .join(' ');
-
-  const areaPath = `${linePath} L ${padding.left + innerWidth} ${padding.top + innerHeight} L ${padding.left} ${padding.top + innerHeight} Z`;
-  const totalAttendance = mapped.reduce((sum, p) => sum + p.value, 0);
-  const latest = mapped[mapped.length - 1]?.value || 0;
-  const previous = mapped[mapped.length - 2]?.value || 0;
-  const delta = latest - previous;
-  const deltaText = delta === 0 ? 'No change from last month' : `${delta > 0 ? '+' : ''}${delta} vs last month`;
-
-  return (
-    <div className="glass-card" style={{ padding: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-        <div>
-          <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>Monthly Attendance Trend</p>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: 3 }}>Last {points.length} months attendance logs</p>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <p style={{ fontSize: '1.1rem', fontWeight: 800, lineHeight: 1 }}>{totalAttendance}</p>
-          <p style={{ color: delta >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)', fontSize: '0.72rem', marginTop: 3 }}>{deltaText}</p>
-        </div>
-      </div>
-
-      {points.length === 0 ? (
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No attendance data available.</p>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', minWidth: 360, height: 220 }} role="img" aria-label="Monthly attendance trend chart">
-            <defs>
-              <linearGradient id="attendanceAreaGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(6,182,212,0.35)" />
-                <stop offset="100%" stopColor="rgba(6,182,212,0.02)" />
-              </linearGradient>
-              <linearGradient id="attendanceLineGradient" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#06b6d4" />
-                <stop offset="100%" stopColor="#8b5cf6" />
-              </linearGradient>
-            </defs>
-
-            {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
-              const y = padding.top + tick * innerHeight;
-              return (
-                <line
-                  key={String(tick)}
-                  x1={padding.left}
-                  y1={y}
-                  x2={padding.left + innerWidth}
-                  y2={y}
-                  stroke="var(--border-glass)"
-                  strokeDasharray="4 6"
-                  strokeWidth="1"
-                />
-              );
-            })}
-
-            <path d={areaPath} fill="url(#attendanceAreaGradient)" />
-            <path d={linePath} fill="none" stroke="url(#attendanceLineGradient)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-
-            {mapped.map((p) => (
-              <g key={p.key}>
-                <circle cx={p.x} cy={p.y} r="5" fill="var(--bg-card)" stroke="#06b6d4" strokeWidth="2" />
-                <text x={p.x} y={height - 8} textAnchor="middle" fontSize="11" fill="var(--text-muted)">{p.label}</text>
-                <title>{`${p.label}: ${p.value}`}</title>
-              </g>
-            ))}
-          </svg>
-        </div>
-      )}
-    </div>
-  );
+function parseUtcTimestamp(value) {
+  if (!value || typeof value !== 'string') return null;
+  const hasTimezone = /([zZ]|[+\-]\d{2}:?\d{2})$/.test(value);
+  const normalized = hasTimezone ? value : `${value}Z`;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({});
+  const [uptimeTick, setUptimeTick] = useState(0);
+  const [queueMetrics, setQueueMetrics] = useState(null);
+  const [loadingQueueMetrics, setLoadingQueueMetrics] = useState(false);
+  const [replayingJobId, setReplayingJobId] = useState('');
+  const [queueActionMessage, setQueueActionMessage] = useState('');
   const [eligibility, setEligibility] = useState({ total: 0, eligible_count: 0, ineligible_count: 0, items: [] });
   const [loadingEligibility, setLoadingEligibility] = useState(false);
-  const [courseOptions, setCourseOptions] = useState([]);
   const [filters, setFilters] = useState({ academic_session: '', course_id: '', semester: '' });
+  const debouncedFilters = useDebouncedValue(filters, 300);
 
   const fetchStats = () => {
     api.get('/admin/stats').then((r) => setStats(r.data)).catch(() => {});
   };
 
-  const fetchEligibility = () => {
-    const params = { ...filters };
+  const fetchQueueMetrics = () => {
+    setLoadingQueueMetrics(true);
+    api.get('/admin/jobs/metrics')
+      .then((r) => setQueueMetrics(r.data || null))
+      .catch(() => setQueueMetrics(null))
+      .finally(() => setLoadingQueueMetrics(false));
+  };
+
+  const fetchEligibility = (signal, activeFilters = filters) => {
+    const params = { ...activeFilters };
     Object.keys(params).forEach((k) => {
       if (params[k] === '') delete params[k];
     });
 
     setLoadingEligibility(true);
-    api.get('/admin/exam-eligibility-summary', { params })
+    api.get('/admin/exam-eligibility-summary', { params, signal })
       .then((r) => setEligibility(r.data))
-      .catch(() => setEligibility({ total: 0, eligible_count: 0, ineligible_count: 0, items: [] }))
+      .catch((err) => {
+        if (err?.code === 'ERR_CANCELED') return;
+        setEligibility({ total: 0, eligible_count: 0, ineligible_count: 0, items: [] });
+      })
       .finally(() => setLoadingEligibility(false));
   };
 
-  const fetchCourseOptions = (academicSession) => {
-    if (!academicSession) {
-      setCourseOptions([]);
-      return;
-    }
-
-    api.get('/admin/exam-eligibility-summary', { params: { academic_session: academicSession } })
-      .then((r) => {
-        const rows = r.data?.items || [];
-        const byCourse = new Map();
-        rows.forEach((row) => {
-          const cid = row.course_id || '';
-          const cname = row.course_name || 'N/A';
-          const key = cid || cname;
-          if (!byCourse.has(key)) {
-            byCourse.set(key, { course_id: cid, course_name: cname });
-          }
-        });
-        const list = Array.from(byCourse.values()).sort((a, b) => a.course_name.localeCompare(b.course_name));
-        setCourseOptions(list);
+  const replayDeadLetterJob = (jobId) => {
+    if (!jobId) return;
+    setReplayingJobId(jobId);
+    setQueueActionMessage('');
+    api.post(`/admin/jobs/${jobId}/replay`)
+      .then(() => {
+        setQueueActionMessage(`Replay queued for ${jobId}`);
+        fetchQueueMetrics();
       })
-      .catch(() => setCourseOptions([]));
+      .catch((err) => {
+        const message = err?.response?.data?.error || `Failed to replay ${jobId}`;
+        setQueueActionMessage(message);
+      })
+      .finally(() => setReplayingJobId(''));
   };
 
   useEffect(() => {
     fetchStats();
+    fetchQueueMetrics();
   }, []);
 
   useEffect(() => {
-    fetchEligibility();
-  }, [filters.academic_session, filters.course_id, filters.semester]);
+    const timer = setInterval(() => {
+      fetchQueueMetrics();
+    }, 20000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
-    fetchCourseOptions(filters.academic_session);
-  }, [filters.academic_session]);
+    setUptimeTick(Date.now());
+    const timer = setInterval(() => {
+      setUptimeTick(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchEligibility(controller.signal, debouncedFilters);
+    return () => controller.abort();
+  }, [debouncedFilters]);
 
   const eligibilityRows = useMemo(() => eligibility.items || [], [eligibility.items]);
 
@@ -289,6 +134,8 @@ export default function AdminDashboard() {
       const existing = map.get(key) || {
         course_id: row.course_id,
         course_name: row.course_name || 'N/A',
+        course_status: row.course_status,
+        is_course_inactive: row.is_course_inactive,
         students: new Map(),
       };
 
@@ -310,12 +157,24 @@ export default function AdminDashboard() {
       return {
         course_id: entry.course_id,
         course_name: entry.course_name,
+        course_status: entry.course_status,
+        is_course_inactive: entry.is_course_inactive,
         total_students: students.length,
         eligible_count: students.filter((s) => s.final_eligible).length,
         ineligible_count: students.filter((s) => !s.final_eligible).length,
       };
     }).sort((a, b) => a.course_name.localeCompare(b.course_name));
   }, [eligibilityRows]);
+
+  const courseOptions = useMemo(
+    () => courseSummary.map((course) => ({
+      course_id: course.course_id || '',
+      course_name: course.course_name,
+      course_status: course.course_status,
+      is_course_inactive: course.is_course_inactive,
+    })).sort((a, b) => a.course_name.localeCompare(b.course_name)),
+    [courseSummary]
+  );
 
   const semesterSummary = useMemo(() => {
     const map = new Map();
@@ -386,14 +245,16 @@ export default function AdminDashboard() {
     total_students: studentBuckets.eligible.length + studentBuckets.ineligible.length,
     eligible_count: studentBuckets.eligible.length,
     ineligible_count: studentBuckets.ineligible.length,
-  }), [studentBuckets]);
+    students_by_course: stats.students_by_course || {},
+    students_by_year: stats.students_by_year || {},
+  }), [studentBuckets, stats.students_by_course, stats.students_by_year]);
 
   const chartRows = useMemo(() => {
     if (!filters.academic_session) return [];
 
     if (!filters.course_id) {
       return courseSummary.map((course) => ({
-        label: course.course_name,
+        label: formatCourseName(course.course_name, { status: course.course_status, isInactive: course.is_course_inactive }),
         value: course.total_students,
       }));
     }
@@ -415,6 +276,18 @@ export default function AdminDashboard() {
     }));
   }, [stats.monthly_attendance]);
 
+  const liveSystemUptime = useMemo(() => {
+    const startedAt = parseUtcTimestamp(stats.app_started_at);
+    if (startedAt) {
+      const elapsedSeconds = Math.floor((uptimeTick - startedAt.getTime()) / 1000);
+      return formatUptime(elapsedSeconds);
+    }
+    if (stats.system_uptime_seconds !== undefined) {
+      return formatUptime(stats.system_uptime_seconds);
+    }
+    return stats.system_uptime || '0m';
+  }, [stats.app_started_at, stats.system_uptime_seconds, stats.system_uptime, uptimeTick]);
+
   const handleAcademicSessionChange = (value) => {
     setFilters({ academic_session: value, course_id: '', semester: '' });
   };
@@ -428,7 +301,7 @@ export default function AdminDashboard() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Dashboard</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>Overview of your attendance management system.</p>
@@ -437,168 +310,101 @@ export default function AdminDashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 16, marginBottom: 24 }}>
         <StatsCard icon={HiOutlineUsers} label="Total Students" value={stats.total_students || 0} color="#06b6d4" />
         <StatsCard icon={HiOutlineAcademicCap} label="Lecturers" value={stats.total_lecturers || 0} color="#f59e0b" />
-        <StatsCard icon={HiOutlineBookOpen} label="Courses" value={stats.total_courses || 0} color="#8b5cf6" />
+        <StatsCard icon={HiOutlineBookOpen} label="Total Courses" value={stats.total_courses || 0} color="#8b5cf6" />
+        <StatsCard icon={HiOutlineBookOpen} label="Active Courses" value={stats.active_courses || 0} color="#10b981" />
+        <StatsCard icon={HiOutlineBookOpen} label="Inactive Courses" value={stats.inactive_courses || 0} color="#ef4444" />
         <StatsCard icon={HiOutlineClipboardList} label="Papers" value={stats.total_papers || 0} color="#10b981" />
         <StatsCard icon={HiOutlineShieldCheck} label="Audit Logs" value={stats.total_audit_logs || 0} color="#ef4444" />
+        <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
-        <MonthlyAttendanceTrend points={monthlyAttendance} />
+        <Suspense fallback={<div className="glass-card" style={{ padding: 20, minHeight: 220 }} />}>
+          <MonthlyAttendanceTrend points={monthlyAttendance} />
+        </Suspense>
 
-        <div className="glass-card" style={{ padding: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-            <HiOutlineClock size={18} style={{ color: 'var(--accent-amber)' }} />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Eligibility Snapshot</h3>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Students</span><b>{eligibilitySnapshot.total_students}</b></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Eligible</span><b style={{ color: 'var(--accent-emerald)' }}>{eligibilitySnapshot.eligible_count}</b></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ineligible</span><b style={{ color: 'var(--accent-rose)' }}>{eligibilitySnapshot.ineligible_count}</b></div>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16, marginBottom: 16 }}>
-        <div className="glass-card" style={{ padding: 20 }}>
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Students by Course</h3>
-          {(Object.entries(stats.students_by_course || {}).length === 0) ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No data</p>
-          ) : (
-            Object.entries(stats.students_by_course || {}).map(([course, count]) => (
-              <div key={course} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-glass)' }}>
-                <span style={{ fontSize: '0.82rem' }}>{course}</span>
-                <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>{count}</span>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="glass-card" style={{ padding: 20 }}>
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Students by Academic Year</h3>
-          {(Object.entries(stats.students_by_year || {}).length === 0) ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No data</p>
-          ) : (
-            Object.entries(stats.students_by_year || {}).map(([year, count]) => (
-              <div key={year} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-glass)' }}>
-                <span style={{ fontSize: '0.82rem' }}>Year {year}</span>
-                <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>{count}</span>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="glass-card" style={{ padding: 18, marginTop: 10 }}>
-        <h3 style={{ fontSize: '0.98rem', fontWeight: 800, marginBottom: 12 }}>Attendance Summary</h3>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
-          <select className="input-field" value={filters.academic_session} onChange={(e) => handleAcademicSessionChange(e.target.value)}>
-            <option value="">Select Academic Session</option>
-            {academicSessionOptions.map((session) => <option key={session} value={session}>{session}</option>)}
-          </select>
-
-          <select className="input-field" value={filters.course_id} onChange={(e) => handleCourseChange(e.target.value)} disabled={!filters.academic_session}>
-            <option value="">Select Course</option>
-            {courseOptions.map((course) => (
-              <option key={course.course_id || course.course_name} value={course.course_id || ''}>{course.course_name}</option>
-            ))}
-          </select>
-
-          <select className="input-field" value={filters.semester} onChange={(e) => handleSemesterChange(e.target.value)} disabled={!filters.course_id}>
-            <option value="">Select Semester</option>
-            {semesterOptions.map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
-          </select>
-        </div>
-
-        {filters.academic_session && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 14 }}>
-            <EligibilityDonutChart
-              eligible={eligibilitySnapshot.eligible_count}
-              ineligible={eligibilitySnapshot.ineligible_count}
-            />
-            <DistributionBars
-              title={!filters.course_id ? 'Students Distribution by Course' : 'Students Distribution by Semester'}
-              rows={chartRows}
-              labelKey="label"
-              valueKey="value"
-            />
-          </div>
-        )}
-
-        {!filters.academic_session ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Select an academic session to view course-wise attendance summary.</p>
-        ) : !filters.course_id ? (
-          <div>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 10 }}>Course-wise Attendance Summary</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
-              {courseSummary.map((course) => (
-                <div key={course.course_id || course.course_name} className="glass-card" style={{ padding: 14 }}>
-                  <p style={{ fontSize: '0.84rem', fontWeight: 700 }}>{course.course_name}</p>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    Total Students: <b>{course.total_students}</b>
-                  </p>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--accent-emerald)', marginTop: 3 }}>Eligible: {course.eligible_count}</p>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--accent-rose)' }}>Ineligible: {course.ineligible_count}</p>
-                </div>
-              ))}
-              {courseSummary.length === 0 && !loadingEligibility && (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No course summary found for selected session.</p>
-              )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="glass-card" style={{ padding: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+              <HiOutlineShieldCheck size={18} style={{ color: 'var(--accent-amber)' }} />
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Eligibility Snapshot</h3>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Students</span><b>{eligibilitySnapshot.total_students}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Eligible</span><b style={{ color: 'var(--accent-emerald)' }}>{eligibilitySnapshot.eligible_count}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ineligible</span><b style={{ color: 'var(--accent-rose)' }}>{eligibilitySnapshot.ineligible_count}</b></div>
             </div>
           </div>
-        ) : !filters.semester ? (
-          <div>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 10 }}>Semester-wise Attendance Summary</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
-              {semesterSummary.filter((x) => x.semester > 0).map((sem) => (
-                <div key={sem.semester} className="glass-card" style={{ padding: 14 }}>
-                  <p style={{ fontSize: '0.84rem', fontWeight: 700 }}>Semester {sem.semester}</p>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    Total Students: <b>{sem.total_students}</b>
-                  </p>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--accent-emerald)', marginTop: 3 }}>Eligible: {sem.eligible_count}</p>
-                  <p style={{ fontSize: '0.76rem', color: 'var(--accent-rose)' }}>Ineligible: {sem.ineligible_count}</p>
-                </div>
-              ))}
-              {semesterSummary.filter((x) => x.semester > 0).length === 0 && !loadingEligibility && (
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No semester summary found for selected course.</p>
-              )}
+
+          <div className="glass-card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Queue Health</h3>
+              <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.72rem' }} onClick={fetchQueueMetrics}>
+                {loadingQueueMetrics ? 'Refreshing...' : 'Refresh'}
+              </button>
             </div>
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div className="glass-card" style={{ padding: 14 }}>
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 10, color: 'var(--accent-emerald)' }}>
-                Eligible Students ({studentBuckets.eligible.length})
-              </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queue Depth</span><b>{queueMetrics?.queue?.depth ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Delayed</span><b>{queueMetrics?.queue?.delayed_depth ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
+            </div>
+
+            {queueActionMessage && (
+              <p style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{queueActionMessage}</p>
+            )}
+
+            <div style={{ marginTop: 14 }}>
+              <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8 }}>Recent Dead-Letter Jobs</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {studentBuckets.eligible.map((s) => (
-                  <div key={s.student_id} style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-glass)' }}>
-                    <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{s.student_name}</p>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{s.reg_number || 'N/A'} · {s.student_email || ''}</p>
+                {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).map((job) => (
+                  <div key={job.job_id} className="glass-card" style={{ padding: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                      <div>
+                        <p style={{ fontSize: '0.76rem', fontWeight: 700 }}>{job.job_type || 'unknown'}</p>
+                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{job.job_id}</p>
+                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Attempts: {job.attempts || 0}/{job.max_attempts || 0}</p>
+                      </div>
+                      <button
+                        className="btn-secondary"
+                        style={{ padding: '4px 10px', fontSize: '0.72rem' }}
+                        disabled={replayingJobId === job.job_id}
+                        onClick={() => replayDeadLetterJob(job.job_id)}
+                      >
+                        {replayingJobId === job.job_id ? 'Replaying...' : 'Replay'}
+                      </button>
+                    </div>
+                    {job.error && <p style={{ marginTop: 6, fontSize: '0.7rem', color: 'var(--accent-rose)' }}>{job.error}</p>}
                   </div>
                 ))}
-                {studentBuckets.eligible.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No eligible students.</p>}
-              </div>
-            </div>
-
-            <div className="glass-card" style={{ padding: 14 }}>
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 10, color: 'var(--accent-rose)' }}>
-                Ineligible Students ({studentBuckets.ineligible.length})
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {studentBuckets.ineligible.map((s) => (
-                  <div key={s.student_id} style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-glass)' }}>
-                    <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{s.student_name}</p>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{s.reg_number || 'N/A'} · {s.student_email || ''}</p>
-                  </div>
-                ))}
-                {studentBuckets.ineligible.length === 0 && <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No ineligible students.</p>}
+                {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 && (
+                  <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>No dead-letter jobs right now.</p>
+                )}
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
+
+      <Suspense fallback={<div className="glass-card" style={{ padding: 18, marginTop: 10, minHeight: 460 }} />}>
+        <DashboardInsightsPanel
+          eligibilitySnapshot={eligibilitySnapshot}
+          filters={filters}
+          academicSessionOptions={academicSessionOptions}
+          courseOptions={courseOptions}
+          semesterOptions={semesterOptions}
+          courseSummary={courseSummary}
+          semesterSummary={semesterSummary}
+          chartRows={chartRows}
+          studentBuckets={studentBuckets}
+          loadingEligibility={loadingEligibility}
+          onAcademicSessionChange={handleAcademicSessionChange}
+          onCourseChange={handleCourseChange}
+          onSemesterChange={handleSemesterChange}
+        />
+      </Suspense>
     </motion.div>
   );
 }

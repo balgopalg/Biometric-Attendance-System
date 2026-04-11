@@ -7,6 +7,7 @@ import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineBookOpen, HiOutlineCamera, HiOutlineKey } from 'react-icons/hi';
+import { formatCourseName } from '../../utils/courseDisplay';
 
 export default function LecturerDashboard() {
   const [papers, setPapers] = useState([]);
@@ -54,7 +55,7 @@ export default function LecturerDashboard() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="lecturer-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
 
       <div style={{ marginBottom: 28 }}>
@@ -94,7 +95,7 @@ export default function LecturerDashboard() {
                 <span className="badge badge-info" style={{ marginBottom: 8 }}>{p.code}</span>
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: 8 }}>{p.name}</h4>
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {(p.course_name || 'No Course')} · Session {p.academic_year || 'N/A'}
+                  {formatCourseName(p.course_name || 'No Course', { isInactive: p.is_course_inactive, status: p.course_status })} · Session {p.enrolled_academic_session_label || p.enrolled_academic_session || p.academic_year || 'N/A'}
                 </p>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                   Semester {p.semester || 'N/A'}

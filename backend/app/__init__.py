@@ -1,9 +1,10 @@
 """Flask application factory."""
 
 import os
+from datetime import datetime
 from urllib.parse import urlparse
 from datetime import timedelta
-from flask import Flask
+from flask import Flask, g, request
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
 from .config import Config
@@ -13,6 +14,7 @@ from .extensions import mongo, jwt, cors, get_collection
 def create_app(config_class=Config, seed_default_admin=True):
     app = Flask(__name__)
     app.config.from_object(config_class)
+    app.config["APP_STARTED_AT"] = datetime.utcnow()
     _validate_security_config(app)
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
         seconds=config_class.JWT_ACCESS_TOKEN_EXPIRES
@@ -40,6 +42,28 @@ def create_app(config_class=Config, seed_default_admin=True):
         response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=()")
         return response
 
+    @app.before_request
+    def _start_request_timer():
+        g.request_started_at = __import__("time").perf_counter()
+
+    @app.after_request
+    def _log_request_duration(response):
+        started_at = getattr(g, "request_started_at", None)
+        if started_at is not None:
+            elapsed_ms = round((__import__("time").perf_counter() - started_at) * 1000, 2)
+            response.headers["X-Response-Time-Ms"] = str(elapsed_ms)
+            threshold_ms = int(app.config.get("SLOW_REQUEST_THRESHOLD_MS", 500))
+            if elapsed_ms >= threshold_ms and request.endpoint:
+                app.logger.info(
+                    "slow-request method=%s path=%s endpoint=%s status=%s duration_ms=%s",
+                    request.method,
+                    request.path,
+                    request.endpoint,
+                    response.status_code,
+                    elapsed_ms,
+                )
+        return response
+
     # Register blueprints
     from .routes.auth import auth_bp
     from .routes.admin import admin_bp
@@ -56,6 +80,7 @@ def create_app(config_class=Config, seed_default_admin=True):
     with app.app_context():
         _bootstrap_isolated_databases(mongo, app.config)
         _ensure_indexes(mongo, app.config)
+        _run_startup_health_checks(app)
         if seed_default_admin:
             _seed_admin(mongo)
 
@@ -133,6 +158,12 @@ def _ensure_indexes(mongo, config):
     _create_index_safe(sessions, [("lecturer_id", ASCENDING), ("created_at", DESCENDING)], name="ix_sessions_lecturer_created")
     _create_index_safe(sessions, [("rollback_until", ASCENDING)], name="ix_sessions_rollback_until")
 
+    background_jobs = client[config["MONGO_DB_ATTENDANCE"]]["background_jobs"]
+    _create_index_safe(background_jobs, [("job_id", ASCENDING)], unique=True, name="uq_jobs_id")
+    _create_index_safe(background_jobs, [("status", ASCENDING), ("created_at", DESCENDING)], name="ix_jobs_status_created")
+    _create_index_safe(background_jobs, [("status", ASCENDING), ("next_attempt_at", ASCENDING)], name="ix_jobs_status_next_attempt")
+    _create_index_safe(background_jobs, [("updated_at", DESCENDING)], name="ix_jobs_updated")
+
     overrides = client[config["MONGO_DB_ATTENDANCE"]]["exam_eligibility_overrides"]
     _create_index_safe(
         overrides,
@@ -164,6 +195,40 @@ def _seed_admin(mongo):
                 "created_at": __import__("datetime").datetime.utcnow(),
             }
         )
+
+
+def _run_startup_health_checks(app):
+    """Verify DB connectivity and critical indexes at startup."""
+    client = mongo.cx
+
+    try:
+        client.admin.command("ping")
+        app.logger.info("startup-health db=ok")
+    except Exception as exc:
+        app.logger.error("startup-health db=failed error=%s", exc)
+        return
+
+    required_indexes = {
+        (app.config["MONGO_DB_AUTH"], "users"): {"uq_users_email", "ix_users_role"},
+        (app.config["MONGO_DB_ACADEMIC"], "papers"): {"uq_papers_code", "ix_papers_course", "ix_papers_lecturers"},
+        (app.config["MONGO_DB_ACADEMIC"], "student_profiles"): {"uq_profiles_user", "uq_profiles_reg", "ix_profiles_course", "ix_profiles_year"},
+        (app.config["MONGO_DB_ATTENDANCE"], "attendance_logs"): {"uq_attendance_session_paper_student", "ix_attendance_timestamp", "ix_attendance_paper_student"},
+        (app.config["MONGO_DB_ATTENDANCE"], "attendance_sessions"): {"uq_sessions_id", "ix_sessions_lecturer_created", "ix_sessions_rollback_until"},
+        (app.config["MONGO_DB_ATTENDANCE"], "exam_eligibility_overrides"): {"uq_overrides_student_paper"},
+    }
+
+    missing = []
+    for (db_name, collection_name), expected in required_indexes.items():
+        collection = client[db_name][collection_name]
+        index_names = set(collection.index_information().keys())
+        for idx_name in expected:
+            if idx_name not in index_names:
+                missing.append(f"{db_name}.{collection_name}:{idx_name}")
+
+    if missing:
+        app.logger.warning("startup-health indexes=missing count=%s details=%s", len(missing), ",".join(missing))
+    else:
+        app.logger.info("startup-health indexes=ok")
 
 
 def _legacy_db_name_from_uri(uri: str):

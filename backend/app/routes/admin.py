@@ -3,16 +3,24 @@
 import re
 import random
 import os
+import time
 from datetime import datetime, timedelta
 import cv2
 import numpy as np
+from threading import Lock, Thread
+from uuid import uuid4
 
 from flask import Blueprint, request, jsonify, current_app
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
+try:
+    import redis
+except Exception:  # pragma: no cover - optional dependency at runtime
+    redis = None
+
 from app.extensions import get_collection
-from app.models.attendance import log_attendance, count_attendance
+from app.models.attendance import log_attendance
 from app.models.audit import log_action, get_audit_logs, get_audit_log_by_id, mark_audit_log_rolled_back
 from app.models.course import (
     create_course,
@@ -46,6 +54,7 @@ from app.models.paper import (
 from app.models.user import (
     create_user,
     get_users_by_role,
+    get_users_by_ids,
     update_user,
     delete_user,
     find_user_by_id,
@@ -60,6 +69,314 @@ from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
 
 admin_bp = Blueprint("admin", __name__)
+
+_QUERY_CACHE = {}
+_QUERY_CACHE_LOCK = Lock()
+_QUERY_CACHE_TTL_SECONDS = 30
+_ELIGIBILITY_CACHE_TTL_SECONDS = 20
+_QUEUE_CLIENT = None
+_QUEUE_CLIENT_LOCK = Lock()
+
+
+def _utcnow():
+    return datetime.utcnow()
+
+
+def _cache_get(key):
+    now = time.monotonic()
+    with _QUERY_CACHE_LOCK:
+        item = _QUERY_CACHE.get(key)
+        if not item:
+            return None
+        if item.get("expires_at", 0) <= now:
+            _QUERY_CACHE.pop(key, None)
+            return None
+        return item.get("value")
+
+
+def _cache_set(key, value, ttl_seconds):
+    with _QUERY_CACHE_LOCK:
+        _QUERY_CACHE[key] = {
+            "value": value,
+            "expires_at": time.monotonic() + ttl_seconds,
+        }
+
+
+def _cache_payload(key, ttl_seconds, builder):
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+    value = builder()
+    _cache_set(key, value, ttl_seconds)
+    return value
+
+
+def _clear_query_cache():
+    with _QUERY_CACHE_LOCK:
+        _QUERY_CACHE.clear()
+
+
+def _create_background_job(job_type, payload=None):
+    job_id = str(uuid4())
+    now = _utcnow()
+    max_attempts = max(1, _to_int(current_app.config.get("TASK_QUEUE_MAX_RETRIES", 3), 3))
+    get_collection("attendance", "background_jobs").insert_one(
+        {
+            "job_id": job_id,
+            "job_type": job_type,
+            "status": "queued",
+            "created_at": now,
+            "updated_at": now,
+            "next_attempt_at": now,
+            "attempts": 0,
+            "max_attempts": max_attempts,
+            "payload": payload or {},
+        }
+    )
+    return job_id
+
+
+def _update_background_job(job_id, **updates):
+    updates["updated_at"] = _utcnow()
+    get_collection("attendance", "background_jobs").update_one(
+        {"job_id": job_id},
+        {"$set": updates},
+    )
+
+
+def _get_background_job(job_id):
+    return get_collection("attendance", "background_jobs").find_one({"job_id": job_id})
+
+
+def _get_queue_names():
+    queue_name = current_app.config.get("TASK_QUEUE_NAME", "biometric:jobs")
+    delayed_queue_name = f"{queue_name}:delayed"
+    return queue_name, delayed_queue_name
+
+
+def _get_task_queue_client():
+    global _QUEUE_CLIENT
+    if redis is None:
+        return None
+
+    with _QUEUE_CLIENT_LOCK:
+        if _QUEUE_CLIENT is not None:
+            return _QUEUE_CLIENT
+
+        queue_url = current_app.config.get("TASK_QUEUE_REDIS_URL")
+        if not queue_url:
+            return None
+
+        _QUEUE_CLIENT = redis.Redis.from_url(queue_url, decode_responses=True)
+        return _QUEUE_CLIENT
+
+
+def _enqueue_background_job(job_id, delay_seconds=0):
+    client = _get_task_queue_client()
+    if client is None:
+        return False
+
+    queue_name, delayed_queue_name = _get_queue_names()
+    delay_seconds = max(0, int(delay_seconds or 0))
+    if delay_seconds > 0:
+        run_at = int(time.time()) + delay_seconds
+        client.zadd(delayed_queue_name, {job_id: run_at})
+    else:
+        client.lpush(queue_name, job_id)
+    return True
+
+
+def promote_due_delayed_jobs(max_items=100):
+    client = _get_task_queue_client()
+    if client is None:
+        return 0
+
+    queue_name, delayed_queue_name = _get_queue_names()
+    now_ts = int(time.time())
+    moved = 0
+    candidates = client.zrangebyscore(delayed_queue_name, 0, now_ts, start=0, num=max(1, int(max_items)))
+    for job_id in candidates:
+        if client.zrem(delayed_queue_name, job_id):
+            client.lpush(queue_name, job_id)
+            moved += 1
+    return moved
+
+
+def _compute_retry_delay_seconds(attempt_number):
+    base = max(1, _to_int(current_app.config.get("TASK_QUEUE_BASE_BACKOFF_SECONDS", 10), 10))
+    cap = max(base, _to_int(current_app.config.get("TASK_QUEUE_MAX_BACKOFF_SECONDS", 300), 300))
+    exponent = max(0, int(attempt_number) - 1)
+    raw_delay = min(base * (2 ** exponent), cap)
+    jitter_ratio = _to_float(current_app.config.get("TASK_QUEUE_BACKOFF_JITTER_RATIO", 0.25), 0.25)
+    jitter_ratio = max(0.0, min(jitter_ratio, 0.9))
+    jitter_multiplier = random.uniform(1.0 - jitter_ratio, 1.0 + jitter_ratio)
+    return max(1, int(round(raw_delay * jitter_multiplier)))
+
+
+def recover_stuck_background_jobs(max_items=50):
+    jobs = get_collection("attendance", "background_jobs")
+    timeout_seconds = max(30, _to_int(current_app.config.get("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900), 900))
+    cutoff = _utcnow() - timedelta(seconds=timeout_seconds)
+    stale_jobs = list(
+        jobs.find(
+            {"status": "running", "updated_at": {"$lte": cutoff}},
+            {"job_id": 1},
+        ).limit(max(1, int(max_items)))
+    )
+
+    recovered = 0
+    for row in stale_jobs:
+        job_id = _as_text(row.get("job_id"))
+        if not job_id:
+            continue
+
+        now = _utcnow()
+        res = jobs.update_one(
+            {"job_id": job_id, "status": "running"},
+            {
+                "$set": {
+                    "status": "queued",
+                    "next_attempt_at": now,
+                    "updated_at": now,
+                    "error": "Recovered from stale running state",
+                }
+            },
+        )
+        if not res.modified_count:
+            continue
+
+        recovered += 1
+        try:
+            enqueued = _enqueue_background_job(job_id)
+        except Exception:
+            current_app.logger.exception("Recovery enqueue failed for stale job %s", job_id)
+            enqueued = False
+
+        if not enqueued:
+            _schedule_local_retry(job_id, 1)
+
+    return recovered
+
+
+def _schedule_local_retry(job_id, delay_seconds):
+    app = current_app._get_current_object()
+
+    def _runner():
+        time.sleep(max(0, int(delay_seconds or 0)))
+        with app.app_context():
+            process_background_job(job_id)
+
+    Thread(target=_runner, daemon=True).start()
+
+
+def _execute_background_job(job):
+    job_type = _as_text(job.get("job_type"))
+    payload = job.get("payload") or {}
+
+    if job_type == "bulk_train_face":
+        actor_id = _as_text(payload.get("actor_id"))
+        student_ids = payload.get("student_ids") or []
+        return _train_bulk_faces_job(actor_id, student_ids)
+
+    if job_type == "rebuild_all_face_embeddings":
+        actor_id = _as_text(payload.get("actor_id"))
+        return _rebuild_all_faces_job(actor_id)
+
+    raise ValueError(f"Unsupported background job type: {job_type}")
+
+
+def process_background_job(job_id):
+    job = _get_background_job(job_id)
+    if not job:
+        return {"status": "missing"}
+
+    status = _as_text(job.get("status")).lower()
+    if status in {"completed", "dead_letter"}:
+        return {"status": "skipped", "reason": status}
+
+    max_attempts = max(1, _to_int(job.get("max_attempts"), 3))
+    attempts = max(0, _to_int(job.get("attempts"), 0))
+    current_attempt = attempts + 1
+
+    _update_background_job(
+        job_id,
+        status="running",
+        attempts=current_attempt,
+        started_at=job.get("started_at") or _utcnow(),
+        next_attempt_at=None,
+    )
+    try:
+        result = _execute_background_job(job)
+        _update_background_job(
+            job_id,
+            status="completed",
+            result=result,
+            error=None,
+            finished_at=_utcnow(),
+        )
+        _clear_query_cache()
+        return {"status": "completed", "result": result}
+    except Exception as exc:
+        current_app.logger.exception("Background job %s failed", job_id)
+        error_text = str(exc)
+        if current_attempt < max_attempts:
+            delay_seconds = _compute_retry_delay_seconds(current_attempt)
+            next_attempt = _utcnow() + timedelta(seconds=delay_seconds)
+            _update_background_job(
+                job_id,
+                status="queued",
+                error=error_text,
+                next_attempt_at=next_attempt,
+            )
+
+            try:
+                enqueued = _enqueue_background_job(job_id, delay_seconds=delay_seconds)
+            except Exception:
+                current_app.logger.exception("Retry enqueue failed for job %s", job_id)
+                enqueued = False
+
+            if not enqueued:
+                _schedule_local_retry(job_id, delay_seconds)
+
+            return {
+                "status": "retry_scheduled",
+                "attempt": current_attempt,
+                "max_attempts": max_attempts,
+                "retry_in_seconds": delay_seconds,
+            }
+
+        _update_background_job(
+            job_id,
+            status="dead_letter",
+            error=error_text,
+            finished_at=_utcnow(),
+        )
+        return {
+            "status": "dead_letter",
+            "attempt": current_attempt,
+            "max_attempts": max_attempts,
+            "error": error_text,
+        }
+
+
+def _run_background_job(app, job_id):
+    with app.app_context():
+        process_background_job(job_id)
+
+
+def _launch_background_job(app, job_type, payload):
+    job_id = _create_background_job(job_type, payload)
+
+    if current_app.config.get("TASK_QUEUE_ENABLED", False):
+        try:
+            if _enqueue_background_job(job_id):
+                return job_id
+        except Exception:
+            app.logger.exception("Queue enqueue failed for job %s; falling back to local thread", job_id)
+
+    thread = Thread(target=_run_background_job, args=(app, job_id), daemon=True)
+    thread.start()
+    return job_id
 
 
 def _as_text(value):
@@ -80,6 +397,13 @@ def _to_int(value, default=0):
         return default
 
 
+def _to_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _as_object_id(value):
     if isinstance(value, ObjectId):
         return value
@@ -90,6 +414,18 @@ def _as_object_id(value):
         return ObjectId(text)
     except Exception:
         return None
+
+
+def _id_variants(value):
+    """Return equivalent ID representations to handle mixed string/ObjectId legacy data."""
+    variants = []
+    text = _as_text(value)
+    if text:
+        variants.append(text)
+    oid = _as_object_id(value)
+    if oid is not None and oid not in variants:
+        variants.append(oid)
+    return variants
 
 
 def _normalise_filter_ids(filter_doc):
@@ -251,6 +587,35 @@ def _ensure_paper_course_active(paper):
     return None
 
 
+def _detach_lecturers_from_course_papers(course_id):
+    """Clear lecturer assignments for all papers under a given course."""
+    papers_col = get_collection("academic", "papers")
+    course_keys = {_as_text(v) for v in _id_variants(course_id) if _as_text(v)}
+    if not course_keys:
+        return 0, []
+
+    assigned_papers = list(
+        papers_col.find({"lecturer_id": {"$nin": [None, ""]}})
+    )
+
+    affected_papers = [
+        p for p in assigned_papers
+        if _as_text(p.get("course_id")) in course_keys
+    ]
+    if not affected_papers:
+        return 0, []
+
+    affected_ids = [p.get("_id") for p in affected_papers if p.get("_id") is not None]
+    if not affected_ids:
+        return 0, []
+
+    res = papers_col.update_many(
+        {"_id": {"$in": affected_ids}},
+        {"$set": {"lecturer_id": None}},
+    )
+    return int(res.modified_count or 0), affected_papers
+
+
 def _legacy_safe_name(raw_value):
     text = _as_text(raw_value)
     cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
@@ -409,12 +774,42 @@ def _to_bool(value):
     return text in {"1", "true", "yes", "y"}
 
 
+def _get_requested_pagination():
+    page_raw = request.args.get("page")
+    per_page_raw = request.args.get("per_page")
+
+    if not _as_text(page_raw) and not _as_text(per_page_raw):
+        return None
+
+    page = max(1, _to_int(page_raw, 1))
+    per_page = max(1, min(_to_int(per_page_raw, 20), 100))
+    return page, per_page
+
+
+def _paginate_items(items):
+    pagination = _get_requested_pagination()
+    if not pagination:
+        return jsonify(items)
+
+    page, per_page = pagination
+    total = len(items)
+    start = (page - 1) * per_page
+    end = start + per_page
+
+    return jsonify({
+        "items": items[start:end],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    })
+
+
 # ─── Courses ────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/courses", methods=["GET"])
 @role_required("admin")
 def list_courses(user):
-    courses = sanitise_many(get_all_courses())
+    courses = sanitise_many(get_all_courses(["name", "code", "department", "course_duration", "status"]))
     q = _as_text(request.args.get("q", "")).lower()
     course_duration = _as_text(request.args.get("course_duration", ""))
     status = _as_text(request.args.get("status", "")).lower()
@@ -434,7 +829,7 @@ def list_courses(user):
             continue
         filtered.append(c)
 
-    return jsonify(filtered)
+    return _paginate_items(filtered)
 
 
 @admin_bp.route("/courses", methods=["POST"])
@@ -455,6 +850,7 @@ def add_course(user):
         details=f"Course {d['code']}",
         rollback=_rb_delete("academic", "courses", {"_id": course.get("_id")}),
     )
+    _clear_query_cache()
     return jsonify(sanitise_mongo_doc(course)), 201
 
 
@@ -479,6 +875,53 @@ def list_course_semesters(user, cid):
             semesters.add(sem)
 
     return jsonify(sorted(list(semesters)))
+
+
+@admin_bp.route("/courses/<cid>/sessions", methods=["GET"])
+@role_required("admin")
+def list_course_sessions(user, cid):
+    """Return distinct academic sessions for a course."""
+    course = _safe_get_course(cid)
+    if not course:
+        return jsonify({"error": "Course not found"}), 404
+
+    profiles = get_collection("academic", "student_profiles")
+    sessions = set()
+    course_duration = max(1, _to_int(course.get("course_duration"), 1))
+    for row in profiles.aggregate([
+        {"$match": {"course_id": cid}},
+        {
+            "$project": {
+                "session": {
+                    "$ifNull": [
+                        "$academic_session",
+                        {
+                            "$ifNull": [
+                                "$academic_year",
+                                {
+                                    "$ifNull": [
+                                        "$year",
+                                        {"$toString": {"$year": "$created_at"}},
+                                    ]
+                                },
+                            ]
+                        },
+                    ]
+                }
+            }
+        },
+        {"$group": {"_id": "$session"}},
+    ]):
+        session = _as_text(row.get("_id"))
+        if session:
+            sessions.add(session)
+
+    # Ensure at least current derived session appears when course has active profiles but no stored session field.
+    if not sessions and profiles.count_documents({"course_id": cid}) > 0:
+        now_year = datetime.utcnow().year
+        sessions.add(_derive_academic_session(now_year, course_duration))
+
+    return jsonify(sorted(sessions))
 
 
 def _normalise_course_semester(course_id, semester):
@@ -518,13 +961,36 @@ def edit_course(user, cid):
         fields["status"] = next_status
 
     previous = get_course_by_id(cid)
+    if not previous:
+        return jsonify({"error": "Course not found"}), 404
+
+    prev_status = _as_text(previous.get("status") or "active").lower() or "active"
+    next_status = _as_text(fields.get("status") or prev_status).lower() or "active"
+
+    detached_count = 0
+    detached_papers = []
+    if prev_status == "active" and next_status == "inactive":
+        detached_count, detached_papers = _detach_lecturers_from_course_papers(cid)
+
     updated = update_course(cid, fields)
+
+    rollback_ops = [
+        _rb_replace("academic", "courses", {"_id": cid}, previous),
+    ]
+    for doc in detached_papers:
+        rollback_ops.append(_rb_replace("academic", "papers", {"_id": doc.get("_id")}, doc))
+
+    details = f"Course {cid}"
+    if detached_count > 0:
+        details = f"Course {cid}; detached lecturers from {detached_count} paper(s)"
+
     log_action(
         "UPDATE_COURSE",
         str(user["_id"]),
-        details=f"Course {cid}",
-        rollback=_rb_replace("academic", "courses", {"_id": cid}, previous) if previous else None,
+        details=details,
+        rollback=_rb_batch(rollback_ops),
     )
+    _clear_query_cache()
     return jsonify(sanitise_mongo_doc(updated))
 
 
@@ -535,14 +1001,28 @@ def remove_course(user, cid):
     if not previous:
         return jsonify({"error": "Course not found"}), 404
 
+    detached_count, detached_papers = _detach_lecturers_from_course_papers(cid)
     delete_course(cid)
+
+    rollback_ops = [_rb_restore("academic", "courses", previous)]
+    for doc in detached_papers:
+        rollback_ops.append(_rb_replace("academic", "papers", {"_id": doc.get("_id")}, doc))
+
+    details = f"Course {cid}"
+    if detached_count > 0:
+        details = f"Course {cid}; detached lecturers from {detached_count} paper(s)"
+
     log_action(
         "DEACTIVATE_COURSE",
         str(user["_id"]),
-        details=f"Course {cid}",
-        rollback=_rb_restore("academic", "courses", previous) if previous else None,
+        details=details,
+        rollback=_rb_batch(rollback_ops),
     )
-    return jsonify({"message": "Course marked inactive"}), 200
+    _clear_query_cache()
+    return jsonify({
+        "message": "Course marked inactive",
+        "detached_lecturer_assignments": detached_count,
+    }), 200
 
 
 # ─── Papers ─────────────────────────────────────────────────────────────────
@@ -550,8 +1030,8 @@ def remove_course(user, cid):
 @admin_bp.route("/papers", methods=["GET"])
 @role_required("admin")
 def list_papers(user):
-    papers = get_all_papers()
-    courses = sanitise_many(get_all_courses())
+    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at"])
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
     lecturers = sanitise_many(get_users_by_role("lecturer"))
     course_map = {c["_id"]: c for c in courses}
     lecturer_map = {l["_id"]: l for l in lecturers}
@@ -582,7 +1062,7 @@ def list_papers(user):
             continue
         result.append(item)
 
-    return jsonify(sanitise_many(result))
+    return _paginate_items(sanitise_many(result))
 
 
 @admin_bp.route("/papers", methods=["POST"])
@@ -610,6 +1090,7 @@ def add_paper(user):
         details=f"Paper {d['code']}",
         rollback=_rb_delete("academic", "papers", {"_id": paper.get("_id")}),
     )
+    _clear_query_cache()
     return jsonify(sanitise_mongo_doc(paper)), 201
 
 
@@ -645,6 +1126,7 @@ def edit_paper(user, pid):
         details=f"Paper {pid}",
         rollback=_rb_replace("academic", "papers", {"_id": pid}, previous) if previous else None,
     )
+    _clear_query_cache()
     return jsonify(sanitise_mongo_doc(updated))
 
 
@@ -666,6 +1148,7 @@ def remove_paper(user, pid):
         details=f"Paper {pid}",
         rollback=_rb_restore("academic", "papers", previous) if previous else None,
     )
+    _clear_query_cache()
     return jsonify({"message": "Deleted"}), 200
 
 
@@ -703,6 +1186,7 @@ def bulk_assign(user):
             str(user["_id"]),
             details=f"Paper {paper_id}, students {updated_count}",
         )
+        _clear_query_cache()
         return jsonify({"message": "Students enrolled successfully", "updated_count": updated_count}), 200
 
     paper_ids = d.get("paper_ids", [])
@@ -724,6 +1208,7 @@ def bulk_assign(user):
         bulk_assign_lecturer(paper_ids, lecturer_id)
         log_action("BULK_ASSIGN_LECTURER", str(user["_id"]),
                    details=f"Papers {paper_ids} → Lecturer {lecturer_id}")
+        _clear_query_cache()
     if course_id:
         course = _safe_get_course(course_id)
         if not course:
@@ -750,14 +1235,15 @@ def bulk_assign(user):
         bulk_assign_course(paper_ids, course_id)
         log_action("BULK_ASSIGN_COURSE", str(user["_id"]),
                    details=f"Papers {paper_ids} → Course {course_id}")
+        _clear_query_cache()
     return jsonify({"message": "Assigned"}), 200
 
 
 @admin_bp.route("/lecturers/<lid>/papers", methods=["GET"])
 @role_required("admin")
 def get_lecturer_papers(user, lid):
-    papers = get_all_papers()
-    courses = sanitise_many(get_all_courses())
+    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at"])
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
     lecturers = sanitise_many(get_users_by_role("lecturer"))
     course_map = {c["_id"]: c for c in courses}
     lecturer_map = {l["_id"]: l for l in lecturers}
@@ -799,6 +1285,7 @@ def set_lecturer_papers(user, lid):
         target_user=lid,
         details=f"Assigned papers: {sorted(list(paper_ids))}",
     )
+    _clear_query_cache()
     return jsonify({"message": "Lecturer paper assignments updated"}), 200
 
 
@@ -808,8 +1295,8 @@ def set_lecturer_papers(user, lid):
 @role_required("admin")
 def list_lecturers(user):
     lecturers = sanitise_many(get_users_by_role("lecturer"))
-    papers = sanitise_many(get_all_papers())
-    courses = sanitise_many(get_all_courses())
+    papers = sanitise_many(get_all_papers(["name", "code", "lecturer_id", "course_id", "semester", "total_classes", "created_at"]))
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
     course_map = {c["_id"]: c for c in courses}
 
     q = _as_text(request.args.get("q", "")).lower()
@@ -857,7 +1344,7 @@ def list_lecturers(user):
         lec["academic_years"] = sorted(list(set(years)))
         result.append(lec)
 
-    return jsonify(sanitise_many(result))
+    return _paginate_items(sanitise_many(result))
 
 
 @admin_bp.route("/lecturers", methods=["POST"])
@@ -874,6 +1361,7 @@ def add_lecturer(user):
         target_user=lec["_id"],
         rollback=_rb_delete("auth", "users", {"_id": lec.get("_id")}),
     )
+    _clear_query_cache()
     lec_clean = sanitise_mongo_doc(lec)
     return jsonify({**lec_clean, "temp_password": temp_pw}), 201
 
@@ -890,6 +1378,7 @@ def edit_lecturer(user, lid):
         target_user=lid,
         rollback=_rb_replace("auth", "users", {"_id": lid}, previous) if previous else None,
     )
+    _clear_query_cache()
     return jsonify(sanitise_mongo_doc(updated))
 
 
@@ -904,6 +1393,7 @@ def remove_lecturer(user, lid):
         target_user=lid,
         rollback=_rb_restore("auth", "users", previous) if previous else None,
     )
+    _clear_query_cache()
     return jsonify({"message": "Deleted"}), 200
 
 
@@ -937,21 +1427,36 @@ def update_lecturer_pin(user, lid):
 @admin_bp.route("/students", methods=["GET"])
 @role_required("admin")
 def list_students(user):
-    profiles = get_all_profiles()
-    courses = sanitise_many(get_all_courses())
-    papers = sanitise_many(get_all_papers())
+    profiles = get_all_profiles([
+        "user_id",
+        "course_id",
+        "enrolled_papers",
+        "reg_number",
+        "roll_number",
+        "academic_session",
+        "academic_year",
+        "year",
+        "enrollment_year",
+        "current_semester",
+        "face_embeddings",
+        "created_at",
+    ])
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
+    papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id"]))
     course_map = {c["_id"]: c for c in courses}
     paper_map = {p["_id"]: p for p in papers}
+    user_map = get_users_by_ids(p.get("user_id") for p in profiles)
 
     q = _as_text(request.args.get("q", "")).lower()
     course_id = _as_text(request.args.get("course_id", ""))
     paper_id = _as_text(request.args.get("paper_id", ""))
     academic_session = _as_text(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
     semester = _as_text(request.args.get("semester", ""))
+    include_inactive = _to_bool(request.args.get("include_inactive", False))
 
     result = []
     for p in profiles:
-        u = _safe_find_user(p.get("user_id", ""))
+        u = user_map.get(_as_text(p.get("user_id", "")))
         course = course_map.get(_as_text(p.get("course_id", "")))
         enrolled_papers = p.get("enrolled_papers", [])
 
@@ -976,6 +1481,8 @@ def list_students(user):
         item["course_code"] = (course or {}).get("code")
         item["course_status"] = _as_text((course or {}).get("status") or "active").lower() or "active"
         item["is_course_inactive"] = item["course_status"] != "active"
+        if item["is_course_inactive"] and not include_inactive:
+            continue
         item["course_department"] = (course or {}).get("department")
         item["course_duration"] = (course or {}).get("course_duration")
         item["current_semester"] = _to_int(item.get("current_semester"), 0) or None
@@ -1016,6 +1523,104 @@ def list_students(user):
         # Don't send raw embeddings to the frontend
         item.pop("face_embeddings", None)
         result.append(item)
+
+    return _paginate_items(sanitise_many(result))
+
+
+@admin_bp.route("/students/options", methods=["GET"])
+@role_required("admin")
+def student_options(user):
+    """Return a lightweight student list for select inputs and lookups."""
+    course_id = _as_text(request.args.get("course_id", ""))
+    academic_session = _as_text(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
+    semester = _as_text(request.args.get("semester", ""))
+    q = _as_text(request.args.get("q", "")).lower()
+    limit = max(1, min(_to_int(request.args.get("limit", 200), 200), 500))
+    include_inactive = _to_bool(request.args.get("include_inactive", False))
+
+    profiles_col = get_collection("academic", "student_profiles")
+    query = {}
+    if course_id:
+        query["course_id"] = course_id
+    if academic_session:
+        query["$or"] = [
+            {"academic_session": academic_session},
+            {"academic_year": academic_session},
+            {"year": academic_session},
+        ]
+    semester_int = _to_int(semester, 0)
+    if semester_int > 0:
+        query["current_semester"] = semester_int
+
+    cursor = profiles_col.find(
+        query,
+        {
+            "user_id": 1,
+            "course_id": 1,
+            "academic_session": 1,
+            "academic_year": 1,
+            "year": 1,
+            "current_semester": 1,
+            "reg_number": 1,
+            "roll_number": 1,
+            "created_at": 1,
+        },
+    )
+    # When searching by q (name/email/reg no), apply limit only after matching,
+    # otherwise valid students outside the first N profiles are never considered.
+    profiles = list(cursor if q else cursor.limit(limit))
+
+    course_map = {}
+    if profiles:
+        course_ids = {str(p.get("course_id", "")) for p in profiles if p.get("course_id")}
+        if course_ids:
+            course_map = {c["_id"]: c for c in sanitise_many(get_all_courses(["name", "code", "status", "course_duration"])) if c.get("_id") in course_ids}
+
+    user_map = get_users_by_ids(profile.get("user_id") for profile in profiles)
+    result = []
+
+    for profile in profiles:
+        uid = _as_text(profile.get("user_id", ""))
+        student = user_map.get(uid)
+        if not student:
+            continue
+
+        course = course_map.get(_as_text(profile.get("course_id", "")))
+        is_course_inactive = _as_text((course or {}).get("status") or "active").lower() != "active"
+        if is_course_inactive and not include_inactive:
+            continue
+        enrollment_year = _to_int((profile.get("created_at") or datetime.utcnow()).year if hasattr(profile.get("created_at"), "year") else None, 0)
+        duration_years = _to_int((course or {}).get("course_duration"), 1)
+        resolved_session = (
+            _as_text(profile.get("academic_session"))
+            or _as_text(profile.get("academic_year"))
+            or _as_text(profile.get("year"))
+            or _derive_academic_session(enrollment_year or datetime.utcnow().year, duration_years)
+        )
+        current_semester = _to_int(profile.get("current_semester"), 0)
+
+        reg_number = _as_text(profile.get("reg_number") or profile.get("roll_number"))
+        name = _as_text(student.get("name"))
+        email = _as_text(student.get("email"))
+        if q and not (q in name.lower() or q in email.lower() or q in reg_number.lower()):
+            continue
+
+        result.append({
+            "_id": uid,
+            "user_id": uid,
+            "name": student.get("name"),
+            "email": student.get("email"),
+            "reg_number": reg_number,
+            "roll_number": _as_text(profile.get("roll_number")),
+            "academic_session": resolved_session,
+            "course_id": _as_text(profile.get("course_id", "")),
+            "current_semester": current_semester or None,
+            "course_name": (course or {}).get("name"),
+            "is_course_inactive": is_course_inactive,
+        })
+
+        if q and len(result) >= limit:
+            break
 
     return jsonify(sanitise_many(result))
 
@@ -1117,6 +1722,7 @@ def add_student(user):
             _rb_delete("auth", "users", {"_id": str(stu["_id"])}),
         ]),
     )
+    _clear_query_cache()
     
     # Sanitize before returning to ensure ObjectId is serializable
     stu_clean = sanitise_mongo_doc(stu)
@@ -1198,6 +1804,7 @@ def edit_student(user, sid):
         target_user=user_id,
         rollback=_rb_batch(rollback_ops) if rollback_ops else None,
     )
+    _clear_query_cache()
     return jsonify({"message": "Updated"})
 
 
@@ -1229,6 +1836,7 @@ def remove_student(user, sid):
         target_user=user_id,
         rollback=_rb_batch(rollback_ops) if rollback_ops else None,
     )
+    _clear_query_cache()
     return jsonify({"message": "Deleted"}), 200
 
 
@@ -1245,8 +1853,8 @@ def bulk_promote_students(user):
     if not student_ids:
         return jsonify({"error": "student_ids is required"}), 400
 
-    paper_map = {p.get("_id"): p for p in sanitise_many(get_all_papers())}
-    course_map = {c.get("_id"): c for c in sanitise_many(get_all_courses())}
+    paper_map = {p.get("_id"): p for p in sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id"]))}
+    course_map = {c.get("_id"): c for c in sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))}
 
     promoted = 0
     skipped = 0
@@ -1297,6 +1905,7 @@ def bulk_promote_students(user):
         details=f"Promoted {promoted}, skipped {skipped}, skipped_max={skipped_max_semester}, removed_papers={removed_papers}, from_semester={from_semester or 'auto'}",
         rollback=_rb_batch(rollback_ops) if rollback_ops else None,
     )
+    _clear_query_cache()
 
     return jsonify(
         {
@@ -1406,6 +2015,7 @@ def enroll_student_face(user):
 
     log_action("ENROLL_FACE", str(user["_id"]), target_user=resolved_user_id,
                details="Face embedding added")
+    _clear_query_cache()
 
     response = {
         "message": "Face enrolled successfully",
@@ -1458,24 +2068,11 @@ def upload_student_photo(user):
     }), 201
 
 
-@admin_bp.route("/students/<sid>/train-face", methods=["POST"])
-@admin_bp.route("/students/<sid>/train", methods=["POST"])
-@admin_bp.route("/student/<sid>/train-face", methods=["POST"])
-@role_required("admin")
-def train_face_from_dataset(user, sid):
-    """Train student face embeddings from dataset/<user_id> images and save to DB."""
-    user_id, _ = _resolve_student_identity(sid)
-    if not user_id:
-        return jsonify({"error": "Student not found"}), 404
-
-    try:
-        train_result = _train_embeddings_from_dataset_for_user(user_id)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
+def _train_single_face_job(actor_id, user_id):
+    train_result = _train_embeddings_from_dataset_for_user(user_id)
     log_action(
         "TRAIN_FACE_FROM_DATASET",
-        str(user["_id"]),
+        actor_id,
         target_user=user_id,
         details=(
             f"dataset={train_result['dataset_dir']}, "
@@ -1483,26 +2080,15 @@ def train_face_from_dataset(user, sid):
             f"skipped={train_result['skipped_images']}"
         ),
     )
-
-    return jsonify({
+    return {
         "message": "Face training completed",
         "trained_embeddings": train_result["trained_embeddings"],
         "skipped_images": train_result["skipped_images"],
         "dataset_dir": train_result["dataset_dir"],
-    }), 200
+    }
 
 
-@admin_bp.route("/students/train-face/bulk", methods=["POST"])
-@admin_bp.route("/students/bulk-train-face", methods=["POST"])
-@role_required("admin")
-def bulk_train_face_from_dataset(user):
-    """Train face embeddings in bulk for selected students from their dataset folders."""
-    d = request.get_json(silent=True) or {}
-    raw_ids = d.get("student_ids") or []
-    student_ids = [_as_text(sid) for sid in raw_ids if _as_text(sid)]
-    if not student_ids:
-        return jsonify({"error": "student_ids is required"}), 400
-
+def _train_bulk_faces_job(actor_id, student_ids):
     items = []
     total_trained_embeddings = 0
     success_count = 0
@@ -1530,35 +2116,28 @@ def bulk_train_face_from_dataset(user):
             items.append({"student_id": _as_text(user_id), "success": False, "error": str(exc)})
 
     failure_count = len(student_ids) - success_count
-
     log_action(
         "BULK_TRAIN_FACE_FROM_DATASET",
-        str(user["_id"]),
+        actor_id,
         details=(
             f"requested={len(student_ids)}, success={success_count}, "
             f"failed={failure_count}, trained_embeddings={total_trained_embeddings}"
         ),
     )
-
-    return jsonify(
-        {
-            "message": "Bulk training completed",
-            "requested_count": len(student_ids),
-            "success_count": success_count,
-            "failure_count": failure_count,
-            "total_trained_embeddings": total_trained_embeddings,
-            "items": items,
-        }
-    ), 200
+    return {
+        "message": "Bulk training completed",
+        "requested_count": len(student_ids),
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "total_trained_embeddings": total_trained_embeddings,
+        "items": items,
+    }
 
 
-@admin_bp.route("/students/train-face/rebuild-all", methods=["POST"])
-@role_required("admin")
-def rebuild_all_face_embeddings(user):
-    """Rebuild face embeddings for every student profile from their dataset folders."""
-    profiles = get_all_profiles()
+def _rebuild_all_faces_job(actor_id):
+    profiles = get_all_profiles(["user_id"])
     if not profiles:
-        return jsonify({"error": "No student profiles found"}), 404
+        return {"error": "No student profiles found"}
 
     items = []
     success_count = 0
@@ -1591,23 +2170,442 @@ def rebuild_all_face_embeddings(user):
 
     log_action(
         "REBUILD_ALL_FACE_EMBEDDINGS",
-        str(user["_id"]),
+        actor_id,
         details=(
             f"requested={len(profiles)}, success={success_count}, failure={failure_count}, "
             f"trained_embeddings={total_trained_embeddings}"
         ),
     )
 
+    return {
+        "message": "Face embeddings rebuilt",
+        "requested_count": len(profiles),
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "total_trained_embeddings": total_trained_embeddings,
+        "items": items,
+    }
+
+
+@admin_bp.route("/students/<sid>/train-face", methods=["POST"])
+@admin_bp.route("/students/<sid>/train", methods=["POST"])
+@admin_bp.route("/student/<sid>/train-face", methods=["POST"])
+@role_required("admin")
+def train_face_from_dataset(user, sid):
+    """Train student face embeddings from dataset/<user_id> images and save to DB."""
+    user_id, _ = _resolve_student_identity(sid)
+    if not user_id:
+        return jsonify({"error": "Student not found"}), 404
+
+    try:
+        train_result = _train_single_face_job(str(user["_id"]), user_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({
+        "message": "Face training completed",
+        "trained_embeddings": train_result["trained_embeddings"],
+        "skipped_images": train_result["skipped_images"],
+        "dataset_dir": train_result["dataset_dir"],
+    }), 200
+
+
+@admin_bp.route("/students/train-face/bulk", methods=["POST"])
+@admin_bp.route("/students/bulk-train-face", methods=["POST"])
+@role_required("admin")
+def bulk_train_face_from_dataset(user):
+    """Train face embeddings in bulk for selected students from their dataset folders."""
+    d = request.get_json(silent=True) or {}
+    raw_ids = d.get("student_ids") or []
+    student_ids = [_as_text(sid) for sid in raw_ids if _as_text(sid)]
+    if not student_ids:
+        return jsonify({"error": "student_ids is required"}), 400
+
+    async_requested = _to_bool(d.get("async", False))
+    if async_requested:
+        job_id = _launch_background_job(
+            current_app._get_current_object(),
+            "bulk_train_face",
+            {
+                "requested_count": len(student_ids),
+                "actor_id": str(user["_id"]),
+                "student_ids": student_ids,
+            },
+        )
+        return jsonify({
+            "message": "Bulk training queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+        }), 202
+
+    result = _train_bulk_faces_job(str(user["_id"]), student_ids)
+    _clear_query_cache()
+    return jsonify(result), 200
+
+
+@admin_bp.route("/students/train-face/rebuild-all", methods=["POST"])
+@role_required("admin")
+def rebuild_all_face_embeddings(user):
+    """Rebuild face embeddings for every student profile from their dataset folders."""
+    d = request.get_json(silent=True) or {}
+    async_requested = _to_bool(d.get("async", False))
+
+    if async_requested:
+        job_id = _launch_background_job(
+            current_app._get_current_object(),
+            "rebuild_all_face_embeddings",
+            {"actor_id": str(user["_id"])},
+        )
+        return jsonify({
+            "message": "Face embeddings rebuild queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+        }), 202
+
+    result = _rebuild_all_faces_job(str(user["_id"]))
+    if result.get("error"):
+        return jsonify({"error": result["error"]}), 404
+    _clear_query_cache()
+    return jsonify(result), 200
+
+
+@admin_bp.route("/jobs/<job_id>", methods=["GET"])
+@role_required("admin")
+def get_job_status(user, job_id):
+    job = _get_background_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(sanitise_mongo_doc(job))
+
+
+@admin_bp.route("/jobs/<job_id>/replay", methods=["POST"])
+@role_required("admin")
+def replay_dead_letter_job(user, job_id):
+    jobs = get_collection("attendance", "background_jobs")
+    job = jobs.find_one({"job_id": job_id})
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    status = _as_text(job.get("status")).lower()
+    if status != "dead_letter":
+        return jsonify({"error": "Only dead-letter jobs can be replayed"}), 400
+
+    if not _requeue_dead_letter_job_by_id(job_id):
+        return jsonify({"error": "Job replay failed due to concurrent update"}), 409
+
+    log_action(
+        "REPLAY_DEAD_LETTER_JOB",
+        str(user["_id"]),
+        details=f"job_id={job_id}, job_type={_as_text(job.get('job_type'))}",
+    )
+
     return jsonify(
         {
-            "message": "Face embeddings rebuilt",
-            "requested_count": len(profiles),
-            "success_count": success_count,
-            "failure_count": failure_count,
-            "total_trained_embeddings": total_trained_embeddings,
-            "items": items,
+            "message": "Job replay queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+        }
+    ), 202
+
+
+def _requeue_dead_letter_job_by_id(job_id):
+    jobs = get_collection("attendance", "background_jobs")
+    now = _utcnow()
+    updated = jobs.update_one(
+        {"job_id": job_id, "status": "dead_letter"},
+        {
+            "$set": {
+                "status": "queued",
+                "attempts": 0,
+                "error": None,
+                "next_attempt_at": now,
+                "updated_at": now,
+                "started_at": None,
+                "finished_at": None,
+            }
+        },
+    )
+    if not updated.modified_count:
+        return False
+
+    try:
+        enqueued = _enqueue_background_job(job_id)
+    except Exception:
+        current_app.logger.exception("Replay enqueue failed for job %s", job_id)
+        enqueued = False
+
+    if not enqueued:
+        _schedule_local_retry(job_id, 1)
+
+    return True
+
+
+def _fetch_dead_letter_rows(filters=None, include_pagination=True):
+    filters = filters or {}
+    q = _as_text(filters.get("q", "")).lower()
+    job_type = _as_text(filters.get("job_type", "")).lower()
+    from_raw = _as_text(filters.get("from", ""))
+    to_raw = _as_text(filters.get("to", ""))
+    sort_by = _as_text(filters.get("sort_by", "updated_at")).lower()
+    sort_dir = _as_text(filters.get("sort_dir", "desc")).lower()
+
+    allowed_sort_by = {"updated_at", "created_at", "attempts", "job_type"}
+    if sort_by not in allowed_sort_by:
+        raise ValueError("Invalid sort_by value")
+    if sort_dir not in {"asc", "desc"}:
+        raise ValueError("Invalid sort_dir value")
+
+    query = {"status": "dead_letter"}
+    if job_type:
+        query["job_type"] = job_type
+
+    ts_filter = {}
+    if from_raw:
+        try:
+            ts_filter["$gte"] = datetime.fromisoformat(from_raw)
+        except ValueError as exc:
+            raise ValueError("Invalid from date format") from exc
+    if to_raw:
+        try:
+            ts_filter["$lte"] = datetime.fromisoformat(to_raw)
+        except ValueError as exc:
+            raise ValueError("Invalid to date format") from exc
+    if ts_filter:
+        query["updated_at"] = ts_filter
+
+    sort_order = -1 if sort_dir == "desc" else 1
+    jobs = get_collection("attendance", "background_jobs")
+    rows = list(
+        jobs.find(
+            query,
+            {
+                "_id": 0,
+                "job_id": 1,
+                "job_type": 1,
+                "error": 1,
+                "payload": 1,
+                "attempts": 1,
+                "max_attempts": 1,
+                "created_at": 1,
+                "updated_at": 1,
+            },
+        ).sort(sort_by, sort_order)
+    )
+
+    if q:
+        filtered = []
+        for row in rows:
+            if (
+                q in _as_text(row.get("job_id")).lower()
+                or q in _as_text(row.get("job_type")).lower()
+                or q in _as_text(row.get("error")).lower()
+            ):
+                filtered.append(row)
+        rows = filtered
+
+    if not include_pagination:
+        return rows, len(rows)
+
+    page = max(1, _to_int(filters.get("page", 1), 1))
+    per_page = max(1, min(_to_int(filters.get("per_page", 20), 20), 100))
+    total = len(rows)
+    start = (page - 1) * per_page
+    end = start + per_page
+    return rows[start:end], total
+
+
+@admin_bp.route("/jobs/dead-letter", methods=["GET"])
+@role_required("admin")
+def list_dead_letter_jobs(user):
+    filters = {
+        "q": request.args.get("q", ""),
+        "job_type": request.args.get("job_type", ""),
+        "from": request.args.get("from", ""),
+        "to": request.args.get("to", ""),
+        "sort_by": request.args.get("sort_by", "updated_at"),
+        "sort_dir": request.args.get("sort_dir", "desc"),
+        "page": request.args.get("page", 1),
+        "per_page": request.args.get("per_page", 20),
+    }
+    try:
+        rows, total = _fetch_dead_letter_rows(filters, include_pagination=True)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    page = max(1, _to_int(filters.get("page", 1), 1))
+    per_page = max(1, min(_to_int(filters.get("per_page", 20), 20), 100))
+    return jsonify(
+        {
+            "items": sanitise_many(rows),
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        }
+    )
+
+
+@admin_bp.route("/jobs/dead-letter/replay-bulk", methods=["POST"])
+@role_required("admin")
+def replay_dead_letter_jobs_bulk(user):
+    d = request.get_json(silent=True) or {}
+    raw_ids = d.get("job_ids") or []
+    job_ids = [_as_text(x) for x in raw_ids if _as_text(x)]
+    if not job_ids:
+        return jsonify({"error": "job_ids is required"}), 400
+
+    replayed = 0
+    skipped = 0
+    for job_id in job_ids:
+        if _requeue_dead_letter_job_by_id(job_id):
+            replayed += 1
+        else:
+            skipped += 1
+
+    log_action(
+        "REPLAY_DEAD_LETTER_JOB_BULK",
+        str(user["_id"]),
+        details=f"requested={len(job_ids)}, replayed={replayed}, skipped={skipped}",
+    )
+
+    return jsonify(
+        {
+            "message": "Bulk dead-letter replay processed",
+            "requested": len(job_ids),
+            "replayed": replayed,
+            "skipped": skipped,
         }
     ), 200
+
+
+@admin_bp.route("/jobs/dead-letter/replay-filtered", methods=["POST"])
+@role_required("admin")
+def replay_dead_letter_jobs_filtered(user):
+    d = request.get_json(silent=True) or {}
+    filters = {
+        "q": d.get("q", ""),
+        "job_type": d.get("job_type", ""),
+        "from": d.get("from", ""),
+        "to": d.get("to", ""),
+        "sort_by": d.get("sort_by", "updated_at"),
+        "sort_dir": d.get("sort_dir", "desc"),
+    }
+    limit = max(1, min(_to_int(d.get("limit", 500), 500), 1000))
+
+    try:
+        rows, total_matched = _fetch_dead_letter_rows(filters, include_pagination=False)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    replayed = 0
+    skipped = 0
+    requested_rows = rows[:limit]
+    for row in requested_rows:
+        job_id = _as_text(row.get("job_id"))
+        if not job_id:
+            skipped += 1
+            continue
+        if _requeue_dead_letter_job_by_id(job_id):
+            replayed += 1
+        else:
+            skipped += 1
+
+    log_action(
+        "REPLAY_DEAD_LETTER_JOB_FILTERED",
+        str(user["_id"]),
+        details=(
+            f"matched={total_matched}, limit={limit}, requested={len(requested_rows)}, "
+            f"replayed={replayed}, skipped={skipped}"
+        ),
+    )
+
+    return jsonify(
+        {
+            "message": "Filtered dead-letter replay processed",
+            "matched": total_matched,
+            "limit": limit,
+            "requested": len(requested_rows),
+            "replayed": replayed,
+            "skipped": skipped,
+        }
+    ), 200
+
+
+@admin_bp.route("/jobs/metrics", methods=["GET"])
+@role_required("admin")
+def get_job_metrics(user):
+    jobs = get_collection("attendance", "background_jobs")
+    summary = {
+        "queued": 0,
+        "running": 0,
+        "completed": 0,
+        "dead_letter": 0,
+    }
+
+    for row in jobs.aggregate([
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+    ]):
+        status = _as_text(row.get("_id")).lower()
+        if status in summary:
+            summary[status] = int(row.get("count", 0) or 0)
+
+    queue_depth = None
+    delayed_queue_depth = None
+    due_delayed_count = None
+    client = _get_task_queue_client()
+    if client is not None:
+        try:
+            queue_name, delayed_queue_name = _get_queue_names()
+            queue_depth = int(client.llen(queue_name) or 0)
+            delayed_queue_depth = int(client.zcard(delayed_queue_name) or 0)
+            due_delayed_count = int(client.zcount(delayed_queue_name, 0, int(time.time())) or 0)
+        except Exception:
+            current_app.logger.exception("Unable to read queue metrics")
+
+    running_timeout_seconds = max(30, _to_int(current_app.config.get("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900), 900))
+    stale_cutoff = _utcnow() - timedelta(seconds=running_timeout_seconds)
+    stale_running_count = int(
+        jobs.count_documents({"status": "running", "updated_at": {"$lte": stale_cutoff}})
+    )
+    dead_letter_last_24h = int(
+        jobs.count_documents({"status": "dead_letter", "updated_at": {"$gte": _utcnow() - timedelta(hours=24)}})
+    )
+    recent_dead_letter_jobs = sanitise_many(
+        list(
+            jobs.find(
+                {"status": "dead_letter"},
+                {
+                    "_id": 0,
+                    "job_id": 1,
+                    "job_type": 1,
+                    "error": 1,
+                    "updated_at": 1,
+                    "attempts": 1,
+                    "max_attempts": 1,
+                },
+            )
+            .sort("updated_at", -1)
+            .limit(5)
+        )
+    )
+
+    return jsonify(
+        {
+            "jobs": {
+                "total": int(sum(summary.values())),
+                **summary,
+                "stale_running": stale_running_count,
+                "dead_letter_last_24h": dead_letter_last_24h,
+                "recent_dead_letter_jobs": recent_dead_letter_jobs,
+            },
+            "queue": {
+                "enabled": bool(current_app.config.get("TASK_QUEUE_ENABLED", False)),
+                "depth": queue_depth,
+                "delayed_depth": delayed_queue_depth,
+                "due_delayed": due_delayed_count,
+                "running_timeout_seconds": running_timeout_seconds,
+            },
+        }
+    )
 
 
 @admin_bp.route("/capture-faces", methods=["POST"])
@@ -1692,6 +2690,7 @@ def reassign_course_entities(user):
             f"moved_students={moved_students}, moved_papers={moved_papers}"
         ),
     )
+    _clear_query_cache()
 
     return jsonify(
         {
@@ -1737,13 +2736,19 @@ def list_audit_logs(user):
         filters["timestamp"] = ts_filter
 
     logs, total = get_audit_logs(page, per_page, filters)
+    audit_user_ids = [
+        item.get("performed_by") for item in logs if item.get("performed_by")
+    ] + [
+        item.get("target_user") for item in logs if item.get("target_user")
+    ]
+    user_map = get_users_by_ids(audit_user_ids)
 
     enriched = []
     for raw in logs:
         item = sanitise_mongo_doc(raw)
 
-        actor = _safe_find_user(item.get("performed_by")) if item.get("performed_by") else None
-        target_user = _safe_find_user(item.get("target_user")) if item.get("target_user") else None
+        actor = user_map.get(_as_text(item.get("performed_by"))) if item.get("performed_by") else None
+        target_user = user_map.get(_as_text(item.get("target_user"))) if item.get("target_user") else None
 
         item["actor_name"] = (actor or {}).get("name") or "Unknown User"
         item["actor_email"] = (actor or {}).get("email") or ""
@@ -1841,12 +2846,14 @@ def override_attendance(user):
         log_action("ATTENDANCE_OVERRIDE_ADD", str(user["_id"]),
                    target_user=d["student_id"],
                    details=f"Paper {d['paper_id']}")
+        _clear_query_cache()
         return jsonify({"message": "Attendance added", "log": log}), 201
     else:
         from app.models.attendance import delete_attendance_log
         delete_attendance_log(d["log_id"])
         log_action("ATTENDANCE_OVERRIDE_REMOVE", str(user["_id"]),
                    details=f"Log {d['log_id']}")
+        _clear_query_cache()
         return jsonify({"message": "Attendance removed"}), 200
 
 
@@ -1854,18 +2861,45 @@ def override_attendance(user):
 @role_required("admin")
 def exam_eligibility_summary(user):
     """Admin view of exam eligibility with filters and override states."""
+    cache_key = (
+        "exam_eligibility_summary",
+        tuple(sorted((k, _as_text(v)) for k, v in request.args.items())),
+    )
+    cached_payload = _cache_get(cache_key)
+    if cached_payload is not None:
+        return jsonify(cached_payload)
+
     course_id = _as_text(request.args.get("course_id", ""))
     paper_id = _as_text(request.args.get("paper_id", ""))
     academic_session = _normalise_year(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
     semester_filter = _as_text(request.args.get("semester", ""))
     q = _as_text(request.args.get("q", "")).lower()
     final_eligible_filter = _as_text(request.args.get("final_eligible", ""))
+    include_inactive = _to_bool(request.args.get("include_inactive", False))
 
-    profiles = get_all_profiles()
-    courses = sanitise_many(get_all_courses())
-    papers = sanitise_many(get_all_papers())
+    profiles_col = get_collection("academic", "student_profiles")
+    profiles = list(
+        profiles_col.find(
+            {},
+            {
+                "user_id": 1,
+                "course_id": 1,
+                "academic_year": 1,
+                "academic_session": 1,
+                "year": 1,
+                "current_semester": 1,
+                "enrolled_papers": 1,
+                "reg_number": 1,
+                "roll_number": 1,
+                "created_at": 1,
+            },
+        )
+    )
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
+    papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id", "created_at"]))
     course_map = {c["_id"]: c for c in courses}
     paper_map = {p["_id"]: p for p in papers}
+    user_map = get_users_by_ids(profile.get("user_id") for profile in profiles)
     overrides_col = get_collection("attendance", "exam_eligibility_overrides")
     sessions_col = get_collection("attendance", "attendance_sessions")
 
@@ -1892,17 +2926,24 @@ def exam_eligibility_summary(user):
             if gid_lecturer:
                 classes_happened_by_paper_lecturer[(gid_paper, gid_lecturer)] = count
 
-    items = []
+    selected_profiles = []
+    relevant_student_ids = []
+    relevant_paper_ids = set()
+
     for profile in profiles:
         uid = profile.get("user_id")
         if not uid:
             continue
-        student = _safe_find_user(uid)
+        uid_text = _as_text(uid)
+        student = user_map.get(uid_text)
         if not student:
             continue
 
         stu_course_id = _as_text(profile.get("course_id", ""))
-        course = course_map.get(stu_course_id)
+        course_doc = course_map.get(stu_course_id)
+        course_status = _as_text((course_doc or {}).get("status") or "active").lower() or "active"
+        if course_status != "active" and not include_inactive:
+            continue
         stu_year = _as_text(profile.get("academic_session") or profile.get("academic_year") or profile.get("year"))
         enrolled = profile.get("enrolled_papers", []) or []
         stu_semester = _to_int(profile.get("current_semester"), 0) or None
@@ -1921,15 +2962,87 @@ def exam_eligibility_summary(user):
         if academic_session and stu_year != academic_session:
             continue
 
+        selected_profiles.append((profile, student, uid_text, stu_course_id, stu_year, enrolled, stu_semester))
+        relevant_student_ids.append(uid_text)
+        for pid in enrolled:
+            pid_text = _as_text(pid)
+            if paper_id and pid_text != paper_id:
+                continue
+            paper = paper_map.get(pid_text) or paper_map.get(pid)
+            if not paper:
+                continue
+            paper_semester = _to_int(paper.get("semester"), 0)
+            if semester_filter and str(paper_semester) != semester_filter:
+                continue
+            relevant_paper_ids.add(pid_text)
+
+    student_match_ids = []
+    for sid in relevant_student_ids:
+        student_match_ids.extend(_id_variants(sid))
+    paper_match_ids = []
+    for pid in relevant_paper_ids:
+        paper_match_ids.extend(_id_variants(pid))
+
+    attendance_count_map = {}
+    if student_match_ids and paper_match_ids:
+        attendance_logs = get_collection("attendance", "attendance_logs")
+        for row in attendance_logs.aggregate([
+            {
+                "$match": {
+                    "student_id": {"$in": student_match_ids},
+                    "paper_id": {"$in": paper_match_ids},
+                }
+            },
+            {
+                "$group": {
+                    "_id": {
+                        "student_id": "$student_id",
+                        "paper_id": "$paper_id",
+                    },
+                    "count": {"$sum": 1},
+                }
+            },
+        ]):
+            gid = row.get("_id") or {}
+            attendance_count_map[(
+                _as_text(gid.get("student_id")),
+                _as_text(gid.get("paper_id")),
+            )] = int(row.get("count", 0) or 0)
+
+    override_map = {}
+    if student_match_ids and paper_match_ids:
+        for override in overrides_col.find(
+            {
+                "student_id": {"$in": student_match_ids},
+                "paper_id": {"$in": paper_match_ids},
+            },
+            {
+                "_id": 0,
+                "student_id": 1,
+                "paper_id": 1,
+                "override_status": 1,
+                "reason": 1,
+            },
+        ):
+            key = (_as_text(override.get("student_id")), _as_text(override.get("paper_id")))
+            override_map[key] = {
+                "override_status": override.get("override_status"),
+                "reason": _as_text(override.get("reason", "")),
+            }
+
+    items = []
+    for profile, student, uid, stu_course_id, stu_year, enrolled, stu_semester in selected_profiles:
+        course = course_map.get(stu_course_id)
         per_paper_rows = []
         total_attended_overall = 0
         total_classes_overall = 0
 
         for pid in enrolled:
-            if paper_id and pid != paper_id:
+            pid_text = _as_text(pid)
+            if paper_id and pid_text != paper_id:
                 continue
 
-            paper = paper_map.get(pid)
+            paper = paper_map.get(pid_text) or paper_map.get(pid)
             if not paper:
                 continue
 
@@ -1942,9 +3055,9 @@ def exam_eligibility_summary(user):
 
             # Count classes conducted for this subject by the assigned lecturer,
             # scoped to sessions after the student was enrolled.
-            session_query = {"paper_id": pid}
+            session_query = {"paper_id": {"$in": _id_variants(pid_text)}}
             if lecturer_id_for_paper:
-                session_query["lecturer_id"] = lecturer_id_for_paper
+                session_query["lecturer_id"] = {"$in": _id_variants(lecturer_id_for_paper)}
 
             if profile_created_at:
                 session_query["$or"] = [
@@ -1962,20 +3075,20 @@ def exam_eligibility_summary(user):
                 classes_happened = int(sessions_col.count_documents(session_query) or 0)
             elif lecturer_id_for_paper:
                 classes_happened = int(
-                    classes_happened_by_paper_lecturer.get((pid, lecturer_id_for_paper), 0) or 0
+                    classes_happened_by_paper_lecturer.get((pid_text, lecturer_id_for_paper), 0) or 0
                 )
             else:
-                classes_happened = int(classes_happened_by_paper.get(pid, 0) or 0)
+                classes_happened = int(classes_happened_by_paper.get(pid_text, 0) or 0)
 
-            attended = count_attendance(uid, pid)
+            attended = attendance_count_map.get((_as_text(uid), pid_text), 0)
             pct = round((attended / classes_happened) * 100, 2) if classes_happened > 0 else 0.0
 
             total_attended_overall += attended
             total_classes_overall += classes_happened
 
-            override = overrides_col.find_one({"student_id": uid, "paper_id": pid})
+            override = override_map.get((_as_text(uid), pid_text))
             override_status = None if not override else override.get("override_status")
-            override_reason = "" if not override else _as_text(override.get("reason", ""))
+            override_reason = "" if not override else override.get("reason", "")
 
             if q and not (
                 q in _as_text(student.get("name", "")).lower()
@@ -1994,7 +3107,7 @@ def exam_eligibility_summary(user):
                 "course_id": stu_course_id,
                 "course_name": (course or {}).get("name"),
                 "student_semester": stu_semester,
-                "paper_id": pid,
+                "paper_id": pid_text,
                 "paper_name": paper.get("name", ""),
                 "paper_code": paper.get("code", ""),
                 "semester": paper_semester or None,
@@ -2036,12 +3149,14 @@ def exam_eligibility_summary(user):
             row["eligibility_status"] = eligibility_status
             items.append(row)
 
-    return jsonify({
+    payload = {
         "total": len(items),
         "eligible_count": sum(1 for x in items if x["final_eligible"] is True),
         "ineligible_count": sum(1 for x in items if x["final_eligible"] is False),
         "items": items,
-    })
+    }
+    _cache_set(cache_key, payload, _ELIGIBILITY_CACHE_TTL_SECONDS)
+    return jsonify(payload)
 
 
 @admin_bp.route("/exam-eligibility-override", methods=["PUT"])
@@ -2059,13 +3174,23 @@ def set_exam_eligibility_override(user):
     if d.get("override_status", None) is None:
         return jsonify({"error": "override_status must be true or false"}), 400
 
-    override_status = bool(d.get("override_status"))
+    raw_status = d.get("override_status")
+    if isinstance(raw_status, str):
+        raw_lower = raw_status.strip().lower()
+        if raw_lower not in {"1", "0", "true", "false", "yes", "no", "y", "n"}:
+            return jsonify({"error": "override_status must be true or false"}), 400
+    override_status = _to_bool(raw_status)
 
     overrides_col = get_collection("attendance", "exam_eligibility_overrides")
     overrides_col.update_one(
-        {"student_id": student_id, "paper_id": paper_id},
+        {
+            "student_id": {"$in": _id_variants(student_id)},
+            "paper_id": {"$in": _id_variants(paper_id)},
+        },
         {
             "$set": {
+                "student_id": student_id,
+                "paper_id": paper_id,
                 "override_status": override_status,
                 "reason": reason,
                 "updated_by": str(user["_id"]),
@@ -2081,7 +3206,81 @@ def set_exam_eligibility_override(user):
         target_user=student_id,
         details=f"Paper {paper_id}, override={override_status}, reason={reason}",
     )
+    _clear_query_cache()
     return jsonify({"message": "Eligibility override updated"}), 200
+
+
+@admin_bp.route("/exam-eligibility-override/bulk", methods=["PUT"])
+@role_required("admin")
+def set_exam_eligibility_override_bulk(user):
+    """Bulk override final exam eligibility for multiple student-paper pairs."""
+    d = request.get_json(silent=True) or {}
+    overrides = d.get("overrides")
+
+    if not isinstance(overrides, list) or len(overrides) == 0:
+        return jsonify({"error": "overrides must be a non-empty list"}), 400
+
+    sanitized = []
+    for item in overrides:
+        if not isinstance(item, dict):
+            continue
+
+        student_id = _as_text(item.get("student_id", ""))
+        paper_id = _as_text(item.get("paper_id", ""))
+        if not student_id or not paper_id:
+            continue
+        if item.get("override_status", None) is None:
+            continue
+        if isinstance(item.get("override_status"), str):
+            raw_lower = item.get("override_status", "").strip().lower()
+            if raw_lower not in {"1", "0", "true", "false", "yes", "no", "y", "n"}:
+                continue
+
+        sanitized.append({
+            "student_id": student_id,
+            "paper_id": paper_id,
+            "override_status": _to_bool(item.get("override_status")),
+            "reason": _as_text(item.get("reason", "")),
+        })
+
+    if not sanitized:
+        return jsonify({"error": "No valid override items found"}), 400
+
+    overrides_col = get_collection("attendance", "exam_eligibility_overrides")
+    now = datetime.utcnow()
+    admin_id = str(user["_id"])
+    unique_pairs = set()
+
+    for item in sanitized:
+        pair = (item["student_id"], item["paper_id"])
+        if pair in unique_pairs:
+            continue
+        unique_pairs.add(pair)
+        overrides_col.update_one(
+            {
+                "student_id": {"$in": _id_variants(item["student_id"])},
+                "paper_id": {"$in": _id_variants(item["paper_id"])},
+            },
+            {
+                "$set": {
+                    "student_id": item["student_id"],
+                    "paper_id": item["paper_id"],
+                    "override_status": item["override_status"],
+                    "reason": item["reason"],
+                    "updated_by": admin_id,
+                    "updated_at": now,
+                }
+            },
+            upsert=True,
+        )
+
+    log_action(
+        "EXAM_ELIGIBILITY_OVERRIDE_BULK",
+        admin_id,
+        details=f"Bulk overrides applied: {len(unique_pairs)}",
+    )
+    _clear_query_cache()
+    return jsonify({"message": "Bulk eligibility overrides updated", "updated": len(unique_pairs)}), 200
 
 
 # ─── Dashboard Stats ────────────────────────────────────────────────────────
@@ -2089,6 +3288,25 @@ def set_exam_eligibility_override(user):
 @admin_bp.route("/stats", methods=["GET"])
 @role_required("admin")
 def dashboard_stats(user):
+    cache_key = ("dashboard_stats",)
+    cached_payload = _cache_get(cache_key)
+    if cached_payload is not None:
+        return jsonify(cached_payload)
+
+    started_at = current_app.config.get("APP_STARTED_AT")
+    uptime_seconds = int((datetime.utcnow() - started_at).total_seconds()) if started_at else 0
+    uptime_days, remainder = divmod(max(uptime_seconds, 0), 86400)
+    uptime_hours, remainder = divmod(remainder, 3600)
+    uptime_minutes, uptime_seconds = divmod(remainder, 60)
+
+    uptime_parts = []
+    if uptime_days:
+        uptime_parts.append(f"{uptime_days}d")
+    if uptime_hours or uptime_parts:
+        uptime_parts.append(f"{uptime_hours}h")
+    uptime_parts.append(f"{uptime_minutes}m")
+    system_uptime = " ".join(uptime_parts)
+
     def _month_start(dt):
         return datetime(dt.year, dt.month, 1)
 
@@ -2136,20 +3354,45 @@ def dashboard_stats(user):
 
         return points
 
-    profiles = get_all_profiles()
+    profiles_col = get_collection("academic", "student_profiles")
     by_course = {}
     by_year = {}
-    courses = sanitise_many(get_all_courses())
+    courses = sanitise_many(get_all_courses(["name", "code", "year", "status"]))
     course_map = {c["_id"]: c for c in courses}
 
+    active_course_ids = {
+        c.get("_id")
+        for c in courses
+        if _as_text(c.get("status") or "active").lower() == "active"
+    }
+
+    profiles = list(
+        profiles_col.find(
+            {},
+            {
+                "course_id": 1,
+                "academic_session": 1,
+                "academic_year": 1,
+                "year": 1,
+            },
+        )
+    )
+
     for profile in profiles:
-        cid = profile.get("course_id")
+        cid = _as_text(profile.get("course_id"))
+        if cid and cid not in active_course_ids:
+            continue
+
         course = course_map.get(cid)
         course_key = course.get("name") if course else "Unassigned"
         by_course[course_key] = by_course.get(course_key, 0) + 1
 
-        y = _normalise_year(profile.get("academic_year") or profile.get("year") or (course or {}).get("year")) or "Unknown"
-        by_year[y] = by_year.get(y, 0) + 1
+        year_key = _normalise_year(
+            profile.get("academic_session")
+            or profile.get("academic_year")
+            or profile.get("year")
+        ) or "Unknown"
+        by_year[year_key] = by_year.get(year_key, 0) + 1
 
     users_col = get_collection("auth", "users")
     courses_col = get_collection("academic", "courses")
@@ -2157,14 +3400,49 @@ def dashboard_stats(user):
     attendance_col = get_collection("attendance", "attendance_logs")
     audit_col = get_collection("audit", "audit_logs")
 
-    return jsonify({
+    active_courses_count = courses_col.count_documents({
+        "$or": [
+            {"status": "active"},
+            {"status": {"$exists": False}},
+            {"status": ""},
+            {"status": None},
+        ]
+    })
+    inactive_courses_count = courses_col.count_documents({"status": "inactive"})
+    total_courses_count = active_courses_count + inactive_courses_count
+
+    active_paper_count = 0
+    inactive_paper_count = 0
+    for paper in papers_col.find({}, {"course_id": 1}):
+        paper_course_id = _as_text(paper.get("course_id"))
+        if not paper_course_id or paper_course_id in active_course_ids:
+            active_paper_count += 1
+        else:
+            inactive_paper_count += 1
+
+    app_started_at = None
+    if started_at:
+        iso_started_at = started_at.isoformat()
+        tz_part = iso_started_at[10:]
+        has_tz = iso_started_at.endswith("Z") or "+" in tz_part or "-" in tz_part
+        app_started_at = iso_started_at if has_tz else f"{iso_started_at}Z"
+
+    payload = {
         "total_students": users_col.count_documents({"role": "student"}),
         "total_lecturers": users_col.count_documents({"role": "lecturer"}),
-        "total_courses": courses_col.count_documents({}),
-        "total_papers": papers_col.count_documents({}),
+        "total_courses": total_courses_count,
+        "active_courses": active_courses_count,
+        "inactive_courses": inactive_courses_count,
+        "total_papers": active_paper_count,
+        "inactive_papers": inactive_paper_count,
         "total_attendance": attendance_col.count_documents({}),
         "total_audit_logs": audit_col.count_documents({}),
+        "app_started_at": app_started_at,
+        "system_uptime_seconds": max(int((datetime.utcnow() - started_at).total_seconds()), 0) if started_at else 0,
+        "system_uptime": system_uptime,
         "students_by_course": by_course,
         "students_by_year": by_year,
         "monthly_attendance": _monthly_attendance(attendance_col, months=6),
-    })
+    }
+    _cache_set(cache_key, payload, _QUERY_CACHE_TTL_SECONDS)
+    return jsonify(payload)

@@ -77,13 +77,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Only drop MongoDB databases; keep local uploads/dataset folders",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be removed without deleting anything",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    if not args.yes:
+    if not args.yes and not args.dry_run:
         print("Refusing to run without --yes.")
         print("Example: python delete.py --yes")
         return
@@ -91,12 +96,43 @@ def main() -> None:
     # Disable automatic default-admin seed while running reset.
     app = create_app(seed_default_admin=False)
 
-    with app.app_context():
-        dropped_dbs = _drop_project_databases(app)
+    db_names = [
+        app.config["MONGO_DB_AUTH"],
+        app.config["MONGO_DB_ACADEMIC"],
+        app.config["MONGO_DB_ATTENDANCE"],
+        app.config["MONGO_DB_AUDIT"],
+    ]
 
-    print("Dropped MongoDB databases:")
-    for name in dropped_dbs:
-        print(f"- {name}")
+    if args.dry_run:
+        print("Would drop MongoDB databases:")
+        for name in db_names:
+            print(f"- {name}")
+        if not args.mongo_only:
+            backend_dir = Path(__file__).resolve().parent
+            project_root = backend_dir.parent
+
+            candidate_dirs = [
+                project_root / "uploads",
+                project_root / "dataset",
+                backend_dir / "uploads",
+                backend_dir / "dataset",
+                backend_dir / "instance",
+            ]
+
+            print("Would clear runtime folders:")
+            for folder in candidate_dirs:
+                print(f"- {folder}")
+
+        print("Dry run complete.")
+        return
+
+    else:
+        with app.app_context():
+            dropped_dbs = _drop_project_databases(app)
+
+        print("Dropped MongoDB databases:")
+        for name in dropped_dbs:
+            print(f"- {name}")
 
     if args.mongo_only:
         print("Mongo reset complete. Local files were not touched (--mongo-only).")

@@ -1,6 +1,6 @@
 """Authentication routes."""
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token,
     jwt_required,
@@ -10,8 +10,46 @@ from flask_jwt_extended import (
 )
 
 from app.models.user import find_user_by_email, verify_password, change_user_password
+from app.extensions import mongo
 
 auth_bp = Blueprint("auth", __name__)
+
+
+@auth_bp.route("/health", methods=["GET"])
+def health():
+    """Lightweight health endpoint for DB connectivity and index verification."""
+    status = "ok"
+    checks = {}
+
+    try:
+        mongo.cx.admin.command("ping")
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"failed: {exc}"
+        status = "degraded"
+
+    cfg = current_app.config
+    required_indexes = {
+        (cfg["MONGO_DB_AUTH"], "users"): ["uq_users_email", "ix_users_role"],
+        (cfg["MONGO_DB_ACADEMIC"], "papers"): ["uq_papers_code", "ix_papers_course", "ix_papers_lecturers"],
+        (cfg["MONGO_DB_ACADEMIC"], "student_profiles"): ["uq_profiles_user", "uq_profiles_reg", "ix_profiles_course"],
+        (cfg["MONGO_DB_ATTENDANCE"], "attendance_logs"): ["uq_attendance_session_paper_student", "ix_attendance_timestamp"],
+        (cfg["MONGO_DB_ATTENDANCE"], "attendance_sessions"): ["uq_sessions_id", "ix_sessions_lecturer_created"],
+    }
+
+    missing = []
+    for (db_name, collection_name), names in required_indexes.items():
+        info = mongo.cx[db_name][collection_name].index_information()
+        present = set(info.keys())
+        for name in names:
+            if name not in present:
+                missing.append(f"{db_name}.{collection_name}:{name}")
+
+    checks["indexes_missing"] = missing
+    if missing and status == "ok":
+        status = "degraded"
+
+    return jsonify({"status": status, "checks": checks})
 
 
 @auth_bp.route("/login", methods=["POST"])

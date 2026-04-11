@@ -12,3 +12,4 @@ mediapipe==0.10.21
 keras-facenet==0.3.2
 tensorflow==2.16.2
 gunicorn==23.0.0
+redis==5.2.1

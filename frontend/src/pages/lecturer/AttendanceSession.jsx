@@ -9,6 +9,7 @@ import PinCommitModal from './PinCommitModal';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlay, HiOutlinePause, HiOutlineStop, HiOutlineCheckCircle, HiOutlinePhotograph } from 'react-icons/hi';
+import { formatCourseName } from '../../utils/courseDisplay';
 
 function fmt(dt) {
   if (!dt) return 'N/A';
@@ -64,6 +65,8 @@ export default function AttendanceSession() {
           _id: p.course_id,
           name: p.course_name || 'N/A',
           code: p.course_code || '',
+          status: p.course_status,
+          isInactive: p.is_course_inactive,
         });
       }
     });
@@ -438,7 +441,7 @@ export default function AttendanceSession() {
           <select className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
             <option value="">Select Course</option>
             {courseOptions.map((c) => (
-              <option key={c._id} value={c._id}>{c.name} {c.code ? `(${c.code})` : ''}</option>
+              <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
             ))}
           </select>
           <select className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
@@ -449,7 +452,7 @@ export default function AttendanceSession() {
           </select>
           <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
             <p style={{ color: 'var(--text-muted)' }}>Subject / Course</p>
-            <p style={{ fontWeight: 700 }}>{selectedPaper ? `${selectedPaper.name} · ${selectedPaper.course_name || 'N/A'}` : 'N/A'}</p>
+            <p style={{ fontWeight: 700 }}>{selectedPaper ? `${selectedPaper.name} · ${formatCourseName(selectedPaper.course_name || 'N/A', { status: selectedPaper.course_status, isInactive: selectedPaper.is_course_inactive })}` : 'N/A'}</p>
             {selectedPaper?.is_course_inactive && (
               <p style={{ marginTop: 4, color: 'var(--accent-amber)' }}>Course inactive: attendance locked</p>
             )}

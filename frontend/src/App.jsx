@@ -17,6 +17,7 @@ const ManageStudents = lazy(() => import('./pages/admin/ManageStudents'));
 const StudentEnrollment = lazy(() => import('./pages/admin/StudentEnrollment'));
 const ExamEligibility = lazy(() => import('./pages/admin/ExamEligibility'));
 const AuditTrail = lazy(() => import('./pages/admin/AuditTrail'));
+const DeadLetterJobs = lazy(() => import('./pages/admin/DeadLetterJobs'));
 const LecturerDashboard = lazy(() => import('./pages/lecturer/LecturerDashboard'));
 const AttendanceSession = lazy(() => import('./pages/lecturer/AttendanceSession'));
 const LecturerProgress = lazy(() => import('./pages/lecturer/LecturerProgress'));
@@ -74,6 +75,7 @@ export default function App() {
                 <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />
                 <Route path="/admin/exam-eligibility" element={<LazyPage><ExamEligibility /></LazyPage>} />
                 <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
+                <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
               </Route>
 
               {/* Lecturer */}

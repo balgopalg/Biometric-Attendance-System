@@ -36,9 +36,14 @@ def get_profile_by_id(profile_id):
     return profiles.find_one({"_id": ObjectId(profile_id)})
 
 
-def get_all_profiles():
+def get_all_profiles(fields=None):
     profiles = get_collection("academic", "student_profiles")
-    return list(profiles.find())
+    projection = None
+    if fields:
+        projection = {field: 1 for field in fields}
+        projection["_id"] = 1
+    cursor = profiles.find({}, projection) if projection else profiles.find()
+    return list(cursor)
 
 
 def add_face_embedding(user_id, embedding, photo_url=None):

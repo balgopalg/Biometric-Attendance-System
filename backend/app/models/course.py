@@ -20,9 +20,14 @@ def create_course(name, code, department, course_duration):
     return doc
 
 
-def get_all_courses():
+def get_all_courses(fields=None):
     courses = get_collection("academic", "courses")
-    return list(courses.find())
+    projection = None
+    if fields:
+        projection = {field: 1 for field in fields}
+        projection["_id"] = 1
+    cursor = courses.find({}, projection) if projection else courses.find()
+    return list(cursor)
 
 
 def get_course_by_id(course_id):

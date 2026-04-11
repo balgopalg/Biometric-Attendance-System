@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../../api/axios';
+import { formatCourseName } from '../../utils/courseDisplay';
 import StatsCard from '../../components/ui/StatsCard';
 import { motion } from 'framer-motion';
 import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator } from 'react-icons/hi';
@@ -59,6 +60,8 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState(null);
 
   const assignedPapers = profile?.papers || profile?.subjects || [];
+  const courseStatus = String(profile?.course_status || profile?.course?.status || 'active').toLowerCase();
+  const isCourseInactive = courseStatus !== 'active';
   const derivedSemesterFromPapers = assignedPapers
     .map((p) => parseSemesterFromPaper(p))
     .filter((s) => Number.isFinite(s) && s > 0)
@@ -82,11 +85,20 @@ export default function StudentDashboard() {
   const overallPrediction = predictions[0] || null;
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="student-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome, <span className="gradient-text">Student</span></h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Your attendance overview at a glance.</p>
       </div>
+
+      {isCourseInactive && (
+        <div className="glass-card" style={{ padding: '12px 16px', marginBottom: 20, borderLeft: '3px solid var(--accent-rose)' }}>
+          <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-rose)' }}>Course discontinued</p>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
+            Your course is currently discontinued until further notice. Some actions may remain restricted.
+          </p>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
         <StatsCard
@@ -107,7 +119,9 @@ export default function StudentDashboard() {
           </div>
           <div>
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Course</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{profile?.course?.name || 'N/A'}</p>
+            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>
+              {formatCourseName(profile?.course?.name || 'N/A', { status: profile?.course_status || profile?.course?.status, isInactive: isCourseInactive })}
+            </p>
           </div>
           <div>
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Course Code</p>

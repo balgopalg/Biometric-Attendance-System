@@ -127,6 +127,17 @@ STRICT_JWT_SECRET=0
 FACENET_THRESHOLD=0.60
 CORS_ORIGINS=http://localhost:5173
 UPLOAD_FOLDER=uploads
+SLOW_REQUEST_THRESHOLD_MS=500
+
+# Optional async job queue (recommended for production)
+TASK_QUEUE_ENABLED=0
+TASK_QUEUE_REDIS_URL=redis://localhost:6379/0
+TASK_QUEUE_NAME=biometric:jobs
+TASK_QUEUE_MAX_RETRIES=3
+TASK_QUEUE_BASE_BACKOFF_SECONDS=10
+TASK_QUEUE_MAX_BACKOFF_SECONDS=300
+TASK_QUEUE_BACKOFF_JITTER_RATIO=0.25
+TASK_QUEUE_RUNNING_TIMEOUT_SECONDS=900
 ```
 
 Use your own strong JWT secret. Do not reuse sample values in production.
@@ -142,6 +153,27 @@ npm run dev
 ```
 
 Frontend runs on `http://localhost:5173`.
+
+### Optional Worker (Production Queue Mode)
+
+If `TASK_QUEUE_ENABLED=1`, start a separate worker process:
+
+```bash
+cd backend
+python worker.py
+```
+
+Queue behavior in this mode:
+
+- Jobs are persisted in MongoDB (`attendance.background_jobs`)
+- Failed jobs retry with exponential backoff and jitter
+- After max retries, jobs move to dead-letter status (`dead_letter`)
+- Stale running jobs are automatically recovered and re-queued by workers
+- Metrics endpoint for admins: `GET /api/admin/jobs/metrics`
+- List dead-letter jobs: `GET /api/admin/jobs/dead-letter` (supports `q`, `job_type`, `from`, `to`, `sort_by`, `sort_dir`, pagination)
+- Replay dead-letter jobs: `POST /api/admin/jobs/<job_id>/replay`
+- Bulk replay dead-letter jobs: `POST /api/admin/jobs/dead-letter/replay-bulk`
+- Replay all currently filtered dead-letter jobs: `POST /api/admin/jobs/dead-letter/replay-filtered`
 
 Vite proxy forwards `/api/*` to backend port `5000`.
 Optional override:
@@ -197,11 +229,26 @@ Safer mode (database only, keep files):
 python delete.py --yes --mongo-only
 ```
 
+Preview mode (no deletion):
+
+```bash
+python delete.py --dry-run
+```
+
 After reset:
 
 ```bash
 python seedAdmin.py
 python run.py
+```
+
+### Database Diagnostics
+
+Check counts and required indexes:
+
+```bash
+cd backend
+python db_diagnostics.py
 ```
 
 ## Authentication Transport

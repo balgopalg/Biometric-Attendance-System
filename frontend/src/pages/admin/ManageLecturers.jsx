@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
+import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
+import Pagination from '../../components/ui/Pagination';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
@@ -14,9 +16,12 @@ import {
 } from 'react-icons/hi';
 
 const EMPTY_FORM = { name: '', email: '' };
+const PAGE_SIZE = 10;
 
 export default function ManageLecturers() {
   const [lecturers, setLecturers] = useState([]);
+  const [totalLecturers, setTotalLecturers] = useState(0);
+  const [page, setPage] = useState(1);
   const [courses, setCourses] = useState([]);
   const [papers, setPapers] = useState([]);
 
@@ -37,12 +42,26 @@ export default function ManageLecturers() {
     api.get('/admin/papers').then((r) => setPapers(r.data)).catch(() => {});
   };
 
-  const fetchLecturers = () => {
+  const fetchLecturers = (nextPage = 1) => {
     const params = {};
+    params.page = nextPage;
+    params.per_page = PAGE_SIZE;
+    if (search) params.q = search;
     if (filters.course_id) params.course_id = filters.course_id;
     if (filters.semester) params.semester = filters.semester;
     if (filters.paper_id) params.paper_id = filters.paper_id;
-    api.get('/admin/lecturers', { params }).then((r) => setLecturers(r.data)).catch(() => {});
+    api.get('/admin/lecturers', { params }).then((r) => {
+      const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+      const resolvedTotal = Number(r.data?.total || items.length || 0);
+      const maxPage = Math.max(1, Math.ceil(resolvedTotal / PAGE_SIZE));
+      if (resolvedTotal > 0 && nextPage > maxPage) {
+        fetchLecturers(maxPage);
+        return;
+      }
+      setLecturers(items);
+      setTotalLecturers(resolvedTotal);
+      setPage(Number(r.data?.page || nextPage));
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -50,8 +69,8 @@ export default function ManageLecturers() {
   }, []);
 
   useEffect(() => {
-    fetchLecturers();
-  }, [filters.course_id, filters.semester, filters.paper_id]);
+    fetchLecturers(1);
+  }, [filters.course_id, filters.semester, filters.paper_id, search]);
 
   const semesterOptions = useMemo(() => {
     const values = new Set();
@@ -71,15 +90,6 @@ export default function ManageLecturers() {
     });
   }, [papers, filters.course_id, filters.semester]);
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return lecturers.filter((l) =>
-      l.name?.toLowerCase().includes(q)
-      || l.email?.toLowerCase().includes(q)
-      || (l.assigned_papers || []).some((s) => s.toLowerCase().includes(q))
-    );
-  }, [lecturers, search]);
-
   const handleAdd = async () => {
     try {
       const res = await api.post('/admin/lecturers', { ...form, role: 'lecturer' });
@@ -92,7 +102,7 @@ export default function ManageLecturers() {
         temp_password: data.temp_password,
       });
       setShowCreds(true);
-      fetchLecturers();
+      fetchLecturers(page);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed');
     }
@@ -103,7 +113,7 @@ export default function ManageLecturers() {
     try {
       await api.delete(`/admin/lecturers/${id}`);
       toast.success('Deleted');
-      fetchLecturers();
+      fetchLecturers(page);
     } catch (err) {
       toast.error('Failed to delete');
     }
@@ -153,7 +163,7 @@ export default function ManageLecturers() {
       setShowAssign(false);
       setSelectedLecturer(null);
       setAssignedPaperIds([]);
-      fetchLecturers();
+      fetchLecturers(page);
       fetchMetadata();
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update assignments');
@@ -168,13 +178,13 @@ export default function ManageLecturers() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Lecturers</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{lecturers.length} lecturers in current filter</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalLecturers} lecturers in current filter</p>
         </div>
         <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
           <HiOutlinePlus size={16} /> Add Lecturer
@@ -188,7 +198,7 @@ export default function ManageLecturers() {
         </div>
         <select className="input-field" value={filters.course_id} onChange={(e) => setFilters({ course_id: e.target.value, semester: '', paper_id: '' })}>
           <option value="">All Courses</option>
-          {courses.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+          {courses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
         </select>
 
         <select className="input-field" value={filters.semester} onChange={(e) => setFilters({ ...filters, semester: e.target.value, paper_id: '' })}>
@@ -213,7 +223,7 @@ export default function ManageLecturers() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((l) => (
+            {lecturers.map((l) => (
               <tr key={l._id}>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -265,12 +275,14 @@ export default function ManageLecturers() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {lecturers.length === 0 && (
               <tr><td colSpan="4" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No lecturers found.</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} total={totalLecturers} perPage={PAGE_SIZE} onPageChange={fetchLecturers} />
 
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Lecturer" width={480}>
         <div style={{ marginBottom: 14 }}>
@@ -309,7 +321,7 @@ export default function ManageLecturers() {
                     setAssignedPaperIds(next);
                   }}
                 />
-                {p.name} ({p.code}) {p.course_name ? `- ${p.course_name}` : ''}
+                {p.name} ({p.code}) {p.course_name ? `- ${formatCourseName(p.course_name, { isInactive: p.is_course_inactive, status: p.course_status })}` : ''}
               </label>
             );
           })}

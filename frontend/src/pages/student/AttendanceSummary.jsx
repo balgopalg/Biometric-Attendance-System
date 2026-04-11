@@ -1,16 +1,36 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import api from '../../api/axios';
 import { motion } from 'framer-motion';
+import { HiOutlineChevronDown, HiOutlineChevronUp } from 'react-icons/hi';
+
+function formatSessionDateTime(session) {
+  const value = session?.timestamp || session?.date_time || session?.date;
+  if (!value) return 'N/A';
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+
+  return parsed.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+}
 
 export default function AttendanceSummary() {
   const [data, setData] = useState([]);
+  const [expandedPaperId, setExpandedPaperId] = useState('');
 
   useEffect(() => {
     api.get('/student/attendance').then((r) => setData(r.data)).catch(() => {});
   }, []);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <motion.div className="student-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Attendance Summary</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Detailed view of your attendance across all papers.</p>
@@ -26,7 +46,9 @@ export default function AttendanceSummary() {
               const color = !hasLectures
                 ? 'var(--text-muted)'
                 : (pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)');
+              const isExpanded = expandedPaperId === a.paper_id;
               return (
+                <Fragment key={a.paper_id}>
                 <tr key={a.paper_id}>
                   <td><span className="badge badge-info">{a.paper_code}</span></td>
                   <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{a.paper_name}</td>
@@ -41,11 +63,60 @@ export default function AttendanceSummary() {
                     </div>
                   </td>
                   <td>
-                    <span className={`badge ${!hasLectures ? 'badge-info' : (pct >= 75 ? 'badge-success' : pct >= 50 ? 'badge-warning' : 'badge-danger')}`}>
-                      {!hasLectures ? 'No Lectures yet' : (pct >= 75 ? 'Good' : pct >= 50 ? 'Warning' : 'Critical')}
-                    </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                      <span className={`badge ${!hasLectures ? 'badge-info' : (pct >= 75 ? 'badge-success' : pct >= 50 ? 'badge-warning' : 'badge-danger')}`}>
+                        {!hasLectures ? 'No Lectures yet' : (pct >= 75 ? 'Good' : pct >= 50 ? 'Warning' : 'Critical')}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={isExpanded ? 'Collapse class details' : 'Expand class details'}
+                        onClick={() => setExpandedPaperId(isExpanded ? '' : a.paper_id)}
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: '50%',
+                          border: '1px solid var(--border-glass)',
+                          background: 'var(--bg-glass)',
+                          display: 'grid',
+                          placeItems: 'center',
+                          cursor: 'pointer',
+                          color: 'var(--text-primary)',
+                        }}
+                      >
+                        {isExpanded ? <HiOutlineChevronUp size={16} /> : <HiOutlineChevronDown size={16} />}
+                      </button>
+                    </div>
                   </td>
                 </tr>
+                {isExpanded && (
+                  <tr key={`${a.paper_id}-details`}>
+                    <td colSpan="6" style={{ paddingTop: 0, paddingBottom: 16 }}>
+                      <div style={{ marginLeft: 16, borderLeft: '2px solid var(--border-glass)', paddingLeft: 14 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr', gap: 10, padding: '8px 0', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                          <span>Date & Time</span>
+                          <span>Status</span>
+                          <span>Session</span>
+                        </div>
+                        {(a.sessions || []).length === 0 ? (
+                          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '8px 0' }}>No class sessions found for this paper.</p>
+                        ) : (
+                          (a.sessions || []).map((session) => (
+                            <div key={session.session_id} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border-glass)', fontSize: '0.8rem' }}>
+                              <span>{formatSessionDateTime(session)}</span>
+                              <span>
+                                <span className={`badge ${session.present ? 'badge-success' : 'badge-danger'}`}>
+                                  {session.status}
+                                </span>
+                              </span>
+                              <span style={{ color: 'var(--text-muted)' }}>{session.session_id ? session.session_id.slice(0, 8) : 'N/A'}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
             {data.length === 0 && <tr><td colSpan="6" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No attendance data available.</td></tr>}
