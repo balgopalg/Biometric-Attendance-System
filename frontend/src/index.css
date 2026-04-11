@@ -590,6 +590,10 @@ body {
   border-radius: 12px;
 }
 
+.admin-page .attendance-matrix-table th {
+  top: auto;
+}
+
 .admin-page .mobile-card-list {
   display: none;
   gap: 10px;

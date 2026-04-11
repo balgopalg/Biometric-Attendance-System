@@ -4,13 +4,15 @@ import re
 import random
 import os
 import time
+import csv
+from io import BytesIO, StringIO
 from datetime import datetime, timedelta
 import cv2
 import numpy as np
 from threading import Lock, Thread
 from uuid import uuid4
 
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, send_file
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
@@ -76,6 +78,7 @@ _QUERY_CACHE_TTL_SECONDS = 30
 _ELIGIBILITY_CACHE_TTL_SECONDS = 20
 _QUEUE_CLIENT = None
 _QUEUE_CLIENT_LOCK = Lock()
+_QUEUE_UNAVAILABLE_LOGGED = False
 
 
 def _utcnow():
@@ -155,7 +158,10 @@ def _get_queue_names():
 
 
 def _get_task_queue_client():
-    global _QUEUE_CLIENT
+    global _QUEUE_CLIENT, _QUEUE_UNAVAILABLE_LOGGED
+    if not current_app.config.get("TASK_QUEUE_ENABLED", False):
+        return None
+
     if redis is None:
         return None
 
@@ -167,8 +173,22 @@ def _get_task_queue_client():
         if not queue_url:
             return None
 
-        _QUEUE_CLIENT = redis.Redis.from_url(queue_url, decode_responses=True)
-        return _QUEUE_CLIENT
+        try:
+            client = redis.Redis.from_url(queue_url, decode_responses=True)
+            # Validate connectivity once so callers don't explode on first command.
+            client.ping()
+            _QUEUE_CLIENT = client
+            _QUEUE_UNAVAILABLE_LOGGED = False
+            return _QUEUE_CLIENT
+        except Exception as exc:
+            _QUEUE_CLIENT = None
+            if not _QUEUE_UNAVAILABLE_LOGGED:
+                current_app.logger.warning(
+                    "Redis unavailable (%s). Falling back to local in-process queue mode.",
+                    exc,
+                )
+                _QUEUE_UNAVAILABLE_LOGGED = True
+            return None
 
 
 def _enqueue_background_job(job_id, delay_seconds=0):
@@ -3281,6 +3301,514 @@ def set_exam_eligibility_override_bulk(user):
     )
     _clear_query_cache()
     return jsonify({"message": "Bulk eligibility overrides updated", "updated": len(unique_pairs)}), 200
+
+
+def _parse_iso_date(value):
+    text = _as_text(value)
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _build_attendance_matrix_payload(args):
+    course_id = _as_text(args.get("course_id", ""))
+    academic_session = _normalise_year(args.get("academic_session", "")) or _normalise_year(args.get("academic_year", ""))
+    semester_filter = _as_text(args.get("semester", ""))
+    tz_offset_minutes = _to_int(args.get("tz_offset_minutes", 0), 0)
+
+    def _to_local(dt):
+        if not isinstance(dt, datetime):
+            return None
+        # Browser sends JS getTimezoneOffset() minutes, so local = utc - offset.
+        return dt - timedelta(minutes=tz_offset_minutes)
+
+    from_date = _parse_iso_date(args.get("from_date", ""))
+    to_date = _parse_iso_date(args.get("to_date", ""))
+    if to_date:
+        to_date = to_date + timedelta(days=1)
+
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "course_duration"]))
+    papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id"]))
+    paper_map = {p["_id"]: p for p in papers}
+
+    allowed_papers = []
+    for paper in papers:
+        pid = _as_text(paper.get("_id"))
+        if not pid:
+            continue
+        if course_id and _as_text(paper.get("course_id")) != course_id:
+            continue
+        if semester_filter and _as_text(paper.get("semester")) != semester_filter:
+            continue
+        allowed_papers.append(pid)
+
+    allowed_paper_set = set(allowed_papers)
+
+    profiles_col = get_collection("academic", "student_profiles")
+    profiles = list(
+        profiles_col.find(
+            {},
+            {
+                "_id": 0,
+                "user_id": 1,
+                "course_id": 1,
+                "academic_session": 1,
+                "academic_year": 1,
+                "year": 1,
+                "current_semester": 1,
+                "roll_number": 1,
+                "reg_number": 1,
+                "enrolled_papers": 1,
+            },
+        )
+    )
+
+    available_sessions = set()
+    for profile in profiles:
+        profile_course_id = _as_text(profile.get("course_id"))
+        if course_id and profile_course_id != course_id:
+            continue
+        profile_session = _as_text(profile.get("academic_session") or profile.get("academic_year") or profile.get("year"))
+        if profile_session:
+            available_sessions.add(profile_session)
+
+    candidate_students = []
+    for profile in profiles:
+        user_id = _as_text(profile.get("user_id"))
+        if not user_id:
+            continue
+
+        stu_course_id = _as_text(profile.get("course_id"))
+        if course_id and stu_course_id != course_id:
+            continue
+
+        stu_session = _as_text(profile.get("academic_session") or profile.get("academic_year") or profile.get("year"))
+        if academic_session and stu_session != academic_session:
+            continue
+
+        enrolled = [_as_text(pid) for pid in (profile.get("enrolled_papers") or []) if _as_text(pid)]
+        if allowed_paper_set:
+            enrolled = [pid for pid in enrolled if pid in allowed_paper_set]
+
+        if semester_filter:
+            current_sem = _as_text(profile.get("current_semester"))
+            has_semester_paper = any(_as_text((paper_map.get(pid) or {}).get("semester")) == semester_filter for pid in enrolled)
+            if current_sem != semester_filter and not has_semester_paper:
+                continue
+
+        candidate_students.append(
+            {
+                "user_id": user_id,
+                "roll_no": _as_text(profile.get("roll_number") or profile.get("reg_number")),
+                "enrolled_papers": enrolled,
+            }
+        )
+
+    user_map = get_users_by_ids([s["user_id"] for s in candidate_students])
+
+    students = []
+    for stu in candidate_students:
+        user_doc = user_map.get(stu["user_id"]) or {}
+        students.append(
+            {
+                "student_id": stu["user_id"],
+                "roll_no": stu["roll_no"] or "N/A",
+                "name": _as_text(user_doc.get("name", "Unknown")) or "Unknown",
+                "enrolled_papers": stu["enrolled_papers"],
+            }
+        )
+
+    student_ids = set(s["student_id"] for s in students)
+
+    if allowed_paper_set:
+        paper_filter_set = set(allowed_paper_set)
+    else:
+        paper_filter_set = set()
+        for stu in students:
+            for pid in stu.get("enrolled_papers", []):
+                paper_filter_set.add(pid)
+
+    session_query = {}
+    if not paper_filter_set:
+        session_docs = []
+    else:
+        paper_match_ids = []
+        for pid in paper_filter_set:
+            paper_match_ids.extend(_id_variants(pid))
+        session_query["paper_id"] = {"$in": paper_match_ids}
+
+        committed_range = {}
+        if from_date:
+            committed_range["$gte"] = from_date
+        if to_date:
+            committed_range["$lt"] = to_date
+        if committed_range:
+            session_query["committed_at"] = committed_range
+
+        sessions_col = get_collection("attendance", "attendance_sessions")
+        session_docs = list(
+            sessions_col.find(
+                session_query,
+                {
+                    "_id": 0,
+                    "session_id": 1,
+                    "paper_id": 1,
+                    "student_ids": 1,
+                    "committed_at": 1,
+                    "last_updated_at": 1,
+                    "period_number": 1,
+                    "period": 1,
+                },
+            )
+        )
+
+    date_subject_sessions = {}
+    for doc in session_docs:
+        paper_id = _as_text(doc.get("paper_id"))
+        if not paper_id:
+            continue
+        if paper_filter_set and paper_id not in paper_filter_set:
+            continue
+
+        dt = doc.get("committed_at") or doc.get("last_updated_at")
+        if not isinstance(dt, datetime):
+            continue
+        local_dt = _to_local(dt)
+        date_key = local_dt.strftime("%Y-%m-%d")
+
+        paper = paper_map.get(paper_id) or {}
+        subject_code = _as_text(paper.get("code") or paper.get("name") or "SUB")
+        subject_name = _as_text(paper.get("name") or paper.get("code") or "Subject")
+        period_number = _as_text(doc.get("period_number") or doc.get("period"))
+        session_id = _as_text(doc.get("session_id"))
+        timestamp_key = local_dt.strftime("%Y%m%d%H%M%S%f")
+
+        # Keep every committed class distinct, even for same subject/date/period.
+        subject_key = f"{paper_id}::{period_number or 'NA'}::{session_id or timestamp_key}"
+        compound_key = f"{date_key}::{subject_key}"
+
+        if compound_key not in date_subject_sessions:
+            date_subject_sessions[compound_key] = {
+                "date": date_key,
+                "paper_id": paper_id,
+                "subject_code": subject_code,
+                "subject_name": subject_name,
+                "period_number": period_number,
+                "column_key": compound_key,
+                "present_set": set(),
+            }
+
+        for sid in (doc.get("student_ids") or []):
+            sid_text = _as_text(sid)
+            if sid_text:
+                date_subject_sessions[compound_key]["present_set"].add(sid_text)
+
+    ordered_columns = sorted(
+        date_subject_sessions.values(),
+        key=lambda x: (
+            x.get("date") or "",
+            _to_int(x.get("period_number"), 0),
+            x.get("subject_code") or "",
+            x.get("paper_id") or "",
+        ),
+    )
+
+    # Global sequence across all class slots in selected range.
+    for idx, col in enumerate(ordered_columns, start=1):
+        col["global_sequence"] = idx
+
+    grouped_dates = {}
+    for col in ordered_columns:
+        d = col["date"]
+        date_bucket = grouped_dates.setdefault(d, [])
+        slot_index = len(date_bucket)
+        if slot_index < 26:
+            subject_slot = chr(ord("A") + slot_index)
+        else:
+            subject_slot = f"S{slot_index + 1}"
+
+        date_bucket.append(
+            {
+                "column_key": col["column_key"],
+                "paper_id": col["paper_id"],
+                "subject_code": col["subject_code"],
+                "subject_name": col["subject_name"],
+                "subject_slot": subject_slot,
+                "period_number": col["period_number"],
+                "sequence_number": col.get("global_sequence"),
+                "label": f"{col['subject_code']} ({col['period_number']})" if col["period_number"] else col["subject_code"],
+            }
+        )
+
+    dates = [{"date": d, "subjects": grouped_dates[d]} for d in sorted(grouped_dates.keys())]
+
+    students.sort(key=lambda x: (x.get("roll_no") or "", x.get("name") or ""))
+    rows = []
+    for stu in students:
+        cell_map = {}
+        attended_counter = 0
+        for col in ordered_columns:
+            present = stu["student_id"] in col["present_set"]
+            if present:
+                attended_counter += 1
+                cell_map[col["column_key"]] = _as_text(attended_counter) or "1"
+            else:
+                cell_map[col["column_key"]] = "X"
+
+        date_summary = {}
+        for date_entry in dates:
+            parts = []
+            for sub in date_entry["subjects"]:
+                parts.append(cell_map.get(sub["column_key"], "X"))
+            date_summary[date_entry["date"]] = " : ".join(parts) if parts else ""
+
+        rows.append(
+            {
+                "student_id": stu["student_id"],
+                "roll_no": stu["roll_no"],
+                "name": stu["name"],
+                "cells": cell_map,
+                "date_summary": date_summary,
+            }
+        )
+
+    available_semesters = set()
+    for paper in papers:
+        if course_id and _as_text(paper.get("course_id")) != course_id:
+            continue
+        sem = _as_text(paper.get("semester"))
+        if sem:
+            available_semesters.add(sem)
+
+    if not available_semesters and course_id:
+        course_doc = next((c for c in courses if _as_text(c.get("_id")) == course_id), None)
+        duration_years = _to_int((course_doc or {}).get("course_duration"), 0)
+        if duration_years > 0:
+            for sem in range(1, duration_years * 2 + 1):
+                available_semesters.add(str(sem))
+
+    options_courses = []
+    for course in courses:
+        options_courses.append(
+            {
+                "_id": _as_text(course.get("_id")),
+                "name": _as_text(course.get("name")),
+                "code": _as_text(course.get("code")),
+                "status": _as_text(course.get("status") or "active").lower() or "active",
+                "course_duration": _to_int(course.get("course_duration"), 0),
+            }
+        )
+
+    options_courses.sort(key=lambda x: (x.get("name") or "", x.get("code") or ""))
+
+    return {
+        "filters": {
+            "course_id": course_id or None,
+            "academic_session": academic_session or None,
+            "semester": semester_filter or None,
+            "tz_offset_minutes": tz_offset_minutes,
+            "from_date": _as_text(args.get("from_date", "")) or None,
+            "to_date": _as_text(args.get("to_date", "")) or None,
+        },
+        "options": {
+            "courses": options_courses,
+            "academic_sessions": sorted(available_sessions),
+            "semesters": sorted(available_semesters, key=lambda x: _to_int(x, 0)),
+        },
+        "meta": {
+            "students_count": len(rows),
+            "dates_count": len(dates),
+            "sessions_count": len(ordered_columns),
+            "subject_columns_count": len(ordered_columns),
+        },
+        "dates": dates,
+        "rows": rows,
+    }
+
+
+@admin_bp.route("/attendance-matrix", methods=["GET"])
+@role_required("admin")
+def attendance_matrix(user):
+    cache_key = (
+        "attendance_matrix",
+        tuple(sorted((k, _as_text(v)) for k, v in request.args.items())),
+    )
+    cached_payload = _cache_get(cache_key)
+    if cached_payload is not None:
+        return jsonify(cached_payload)
+
+    payload = _build_attendance_matrix_payload(request.args)
+    _cache_set(cache_key, payload, _QUERY_CACHE_TTL_SECONDS)
+    return jsonify(payload)
+
+
+@admin_bp.route("/attendance-matrix/export", methods=["GET"])
+@role_required("admin")
+def attendance_matrix_export(user):
+    payload = _build_attendance_matrix_payload(request.args)
+    tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+    except Exception:
+        return jsonify({"error": "openpyxl is required for Excel export. Install it in backend requirements."}), 500
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Attendance Matrix"
+
+    dates = payload.get("dates") or []
+    rows = payload.get("rows") or []
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=2, end_column=1)
+    ws.merge_cells(start_row=1, start_column=2, end_row=2, end_column=2)
+    ws.cell(row=1, column=1, value="Roll No")
+    ws.cell(row=1, column=2, value="Name")
+
+    header_fill = PatternFill(fill_type="solid", fgColor="DDEBF7")
+    header_font = Font(bold=True)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin = Side(style="thin", color="D9D9D9")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    col_idx = 3
+    ordered_subjects = []
+    for date_entry in dates:
+        subjects = date_entry.get("subjects") or []
+        if not subjects:
+            continue
+
+        start_col = col_idx
+        for sub in subjects:
+            ws.cell(
+                row=2,
+                column=col_idx,
+                value=_as_text(sub.get("subject_code") or sub.get("subject_name") or "SUB"),
+            )
+            ordered_subjects.append(sub)
+            col_idx += 1
+
+        end_col = col_idx - 1
+        if end_col > start_col:
+            ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
+        ws.cell(row=1, column=start_col, value=_as_text(date_entry.get("date")) or "Date")
+
+    total_attended_col = col_idx
+    total_held_col = col_idx + 1
+    percentage_col = col_idx + 2
+
+    ws.merge_cells(start_row=1, start_column=total_attended_col, end_row=2, end_column=total_attended_col)
+    ws.merge_cells(start_row=1, start_column=total_held_col, end_row=2, end_column=total_held_col)
+    ws.merge_cells(start_row=1, start_column=percentage_col, end_row=2, end_column=percentage_col)
+
+    ws.cell(row=1, column=total_attended_col, value="TCA")
+    ws.cell(row=1, column=total_held_col, value="TCH")
+    ws.cell(row=1, column=percentage_col, value="%")
+
+    body_start_row = 3
+    for i, row in enumerate(rows, start=body_start_row):
+        ws.cell(row=i, column=1, value=row.get("roll_no"))
+        ws.cell(row=i, column=2, value=row.get("name"))
+
+        total_attended = 0
+        total_held = 0
+        for j, sub in enumerate(ordered_subjects, start=3):
+            value = _as_text((row.get("cells") or {}).get(sub.get("column_key"), "X")) or "X"
+            ws.cell(row=i, column=j, value=value)
+            total_held += 1
+            if value.upper() != "X":
+                total_attended += 1
+
+        percentage = round((total_attended / total_held) * 100, 2) if total_held > 0 else 0
+        ws.cell(row=i, column=total_attended_col, value=total_attended)
+        ws.cell(row=i, column=total_held_col, value=total_held)
+        ws.cell(row=i, column=percentage_col, value=f"{percentage}%")
+
+    max_col = max(2, percentage_col)
+    max_row = max(2, body_start_row + len(rows) - 1)
+    for r in range(1, max_row + 1):
+        for c in range(1, max_col + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.border = border
+            cell.alignment = center
+            if r <= 2:
+                cell.fill = header_fill
+                cell.font = header_font
+
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 24
+    for c in range(3, total_attended_col):
+        ws.column_dimensions[get_column_letter(c)].width = 14
+    ws.column_dimensions[get_column_letter(total_attended_col)].width = 20
+    ws.column_dimensions[get_column_letter(total_held_col)].width = 18
+    ws.column_dimensions[get_column_letter(percentage_col)].width = 14
+
+    stream = BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+
+    local_now = datetime.utcnow() - timedelta(minutes=tz_offset_minutes)
+    filename = f"attendance_matrix_{local_now.strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return send_file(
+        stream,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@admin_bp.route("/attendance-matrix/export-csv", methods=["GET"])
+@role_required("admin")
+def attendance_matrix_export_csv(user):
+    payload = _build_attendance_matrix_payload(request.args)
+    tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
+
+    dates = payload.get("dates") or []
+    rows = payload.get("rows") or []
+
+    output = StringIO()
+    writer = csv.writer(output)
+
+    header_row_1 = ["Roll No", "Name"]
+    header_row_2 = ["", ""]
+    ordered_subjects = []
+
+    for date_entry in dates:
+        subjects = date_entry.get("subjects") or []
+        if not subjects:
+            continue
+        for _ in subjects:
+            header_row_1.append(date_entry.get("date"))
+        for sub in subjects:
+            header_row_2.append(sub.get("subject_slot") or sub.get("subject_code") or sub.get("label") or "SUB")
+            ordered_subjects.append(sub)
+
+    writer.writerow(header_row_1)
+    writer.writerow(header_row_2)
+
+    for row in rows:
+        line = [row.get("roll_no"), row.get("name")]
+        for sub in ordered_subjects:
+            line.append((row.get("cells") or {}).get(sub.get("column_key"), "X"))
+        writer.writerow(line)
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    stream = BytesIO(csv_bytes)
+    stream.seek(0)
+    local_now = datetime.utcnow() - timedelta(minutes=tz_offset_minutes)
+    filename = f"attendance_matrix_{local_now.strftime('%Y%m%d_%H%M%S')}.csv"
+
+    return send_file(
+        stream,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="text/csv",
+    )
 
 
 # ─── Dashboard Stats ────────────────────────────────────────────────────────
