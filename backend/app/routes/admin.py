@@ -1784,6 +1784,15 @@ def edit_student(user, sid):
         profile_fields["year"] = profile_fields["academic_year"]
         profile_fields["academic_session"] = profile_fields["academic_year"]
 
+    if "roll_number" in profile_fields:
+        profile_fields["roll_number"] = _as_text(profile_fields.get("roll_number"))
+    if "reg_number" in profile_fields:
+        profile_fields["reg_number"] = _as_text(profile_fields.get("reg_number"))
+    if "roll_number" in d and not profile_fields.get("roll_number"):
+        return jsonify({"error": "Roll number cannot be empty"}), 400
+    if "reg_number" in d and not profile_fields.get("reg_number"):
+        return jsonify({"error": "Registration number cannot be empty"}), 400
+
     current_course_id = (profile or {}).get("course_id")
     next_course_id = profile_fields.get("course_id", current_course_id)
     current_enrollment_year = _to_int((profile or {}).get("enrollment_year"), (profile or {}).get("created_at", datetime.utcnow()).year)
@@ -1800,18 +1809,30 @@ def edit_student(user, sid):
     profile_fields["academic_year"] = next_session
     profile_fields["year"] = next_session
 
-    if "course_id" in profile_fields or "enrollment_year" in profile_fields or "academic_session" in profile_fields:
+    current_session = _as_text((profile or {}).get("academic_session") or (profile or {}).get("academic_year") or (profile or {}).get("year"))
+    requested_reg_update = "reg_number" in d
+    requested_roll_update = "roll_number" in d
+    course_changed = "course_id" in d and _as_text(current_course_id) != _as_text(next_course_id)
+    enrollment_changed = "enrollment_year" in d and next_enrollment_year != current_enrollment_year
+    session_changed = any(k in d for k in ["academic_session", "academic_year", "year"]) and _as_text(next_session) != current_session
+
+    if (course_changed or enrollment_changed or session_changed) and not (requested_reg_update or requested_roll_update):
         new_reg = _generate_registration_number(next_course, next_session, exclude_user_id=user_id)
         profile_fields["reg_number"] = new_reg
         profile_fields["roll_number"] = new_reg
 
     if "reg_number" in profile_fields and "roll_number" not in profile_fields:
         profile_fields["roll_number"] = profile_fields["reg_number"]
+    if "roll_number" in profile_fields and "reg_number" not in profile_fields:
+        profile_fields["reg_number"] = profile_fields["roll_number"]
 
     if user_fields:
         update_user(user_id, user_fields)
     if profile_fields:
-        update_profile(user_id, profile_fields)
+        try:
+            update_profile(user_id, profile_fields)
+        except DuplicateKeyError:
+            return jsonify({"error": "Registration number already exists. Please use a unique value."}), 409
     rollback_ops = []
     if prev_user:
         rollback_ops.append(_rb_replace("auth", "users", {"_id": user_id}, prev_user))
