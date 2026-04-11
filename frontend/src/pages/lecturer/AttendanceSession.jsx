@@ -119,8 +119,7 @@ export default function AttendanceSession() {
 
     const probeStopEndpoint = async () => {
       try {
-        // Probes endpoint availability; 400/401/403 still means route exists.
-        await api.post('/lecturer/session/stop', {});
+        await api.post('/lecturer/session/stop', { session_id: '__probe__' });
         if (!cancelled) setStopEndpointAvailable(true);
       } catch (err) {
         if (cancelled) return;
@@ -142,6 +141,10 @@ export default function AttendanceSession() {
   const startSession = async () => {
     if (!selectedPaperId) {
       toast.error('Please select a paper first');
+      return;
+    }
+    if (selectedPaper?.is_course_inactive) {
+      toast.error('This subject is locked because its course is inactive');
       return;
     }
     try {
@@ -285,7 +288,13 @@ export default function AttendanceSession() {
       console.debug('[Image Upload] Response received', {
         facesDetected: res.data.faces_detected,
         newMatches: res.data.new_matches?.length,
+        savedFolder: res.data.saved_folder,
+        facePaths: res.data.face_paths?.length,
       });
+
+      if (res.data.saved_folder) {
+        toast.success(`Saved classroom bundle: ${res.data.saved_folder}`);
+      }
 
       if (res.data.new_matches?.length > 0) {
         setRecognized((prev) => [...prev, ...res.data.new_matches]);
@@ -382,8 +391,8 @@ export default function AttendanceSession() {
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           {!sessionId ? (
-            <button className="btn-primary" onClick={startSession}>
-              <HiOutlinePlay size={16} /> Start Session
+            <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive}>
+              <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Locked' : 'Start Session'}
             </button>
           ) : (
             <>
@@ -421,12 +430,15 @@ export default function AttendanceSession() {
           <select className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
             <option value="">{selectedCourseId ? 'Select Paper' : 'Select Course First'}</option>
             {filteredPapers.map((p) => (
-              <option key={p._id} value={p._id}>{p.name} ({p.code})</option>
+              <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' - Locked' : ''}</option>
             ))}
           </select>
           <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
             <p style={{ color: 'var(--text-muted)' }}>Subject / Course</p>
             <p style={{ fontWeight: 700 }}>{selectedPaper ? `${selectedPaper.name} · ${selectedPaper.course_name || 'N/A'}` : 'N/A'}</p>
+            {selectedPaper?.is_course_inactive && (
+              <p style={{ marginTop: 4, color: 'var(--accent-amber)' }}>Course inactive: attendance locked</p>
+            )}
           </div>
           <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
             <p style={{ color: 'var(--text-muted)' }}>Academic Session</p>

@@ -50,6 +50,12 @@ def add_face_embedding(user_id, embedding, photo_url=None):
     profiles.update_one({"user_id": user_id}, update)
 
 
+def set_face_embeddings(user_id, embeddings):
+    """Replace the full face embedding set for a student profile."""
+    profiles = get_collection("academic", "student_profiles")
+    profiles.update_one({"user_id": user_id}, {"$set": {"face_embeddings": embeddings}})
+
+
 def enroll_in_papers(user_id, paper_ids):
     """Add papers to a students enrolled papers list."""
     profiles = get_collection("academic", "student_profiles")

@@ -67,6 +67,7 @@ This system provides:
 │   │   ├── extensions.py
 │   │   └── __init__.py
 │   ├── requirements.txt
+│   ├── seedAdmin.py
 │   └── run.py
 ├── frontend/
 │   ├── src/
@@ -96,6 +97,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+python seedAdmin.py
 python run.py
 ```
 
@@ -108,6 +110,7 @@ MONGO_DB_ACADEMIC=biometric_academic
 MONGO_DB_ATTENDANCE=biometric_attendance_ops
 MONGO_DB_AUDIT=biometric_audit
 JWT_SECRET_KEY=dd29382bc1f40da4ee3817eeedaef0e5123bdc9fdcd63a5d4caf5770d5f1fa2a
+STRICT_JWT_SECRET=0
 FACENET_THRESHOLD=0.60
 CORS_ORIGINS=http://localhost:5173
 UPLOAD_FOLDER=uploads
@@ -127,19 +130,83 @@ Frontend runs on `http://localhost:5173`.
 
 Vite proxy forwards `/api/*` to backend port `5000`.
 
-## Default Admin Account
+## Admin Seeding
 
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@system.com | admin123 |
+Create the first admin from console:
 
-Change this password immediately for production-like usage.
+```bash
+cd backend
+python seedAdmin.py
+```
+
+The script will ask for:
+
+- Admin email
+- Admin password
+- Password confirmation
+
+Notes:
+
+- It only creates an admin if no admin exists.
+- It stops if the email is already used.
+- If you skip this step, backend startup can still auto-seed a default admin (`admin@system.com` / `admin123`) when no admin exists.
+
+## Authentication Transport
+
+- JWT is transported using secure HttpOnly cookies (not localStorage bearer tokens).
+- Frontend sends `withCredentials` requests to backend APIs.
+- CSRF protection is enabled with double-submit cookie by default.
+
+Optional cookie-related env vars:
+
+```dotenv
+JWT_COOKIE_SAMESITE=Lax
+JWT_COOKIE_CSRF_PROTECT=1
+JWT_COOKIE_DOMAIN=
+```
+
+## JWT Secret Enforcement
+
+- Startup fails when `JWT_SECRET_KEY` is weak in non-local environments.
+- To enforce this even in local/dev, set:
+
+```dotenv
+STRICT_JWT_SECRET=1
+```
 
 ## Important Notes
 
 - If backend routes are changed, restart backend (`python run.py`) to load updates.
 - Some rollback controls appear only for eligible audit entries within 1 day.
 - Uploaded/enrolled data can include local runtime artifacts; `.gitignore` excludes them.
+
+## SPA Rewrite Rules (Production)
+
+Because frontend uses `BrowserRouter`, server must rewrite unknown routes to `index.html`.
+
+### Nginx
+
+```nginx
+location / {
+	try_files $uri $uri/ /index.html;
+}
+```
+
+### Apache (.htaccess)
+
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.html [L]
+```
+
+### Caddy
+
+```caddy
+try_files {path} /index.html
+file_server
+```
 
 ## Recognition Flow
 

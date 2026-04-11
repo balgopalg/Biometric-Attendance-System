@@ -8,6 +8,8 @@ export default function ExamEligibility() {
   const [courses, setCourses] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({
     course_id: '',
@@ -98,6 +100,21 @@ export default function ExamEligibility() {
     return uniqueRows.filter((row) => row.final_eligible === required);
   }, [uniqueRows, filters.final_eligible]);
 
+  const displayedStudentIds = useMemo(() => (
+    displayedRows
+      .map((row) => String(row.student_id || '').trim())
+      .filter(Boolean)
+  ), [displayedRows]);
+
+  const allDisplayedSelected = displayedStudentIds.length > 0
+    && displayedStudentIds.every((id) => selectedStudentIds.includes(id));
+
+  useEffect(() => {
+    if (selectedStudentIds.length === 0) return;
+    const visibleSet = new Set(displayedStudentIds);
+    setSelectedStudentIds((prev) => prev.filter((id) => visibleSet.has(id)));
+  }, [displayedStudentIds, selectedStudentIds.length]);
+
   const summary = useMemo(() => ({
     total: displayedRows.length,
     eligible_count: displayedRows.filter((x) => x.final_eligible === true).length,
@@ -165,6 +182,75 @@ export default function ExamEligibility() {
     }
   };
 
+  const toggleStudentSelection = (studentId) => {
+    const key = String(studentId || '').trim();
+    if (!key) return;
+    setSelectedStudentIds((prev) => (
+      prev.includes(key) ? prev.filter((id) => id !== key) : [...prev, key]
+    ));
+  };
+
+  const handleToggleSelectAllDisplayed = () => {
+    if (allDisplayedSelected) {
+      setSelectedStudentIds([]);
+      return;
+    }
+    setSelectedStudentIds(displayedStudentIds);
+  };
+
+  const handleBulkOverride = async (overrideStatus) => {
+    const targetRows = displayedRows.filter((row) => selectedStudentIds.includes(String(row.student_id || '').trim()));
+    if (targetRows.length === 0) {
+      toast.error(`Select at least one student to bulk ${overrideStatus ? 'allow' : 'block'}`);
+      return;
+    }
+
+    const reason = window.prompt(
+      `Reason for ${overrideStatus ? 'allowing' : 'blocking'} examination access for ${targetRows.length} student${targetRows.length > 1 ? 's' : ''}:`,
+      overrideStatus ? 'Admin bulk allow' : 'Admin bulk block'
+    );
+    if (reason === null) return;
+
+    const requests = [];
+    targetRows.forEach((row) => {
+      const studentId = String(row.student_id || '').trim();
+      const paperIds = Array.from(new Set((row.paper_ids || []).filter(Boolean)));
+      paperIds.forEach((paperId) => {
+        requests.push({
+          student_id: studentId,
+          paper_id: paperId,
+          override_status: overrideStatus,
+          reason,
+        });
+      });
+    });
+
+    if (requests.length === 0) {
+      toast.error('No eligible paper mappings found for selected students');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Bulk ${overrideStatus ? 'allow' : 'block'} examination for ${targetRows.length} student${targetRows.length > 1 ? 's' : ''} across ${requests.length} paper override${requests.length > 1 ? 's' : ''}?`
+    );
+    if (!confirmed) return;
+
+    setBulkUpdating(true);
+    try {
+      await Promise.all(requests.map((payload) => api.put('/admin/exam-eligibility-override', payload)));
+      toast.success(`Bulk ${overrideStatus ? 'allow' : 'block'} applied (${targetRows.length} students, ${requests.length} overrides)`);
+      setSelectedStudentIds([]);
+      fetchEligibility();
+    } catch (err) {
+      toast.error(err.response?.data?.error || `Bulk ${overrideStatus ? 'allow' : 'block'} failed`);
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const handleBulkAllow = () => handleBulkOverride(true);
+  const handleBulkBlock = () => handleBulkOverride(false);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
@@ -231,12 +317,50 @@ export default function ExamEligibility() {
             <option value="false">Ineligible</option>
           </select>
         </div>
+
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Selected: {selectedStudentIds.length} / {displayedStudentIds.length}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.72rem' }} onClick={handleToggleSelectAllDisplayed}>
+              {allDisplayedSelected ? 'Unselect All' : 'Select All Shown'}
+            </button>
+            <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.72rem' }} onClick={() => setSelectedStudentIds([])}>
+              Clear Selection
+            </button>
+            <button
+              className="btn-primary"
+              style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+              onClick={handleBulkAllow}
+              disabled={bulkUpdating || selectedStudentIds.length === 0}
+            >
+              {bulkUpdating ? 'Applying...' : 'Bulk Allow for Examination'}
+            </button>
+            <button
+              className="btn-secondary"
+              style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+              onClick={handleBulkBlock}
+              disabled={bulkUpdating || selectedStudentIds.length === 0}
+            >
+              {bulkUpdating ? 'Applying...' : 'Bulk Block for Examination'}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="glass-card table-desktop" style={{ overflowX: 'auto' }}>
         <table className="data-table">
           <thead>
             <tr>
+              <th style={{ width: 36, textAlign: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={allDisplayedSelected}
+                  onChange={handleToggleSelectAllDisplayed}
+                  aria-label="Select all students"
+                />
+              </th>
               <th>Student</th>
               <th>Reg No</th>
               <th>Course / Session / Semester</th>
@@ -248,6 +372,14 @@ export default function ExamEligibility() {
           <tbody>
             {displayedRows.map((row) => (
               <tr key={row.student_id}>
+                <td style={{ textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedStudentIds.includes(String(row.student_id || '').trim())}
+                    onChange={() => toggleStudentSelection(row.student_id)}
+                    aria-label={`Select ${row.student_name || 'student'}`}
+                  />
+                </td>
                 <td>
                   <div>
                     <p style={{ fontWeight: 600, fontSize: '0.82rem' }}>{row.student_name}</p>
@@ -285,7 +417,7 @@ export default function ExamEligibility() {
             ))}
             {displayedRows.length === 0 && (
               <tr>
-                <td colSpan="6" style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
+                <td colSpan="7" style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
                   {loading ? 'Loading eligibility records...' : 'No eligibility records found.'}
                 </td>
               </tr>
@@ -301,6 +433,17 @@ export default function ExamEligibility() {
           const totalClasses = row.overall_total_classes ?? row.classes_happened ?? 0;
           return (
             <div key={row.student_id} className="glass-card mobile-card">
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedStudentIds.includes(String(row.student_id || '').trim())}
+                    onChange={() => toggleStudentSelection(row.student_id)}
+                    aria-label={`Select ${row.student_name || 'student'}`}
+                  />
+                  Select
+                </label>
+              </div>
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Student</span>
                 <div style={{ textAlign: 'right' }}>

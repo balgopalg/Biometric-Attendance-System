@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import StatsCard from '../../components/ui/StatsCard';
 import Modal from '../../components/ui/Modal';
+import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineBookOpen, HiOutlineCamera, HiOutlineKey } from 'react-icons/hi';
@@ -81,10 +82,14 @@ export default function LecturerDashboard() {
             key={p._id}
             whileHover={{ y: -4 }}
             className="glass-card"
-            style={{ padding: 20, cursor: 'pointer' }}
-            onClick={() => navigate(`/lecturer/session?paper_id=${p._id}`)}
+            style={{ padding: 20, cursor: p.is_course_inactive ? 'not-allowed' : 'pointer' }}
+            onClick={() => {
+              if (p.is_course_inactive) return;
+              navigate(`/lecturer/session?paper_id=${p._id}`);
+            }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <SoftLockWrapper locked={p.is_course_inactive} title="Locked: course inactive">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <span className="badge badge-info" style={{ marginBottom: 8 }}>{p.code}</span>
                 <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: 8 }}>{p.name}</h4>
@@ -100,11 +105,17 @@ export default function LecturerDashboard() {
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
                   {p.total_enrolled_students || 0} total enrolled students
                 </p>
+                {p.is_course_inactive && (
+                  <p style={{ fontSize: '0.72rem', color: 'var(--accent-amber)', marginTop: 6 }}>
+                    Course inactive: attendance locked
+                  </p>
+                )}
               </div>
-              <button className="btn-primary" style={{ padding: '8px 14px', fontSize: '0.75rem' }}>
-                <HiOutlineCamera size={14} /> Start
+              <button className="btn-primary" style={{ padding: '8px 14px', fontSize: '0.75rem' }} disabled={p.is_course_inactive}>
+                <HiOutlineCamera size={14} /> {p.is_course_inactive ? 'Locked' : 'Start'}
               </button>
-            </div>
+              </div>
+            </SoftLockWrapper>
           </motion.div>
         ))}
         {papers.length === 0 && (

@@ -10,21 +10,27 @@ from .config import Config
 from .extensions import mongo, jwt, cors, get_collection
 
 
-def create_app(config_class=Config):
+def create_app(config_class=Config, seed_default_admin=True):
     app = Flask(__name__)
     app.config.from_object(config_class)
-    _validate_production_config(app)
+    _validate_security_config(app)
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
         seconds=config_class.JWT_ACCESS_TOKEN_EXPIRES
     )
 
     # Ensure upload folder exists
-    os.makedirs(app.config.get("UPLOAD_FOLDER", "uploads"), exist_ok=True)
+    uploads_dir = os.path.abspath(os.path.join(app.root_path, "..", app.config.get("UPLOAD_FOLDER", "uploads")))
+    app.config["UPLOADS_ABSOLUTE_PATH"] = uploads_dir
+    os.makedirs(uploads_dir, exist_ok=True)
 
     # Initialise extensions
     mongo.init_app(app)
     jwt.init_app(app)
-    cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
+    cors.init_app(
+        app,
+        resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
+        supports_credentials=app.config.get("CORS_SUPPORTS_CREDENTIALS", True),
+    )
 
     @app.after_request
     def _security_headers(response):
@@ -47,21 +53,29 @@ def create_app(config_class=Config):
     app.register_blueprint(student_bp, url_prefix="/api/student")
     app.register_blueprint(recognition_bp, url_prefix="/api/recognition")
 
-    # Seed default admin on first run
     with app.app_context():
         _bootstrap_isolated_databases(mongo, app.config)
         _ensure_indexes(mongo, app.config)
-        _seed_admin(mongo)
+        if seed_default_admin:
+            _seed_admin(mongo)
 
     return app
 
 
-def _validate_production_config(app):
-    if app.config.get("ENV") != "production":
+def _validate_security_config(app):
+    env = (app.config.get("ENV") or "").lower()
+    local_envs = {"development", "dev", "local", "testing", "test"}
+    strict_always = bool(app.config.get("STRICT_JWT_SECRET", False))
+
+    if not strict_always and env in local_envs:
         return
+
     insecure_secrets = {"change-me", "admin123", "", None}
     if app.config.get("JWT_SECRET_KEY") in insecure_secrets:
-        raise RuntimeError("JWT_SECRET_KEY must be set to a strong value in production")
+        raise RuntimeError(
+            "JWT_SECRET_KEY is weak. Set a strong value for non-local environments "
+            "or enable STRICT_JWT_SECRET=1 to enforce this everywhere."
+        )
 
 
 def _ensure_indexes(mongo, config):

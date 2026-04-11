@@ -4,7 +4,9 @@ import random
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
+import os
 
+import cv2
 import numpy as np
 from flask import Blueprint, request, jsonify, current_app
 
@@ -17,6 +19,7 @@ from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_
 from app.models.user import find_user_by_id, update_user
 from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, find_best_match, compare_embeddings
+from app.services.capture_upload import save_classroom_upload_bundle
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, decode_base64_image
 
@@ -37,6 +40,8 @@ def _enrich_paper(paper):
             course = None
     item["course_name"] = (course or {}).get("name")
     item["course_code"] = (course or {}).get("code")
+    item["course_status"] = str((course or {}).get("status") or "active").lower()
+    item["is_course_inactive"] = item["course_status"] != "active"
     item["academic_year"] = item.get("academic_session") or item.get("academic_year")
     item["semester"] = item.get("semester")
     item["total_enrolled_students"] = count_profiles_for_paper(item.get("_id")) if item.get("_id") else 0
@@ -113,6 +118,77 @@ def _parse_date(value, end_of_day=False):
         return None
 
 
+def _extract_classroom_faces(img_rgb, img_bgr=None):
+    """Extract classroom face crops using MediaPipe first, then Haar cascade fallback."""
+    detector = get_detector()
+    faces = detector.detect_faces(img_rgb) or []
+
+    if faces:
+        return faces
+
+    if img_bgr is None:
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    cascade = cv2.CascadeClassifier(cascade_path)
+    rects = cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=4,
+        minSize=(40, 40),
+    )
+
+    fallback_faces = []
+    for (x, y, w, h) in rects:
+        pad = int(0.18 * max(w, h))
+        x1 = max(x - pad, 0)
+        y1 = max(y - pad, 0)
+        x2 = min(x + w + pad, img_rgb.shape[1])
+        y2 = min(y + h + pad, img_rgb.shape[0])
+        crop = img_rgb[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
+        crop_resized = cv2.resize(crop, (160, 160))
+        fallback_faces.append({
+            "bbox": (x, y, w, h),
+            "confidence": 1.0,
+            "crop": crop_resized,
+        })
+
+    if fallback_faces:
+        return fallback_faces
+
+    # Final fallback: detect people regions so the bundle still contains per-person crops.
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+    boxes, _ = hog.detectMultiScale(
+        img_bgr,
+        winStride=(8, 8),
+        padding=(8, 8),
+        scale=1.05,
+    )
+
+    people_faces = []
+    for (x, y, w, h) in boxes:
+        pad = int(0.08 * max(w, h))
+        x1 = max(x - pad, 0)
+        y1 = max(y - pad, 0)
+        x2 = min(x + w + pad, img_rgb.shape[1])
+        y2 = min(y + h + pad, img_rgb.shape[0])
+        crop = img_rgb[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
+        crop_resized = cv2.resize(crop, (160, 160))
+        people_faces.append({
+            "bbox": (x, y, w, h),
+            "confidence": 0.5,
+            "crop": crop_resized,
+        })
+
+    return people_faces
+
+
 @lecturer_bp.route("/papers", methods=["GET"])
 @role_required("lecturer")
 def my_papers(user):
@@ -161,6 +237,10 @@ def start_session(user):
     paper = get_paper_by_id(paper_id)
     if not paper:
         return jsonify({"error": "Paper not found"}), 404
+
+    course = get_course_by_id(paper.get("course_id")) if paper.get("course_id") else None
+    if not course or str(course.get("status") or "active").lower() != "active":
+        return jsonify({"error": "This subject belongs to an inactive course and cannot take attendance"}), 409
 
     if str(paper.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "You are not assigned to this paper"}), 403
@@ -260,36 +340,48 @@ def recognize_image(user):
     
     session = _sessions[session_id]
     paper_id = session["paper_id"]
+    paper = get_paper_by_id(paper_id)
+    subject_label = (paper or {}).get("code") or (paper or {}).get("name") or "classroom"
     
     try:
-        # Read image from file
-        from PIL import Image
-        import io
-        img_pil = Image.open(io.BytesIO(file.read()))
-        img = np.array(img_pil)
-        
-        print(f"[DEBUG] Image shape: {img.shape}, dtype: {img.dtype}")
-        
-        # Ensure RGB format
-        if len(img.shape) == 2:
-            # Grayscale - convert to RGB
-            img = np.stack([img] * 3, axis=-1)
-        elif len(img.shape) == 3:
-            if img.shape[2] == 4:
-                # RGBA - remove alpha channel
-                img = img[:, :, :3]
-            elif img.shape[2] != 3:
-                # Unexpected format - take first 3 channels
-                img = img[:, :, :3]
+        file_bytes = file.read()
+        if not file_bytes:
+            return jsonify({"error": "Uploaded image is empty"}), 400
+
+        arr = np.frombuffer(file_bytes, dtype=np.uint8)
+        img_raw = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
+        if img_raw is None:
+            return jsonify({"error": "Invalid image format"}), 400
+
+        uploads_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
+
+        # Convert to RGB for detector/recognition pipeline.
+        if len(img_raw.shape) == 2:
+            img = cv2.cvtColor(img_raw, cv2.COLOR_GRAY2RGB)
+        elif len(img_raw.shape) == 3 and img_raw.shape[2] == 4:
+            img = cv2.cvtColor(img_raw, cv2.COLOR_BGRA2RGB)
+        elif len(img_raw.shape) == 3 and img_raw.shape[2] == 3:
+            img = cv2.cvtColor(img_raw, cv2.COLOR_BGR2RGB)
         else:
-            return jsonify({"error": f"Invalid image format: unexpected shape {img.shape}"}), 400
-            
+            return jsonify({"error": f"Invalid image format: unexpected shape {img_raw.shape}"}), 400
     except Exception as e:
         print(f"[ERROR] Image processing failed: {str(e)}")
         return jsonify({"error": f"Failed to process image: {str(e)}"}), 400
     
     detector = get_detector()
     faces = detector.detect_faces(img)
+
+    uploads_dir = current_app.config.get("UPLOADS_ABSOLUTE_PATH") or os.path.abspath(
+        os.path.join(current_app.root_path, "..", current_app.config.get("UPLOAD_FOLDER", "uploads"))
+    )
+    saved_bundle = save_classroom_upload_bundle(
+        subject_label=subject_label,
+        image=img_raw,
+        face_crops=[face["crop"] for face in faces],
+        uploads_dir=uploads_dir,
+    )
+
+    print(f"[DEBUG] Image shape: {img.shape}, dtype: {img.dtype}, saved_folder: {saved_bundle['folder_path']}")
     
     if not faces:
         return jsonify({
@@ -297,7 +389,10 @@ def recognize_image(user):
             "faces_detected": 0,
             "candidates_count": 0,
             "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
-            "best_similarity_seen": None
+            "best_similarity_seen": None,
+            "saved_folder": saved_bundle["folder_path"],
+            "original_path": saved_bundle["original_path"],
+            "face_paths": saved_bundle["face_paths"],
         })
     
     profiles = get_profiles_for_paper(paper_id)
@@ -336,6 +431,9 @@ def recognize_image(user):
         "candidates_count": len(profiles),
         "threshold": threshold,
         "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
+        "saved_folder": saved_bundle["folder_path"],
+        "original_path": saved_bundle["original_path"],
+        "face_paths": saved_bundle["face_paths"],
     })
 
 

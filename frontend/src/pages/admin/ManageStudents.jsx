@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
 import FaceEnrollmentModal from '../../components/admin/FaceEnrollmentModal';
+import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
@@ -15,6 +16,7 @@ import {
   HiOutlineClipboardCopy,
   HiOutlinePencil,
   HiOutlineArrowUp,
+  HiOutlineSparkles,
 } from 'react-icons/hi';
 
 const EMPTY_FORM = {
@@ -49,6 +51,9 @@ export default function ManageStudents() {
   const [bulkPapers, setBulkPapers] = useState([]);
   const [bulkStudents, setBulkStudents] = useState([]);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
+  const [trainingStudentId, setTrainingStudentId] = useState('');
+  const [bulkTraining, setBulkTraining] = useState(false);
+  const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
 
   const fetchMetadata = () => {
     api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
@@ -170,12 +175,22 @@ export default function ManageStudents() {
     });
   }, [papers, filters.course_id, filters.semester]);
 
+  const activeCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [courses]
+  );
+
+  const eligibleBulkStudents = useMemo(
+    () => bulkStudents.filter((s) => !s.is_course_inactive),
+    [bulkStudents]
+  );
+
   useEffect(() => {
     const visibleIds = new Set(filtered.map((s) => s.user_id || s._id));
     setSelectedStudentIds((prev) => prev.filter((id) => visibleIds.has(id)));
   }, [filtered]);
 
-  const areAllBulkStudentsSelected = bulkStudents.length > 0 && bulkStudents.every((s) => {
+  const areAllBulkStudentsSelected = eligibleBulkStudents.length > 0 && eligibleBulkStudents.every((s) => {
     const sid = s.user_id || s._id;
     return bulkForm.student_ids.includes(sid);
   });
@@ -301,6 +316,93 @@ export default function ManageStudents() {
     fetchStudents();
   };
 
+  const handleTrainFace = async (student) => {
+    const sid = student.user_id || student._id;
+    if (!sid) {
+      toast.error('Invalid student id');
+      return;
+    }
+
+    const ok = window.confirm(`Train face embeddings from dataset for ${student.name}?`);
+    if (!ok) return;
+
+    try {
+      setTrainingStudentId(sid);
+      const res = await api.post(`/admin/students/${sid}/train-face`);
+      const trained = Number(res.data?.trained_embeddings || 0);
+      const skipped = Number(res.data?.skipped_images || 0);
+      toast.success(`Training done. Embeddings: ${trained}, skipped images: ${skipped}`);
+      fetchStudents();
+    } catch (err) {
+      if (err.response?.status === 404) {
+        toast.error('Train Face endpoint not active. Restart backend server once and retry.');
+      } else if (err.response?.status === 400) {
+        toast.error(err.response?.data?.error || 'Dataset images missing. Please run Enroll Face first.');
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to train face from dataset');
+      }
+    } finally {
+      setTrainingStudentId('');
+    }
+  };
+
+  const handleBulkTrainFace = async () => {
+    if (selectedStudentIds.length === 0) {
+      toast.error('Select at least one student to bulk train');
+      return;
+    }
+
+    const ok = window.confirm(`Train face embeddings for ${selectedStudentIds.length} selected students?`);
+    if (!ok) return;
+
+    try {
+      setBulkTraining(true);
+      const res = await api.post('/admin/students/train-face/bulk', {
+        student_ids: selectedStudentIds,
+      });
+
+      const success = Number(res.data?.success_count || 0);
+      const failed = Number(res.data?.failure_count || 0);
+      const totalEmbeddings = Number(res.data?.total_trained_embeddings || 0);
+
+      if (failed > 0) {
+        const firstError = (res.data?.items || []).find((x) => x?.success === false)?.error;
+        toast(`Bulk train done. Success: ${success}, Failed: ${failed}, Embeddings: ${totalEmbeddings}${firstError ? ` | ${firstError}` : ''}`);
+      } else {
+        toast.success(`Bulk train complete. Success: ${success}, Embeddings: ${totalEmbeddings}`);
+      }
+
+      fetchStudents();
+    } catch (err) {
+      if (err.response?.status === 404) {
+        toast.error('Bulk train endpoint not active. Restart backend server once and retry.');
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to bulk train face from dataset');
+      }
+    } finally {
+      setBulkTraining(false);
+    }
+  };
+
+  const handleRebuildAllFaces = async () => {
+    const ok = window.confirm('Rebuild face embeddings for every student from their dataset folders?');
+    if (!ok) return;
+
+    try {
+      setRebuildingAllFaces(true);
+      const res = await api.post('/admin/students/train-face/rebuild-all');
+      const success = Number(res.data?.success_count || 0);
+      const failed = Number(res.data?.failure_count || 0);
+      const totalEmbeddings = Number(res.data?.total_trained_embeddings || 0);
+      toast.success(`Rebuild complete. Success: ${success}, Failed: ${failed}, Embeddings: ${totalEmbeddings}`);
+      fetchStudents();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to rebuild all face embeddings');
+    } finally {
+      setRebuildingAllFaces(false);
+    }
+  };
+
   const handleBulkAssign = async () => {
     if (!bulkForm.paper_id || bulkForm.student_ids.length === 0) {
       toast.error('Select subject and at least one student');
@@ -373,7 +475,7 @@ export default function ManageStudents() {
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course</label>
           <select className="input-field" value={form.course_id} onChange={(e) => setForm({ ...form, course_id: e.target.value })}>
             <option value="">Select course</option>
-            {courses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            {activeCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
           </select>
         </div>
 
@@ -400,6 +502,12 @@ export default function ManageStudents() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{students.length} students in current filter</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" onClick={handleRebuildAllFaces} disabled={rebuildingAllFaces}>
+            <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
+          </button>
+          <button className="btn-secondary" onClick={handleBulkTrainFace} disabled={selectedStudentIds.length === 0 || bulkTraining}>
+            <HiOutlineSparkles size={16} /> {bulkTraining ? 'Training...' : `Bulk Train Face (${selectedStudentIds.length})`}
+          </button>
           <button className="btn-secondary" onClick={handlePromoteSelected} disabled={selectedStudentIds.length === 0}>
             <HiOutlineArrowUp size={16} /> Promote Selected ({selectedStudentIds.length})
           </button>
@@ -490,7 +598,7 @@ export default function ManageStudents() {
           </thead>
           <tbody>
             {filtered.map((s) => (
-              <tr key={s._id}>
+              <tr key={s._id} className={s.is_course_inactive ? 'faded-entity' : ''}>
                 <td>
                   <input
                     type="checkbox"
@@ -537,20 +645,30 @@ export default function ManageStudents() {
                   </span>
                 </td>
                 <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="icon-btn" title="Edit" onClick={() => openEdit(s)}>
-                      <HiOutlinePencil size={15} />
-                    </button>
-                    <button className="icon-btn" title="Reset Password" onClick={() => handleResetPassword(s)}>
-                      <HiOutlineKey size={15} />
-                    </button>
-                    <button className="icon-btn" title="Enroll Face" onClick={() => handleFaceEnroll(s)}>
-                      <HiOutlineCamera size={15} />
-                    </button>
-                    <button className="icon-btn danger" title="Delete" onClick={() => handleDelete(s)}>
-                      <HiOutlineTrash size={15} />
-                    </button>
-                  </div>
+                  <SoftLockWrapper locked={s.is_course_inactive} title="Locked: course inactive">
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button
+                        className="icon-btn"
+                        title={s.is_course_inactive ? 'Locked: course inactive' : 'Train Face From Dataset'}
+                        onClick={() => handleTrainFace(s)}
+                        disabled={s.is_course_inactive || trainingStudentId === (s.user_id || s._id)}
+                      >
+                        <HiOutlineSparkles size={15} />
+                      </button>
+                      <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Edit'} onClick={() => openEdit(s)} disabled={s.is_course_inactive}>
+                        <HiOutlinePencil size={15} />
+                      </button>
+                      <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Reset Password'} onClick={() => handleResetPassword(s)} disabled={s.is_course_inactive}>
+                        <HiOutlineKey size={15} />
+                      </button>
+                      <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Enroll Face'} onClick={() => handleFaceEnroll(s)} disabled={s.is_course_inactive}>
+                        <HiOutlineCamera size={15} />
+                      </button>
+                      <button className="icon-btn danger" title={s.is_course_inactive ? 'Locked: course inactive' : 'Delete'} onClick={() => handleDelete(s)} disabled={s.is_course_inactive}>
+                        <HiOutlineTrash size={15} />
+                      </button>
+                    </div>
+                  </SoftLockWrapper>
                 </td>
               </tr>
             ))}
@@ -653,11 +771,11 @@ export default function ManageStudents() {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
             <input
               type="checkbox"
-              disabled={bulkStudents.length === 0}
+              disabled={eligibleBulkStudents.length === 0}
               checked={areAllBulkStudentsSelected}
               onChange={(e) => {
                 if (e.target.checked) {
-                  setBulkForm({ ...bulkForm, student_ids: bulkStudents.map((s) => s.user_id || s._id) });
+                  setBulkForm({ ...bulkForm, student_ids: eligibleBulkStudents.map((s) => s.user_id || s._id) });
                 } else {
                   setBulkForm({ ...bulkForm, student_ids: [] });
                 }
@@ -666,7 +784,7 @@ export default function ManageStudents() {
             Select All
           </label>
           <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8 }}>
-            {bulkStudents.map((s) => {
+            {eligibleBulkStudents.map((s) => {
               const sid = s.user_id || s._id;
               return (
                 <label key={s._id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', cursor: 'pointer', fontSize: '0.82rem' }}>
@@ -684,7 +802,7 @@ export default function ManageStudents() {
                 </label>
               );
             })}
-            {bulkStudents.length === 0 && (
+            {eligibleBulkStudents.length === 0 && (
               <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)', padding: '8px 6px' }}>
                 Select course and semester to load eligible students.
               </p>

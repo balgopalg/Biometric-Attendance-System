@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
+import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil } from 'react-icons/hi';
@@ -69,7 +70,8 @@ export default function ManagePapers() {
 
   const formLecturers = useMemo(() => {
     if (!form.course_id) return lecturers;
-    return lecturers.filter((l) => (l.assigned_course_ids || []).includes(form.course_id));
+    const linkedLecturers = lecturers.filter((l) => (l.assigned_course_ids || []).includes(form.course_id));
+    return linkedLecturers.length > 0 ? linkedLecturers : lecturers;
   }, [lecturers, form.course_id]);
 
   const formSemesterOptions = useMemo(() => {
@@ -85,6 +87,11 @@ export default function ManagePapers() {
     if (maxSemesters <= 0) return [];
     return Array.from({ length: maxSemesters }, (_, i) => i + 1);
   }, [selectedFilterCourse]);
+
+  const activeCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [courses]
+  );
 
   useEffect(() => {
     if (!form.course_id && form.semester) {
@@ -119,6 +126,10 @@ export default function ManagePapers() {
   }, [form.course_id, form.lecturer_id, formLecturers]);
 
   const handleAdd = async () => {
+    if (!form.lecturer_id) {
+      toast.error('Please assign a lecturer');
+      return;
+    }
     try {
       await api.post('/admin/papers', form);
       toast.success('Subject created');
@@ -189,8 +200,11 @@ export default function ManagePapers() {
             onChange={(e) => setForm({ ...form, course_id: e.target.value, semester: '', lecturer_id: '' })}
           >
             <option value="">Select course</option>
-            {courses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
+            {activeCourses.map((c) => <option key={c._id} value={c._id}>{c.name} ({c.code})</option>)}
           </select>
+          <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 6 }}>
+            Pick any lecturer. Course-linked filtering is used only when available.
+          </p>
         </div>
         <div>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Semester</label>
@@ -209,7 +223,7 @@ export default function ManagePapers() {
       <div style={{ marginBottom: 20 }}>
         <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Lecturer</label>
         <select className="input-field" value={form.lecturer_id} onChange={(e) => setForm({ ...form, lecturer_id: e.target.value })}>
-          <option value="">Unassigned</option>
+          <option value="">Select lecturer</option>
           {formLecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
         </select>
       </div>
@@ -283,7 +297,7 @@ export default function ManagePapers() {
           </thead>
           <tbody>
             {filtered.map((p) => (
-              <tr key={p._id}>
+              <tr key={p._id} className={p.is_course_inactive ? 'faded-entity' : ''}>
                 <td><span className="badge badge-purple">{p.code}</span></td>
                 <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{p.name}</td>
                 <td>{p.course_name || 'Unassigned'}</td>
@@ -291,10 +305,12 @@ export default function ManagePapers() {
                 <td>{p.semester ? `Semester ${p.semester}` : 'N/A'}</td>
                 <td>{p.total_classes}</td>
                 <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="icon-btn" title="Edit" onClick={() => openEdit(p)}><HiOutlinePencil size={15} /></button>
-                    <button className="icon-btn danger" title="Delete" onClick={() => handleDelete(p._id)}><HiOutlineTrash size={15} /></button>
-                  </div>
+                  <SoftLockWrapper locked={p.is_course_inactive} title="Locked: course inactive">
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="icon-btn" title={p.is_course_inactive ? 'Locked: course inactive' : 'Edit'} onClick={() => openEdit(p)} disabled={p.is_course_inactive}><HiOutlinePencil size={15} /></button>
+                      <button className="icon-btn danger" title={p.is_course_inactive ? 'Locked: course inactive' : 'Delete'} onClick={() => handleDelete(p._id)} disabled={p.is_course_inactive}><HiOutlineTrash size={15} /></button>
+                    </div>
+                  </SoftLockWrapper>
                 </td>
               </tr>
             ))}

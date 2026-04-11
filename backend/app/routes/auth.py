@@ -1,17 +1,22 @@
 """Authentication routes."""
 
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import (
+    create_access_token,
+    jwt_required,
+    get_jwt_identity,
+    set_access_cookies,
+    unset_jwt_cookies,
+)
 
 from app.models.user import find_user_by_email, verify_password, change_user_password
-from app.utils.helpers import sanitise_mongo_doc
 
 auth_bp = Blueprint("auth", __name__)
 
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
-    """Authenticate user and return JWT."""
+    """Authenticate user and set JWT in secure HttpOnly cookie."""
     data = request.get_json(silent=True) or {}
     email = data.get("email", "").strip()
     password = data.get("password", "")
@@ -24,9 +29,8 @@ def login():
         return jsonify({"error": "Invalid email or password"}), 401
 
     token = create_access_token(identity=email)
-    return jsonify(
+    response = jsonify(
         {
-            "token": token,
             "user": {
                 "_id": str(user["_id"]),
                 "name": user["name"],
@@ -37,6 +41,16 @@ def login():
             },
         }
     )
+    set_access_cookies(response, token)
+    return response
+
+
+@auth_bp.route("/logout", methods=["POST"])
+def logout():
+    """Clear auth cookies."""
+    response = jsonify({"message": "Logged out"})
+    unset_jwt_cookies(response)
+    return response
 
 
 @auth_bp.route("/me", methods=["GET"])

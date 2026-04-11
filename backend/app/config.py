@@ -4,6 +4,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class Config:
     """Application configuration loaded from environment variables."""
 
@@ -16,11 +23,20 @@ class Config:
     MONGO_DB_ATTENDANCE = os.getenv("MONGO_DB_ATTENDANCE", "biometric_attendance_ops")
     MONGO_DB_AUDIT = os.getenv("MONGO_DB_AUDIT", "biometric_audit")
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me")
+    STRICT_JWT_SECRET = _env_bool("STRICT_JWT_SECRET", False)
     CORS_ORIGINS = [
         origin.strip()
         for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
         if origin.strip()
     ]
+    CORS_SUPPORTS_CREDENTIALS = True
+
+    JWT_TOKEN_LOCATION = ["cookies"]
+    JWT_COOKIE_SECURE = ENV not in {"development", "dev", "local", "testing", "test"}
+    JWT_COOKIE_SAMESITE = os.getenv("JWT_COOKIE_SAMESITE", "Lax")
+    JWT_COOKIE_CSRF_PROTECT = _env_bool("JWT_COOKIE_CSRF_PROTECT", True)
+    JWT_ACCESS_COOKIE_PATH = "/api/"
+    JWT_COOKIE_DOMAIN = os.getenv("JWT_COOKIE_DOMAIN") or None
     JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24 hours in seconds
 
     # FaceNet cosine similarity threshold (0.6+ recommended for reliable matching)

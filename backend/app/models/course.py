@@ -12,6 +12,7 @@ def create_course(name, code, department, course_duration):
         "code": code,
         "department": department,
         "course_duration": course_duration,
+        "status": "active",
         "created_at": datetime.utcnow(),
     }
     result = courses.insert_one(doc)
@@ -37,4 +38,16 @@ def update_course(course_id, fields):
 
 def delete_course(course_id):
     courses = get_collection("academic", "courses")
+    courses.update_one({"_id": ObjectId(course_id)}, {"$set": {"status": "inactive"}})
+
+
+def hard_delete_course(course_id):
+    courses = get_collection("academic", "courses")
     courses.delete_one({"_id": ObjectId(course_id)})
+
+
+def is_course_active(course_id):
+    course = get_course_by_id(course_id)
+    if not course:
+        return False
+    return str(course.get("status") or "active").lower() == "active"

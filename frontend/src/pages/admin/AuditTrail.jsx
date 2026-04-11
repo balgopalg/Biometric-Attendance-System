@@ -4,6 +4,8 @@ import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck, HiOutlineRefresh } from 'react-icons/hi';
 
+const PER_PAGE = 20;
+
 export default function AuditTrail() {
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);
@@ -43,7 +45,7 @@ export default function AuditTrail() {
   }, []);
 
   const fetchLogs = (p = page) => {
-    const params = { page: p, per_page: 20 };
+    const params = { page: p, per_page: PER_PAGE };
     if (keyword) params.action = keyword;
     if (dateFrom) params.from = dateFrom;
     if (dateTo) params.to = dateTo;
@@ -52,8 +54,19 @@ export default function AuditTrail() {
         const nextLogs = Array.isArray(r.data?.logs)
           ? r.data.logs
           : (Array.isArray(r.data) ? r.data : []);
+        const resolvedTotal = Number(r.data?.total || nextLogs.length || 0);
+        const maxPage = Math.max(1, Math.ceil(resolvedTotal / PER_PAGE));
+
+        // If requested page is out of range, snap to last valid page.
+        if (resolvedTotal > 0 && p > maxPage) {
+          setPage(maxPage);
+          fetchLogs(maxPage);
+          return;
+        }
+
         setLogs(nextLogs);
-        setTotal(Number(r.data?.total || nextLogs.length || 0));
+        setTotal(resolvedTotal);
+        setPage(p);
       })
       .catch(() => {
         setLogs([]);
@@ -75,6 +88,10 @@ export default function AuditTrail() {
     setPage(1);
     setTimeout(() => fetchLogs(1), 0);
   };
+
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const canGoPrev = page > 1;
+  const canGoNext = page < totalPages;
 
   const getActionColor = (action) => {
     const a = action?.toUpperCase() || '';
@@ -305,11 +322,27 @@ export default function AuditTrail() {
       </div>
 
       {/* Pagination */}
-      {total > 20 && (
+      {total > PER_PAGE && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 16 }}>
-          <button className="btn-secondary" disabled={page <= 1} onClick={() => { setPage(p => p - 1); fetchLogs(page - 1); }} style={{ padding: '6px 16px', fontSize: '0.8rem' }}>Previous</button>
-          <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>Page {page}</span>
-          <button className="btn-secondary" onClick={() => { setPage(p => p + 1); fetchLogs(page + 1); }} style={{ padding: '6px 16px', fontSize: '0.8rem' }}>Next</button>
+          <button
+            className="btn-secondary"
+            disabled={!canGoPrev}
+            onClick={() => canGoPrev && fetchLogs(page - 1)}
+            style={{ padding: '6px 16px', fontSize: '0.8rem' }}
+          >
+            Previous
+          </button>
+          <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            Page {page} of {totalPages}
+          </span>
+          <button
+            className="btn-secondary"
+            disabled={!canGoNext}
+            onClick={() => canGoNext && fetchLogs(page + 1)}
+            style={{ padding: '6px 16px', fontSize: '0.8rem' }}
+          >
+            Next
+          </button>
         </div>
       )}
     </motion.div>
