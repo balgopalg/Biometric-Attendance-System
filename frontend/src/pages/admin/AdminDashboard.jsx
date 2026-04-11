@@ -7,7 +7,6 @@ import {
   HiOutlineAcademicCap,
   HiOutlineBookOpen,
   HiOutlineClipboardList,
-  HiOutlineChartBar,
   HiOutlineClock,
   HiOutlineShieldCheck,
 } from 'react-icons/hi';
@@ -122,6 +121,94 @@ function DistributionBars({ title, rows, labelKey, valueKey }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function MonthlyAttendanceTrend({ points }) {
+  const width = 620;
+  const height = 210;
+  const padding = { top: 16, right: 16, bottom: 26, left: 16 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(...points.map((p) => Number(p.total) || 0), 1);
+
+  const mapped = points.map((point, index) => {
+    const x = padding.left + (points.length > 1 ? (index / (points.length - 1)) * innerWidth : innerWidth / 2);
+    const ratio = (Number(point.total) || 0) / maxValue;
+    const y = padding.top + (innerHeight - ratio * innerHeight);
+    return { ...point, x, y, value: Number(point.total) || 0 };
+  });
+
+  const linePath = mapped
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
+    .join(' ');
+
+  const areaPath = `${linePath} L ${padding.left + innerWidth} ${padding.top + innerHeight} L ${padding.left} ${padding.top + innerHeight} Z`;
+  const totalAttendance = mapped.reduce((sum, p) => sum + p.value, 0);
+  const latest = mapped[mapped.length - 1]?.value || 0;
+  const previous = mapped[mapped.length - 2]?.value || 0;
+  const delta = latest - previous;
+  const deltaText = delta === 0 ? 'No change from last month' : `${delta > 0 ? '+' : ''}${delta} vs last month`;
+
+  return (
+    <div className="glass-card" style={{ padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+        <div>
+          <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>Monthly Attendance Trend</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: 3 }}>Last {points.length} months attendance logs</p>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <p style={{ fontSize: '1.1rem', fontWeight: 800, lineHeight: 1 }}>{totalAttendance}</p>
+          <p style={{ color: delta >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)', fontSize: '0.72rem', marginTop: 3 }}>{deltaText}</p>
+        </div>
+      </div>
+
+      {points.length === 0 ? (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>No attendance data available.</p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', minWidth: 360, height: 220 }} role="img" aria-label="Monthly attendance trend chart">
+            <defs>
+              <linearGradient id="attendanceAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(6,182,212,0.35)" />
+                <stop offset="100%" stopColor="rgba(6,182,212,0.02)" />
+              </linearGradient>
+              <linearGradient id="attendanceLineGradient" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#06b6d4" />
+                <stop offset="100%" stopColor="#8b5cf6" />
+              </linearGradient>
+            </defs>
+
+            {[0, 0.25, 0.5, 0.75, 1].map((tick) => {
+              const y = padding.top + tick * innerHeight;
+              return (
+                <line
+                  key={String(tick)}
+                  x1={padding.left}
+                  y1={y}
+                  x2={padding.left + innerWidth}
+                  y2={y}
+                  stroke="var(--border-glass)"
+                  strokeDasharray="4 6"
+                  strokeWidth="1"
+                />
+              );
+            })}
+
+            <path d={areaPath} fill="url(#attendanceAreaGradient)" />
+            <path d={linePath} fill="none" stroke="url(#attendanceLineGradient)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+
+            {mapped.map((p) => (
+              <g key={p.key}>
+                <circle cx={p.x} cy={p.y} r="5" fill="var(--bg-card)" stroke="#06b6d4" strokeWidth="2" />
+                <text x={p.x} y={height - 8} textAnchor="middle" fontSize="11" fill="var(--text-muted)">{p.label}</text>
+                <title>{`${p.label}: ${p.value}`}</title>
+              </g>
+            ))}
+          </svg>
+        </div>
+      )}
     </div>
   );
 }
@@ -319,6 +406,15 @@ export default function AdminDashboard() {
       }));
   }, [filters.academic_session, filters.course_id, courseSummary, semesterSummary]);
 
+  const monthlyAttendance = useMemo(() => {
+    const rows = Array.isArray(stats.monthly_attendance) ? stats.monthly_attendance : [];
+    return rows.map((row, index) => ({
+      key: row.key || `m-${index}`,
+      label: row.label || row.month || `M${index + 1}`,
+      total: Number(row.total) || 0,
+    }));
+  }, [stats.monthly_attendance]);
+
   const handleAcademicSessionChange = (value) => {
     setFilters({ academic_session: value, course_id: '', semester: '' });
   };
@@ -347,34 +443,7 @@ export default function AdminDashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
-        <div className="glass-card" style={{ padding: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-            <HiOutlineChartBar size={18} style={{ color: 'var(--accent-purple)' }} />
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Monthly Attendance Trend</h3>
-          </div>
-          <div style={{ height: 200, display: 'flex', alignItems: 'flex-end', gap: 8, padding: '0 10px' }}>
-            {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'].map((month, i) => {
-              const heights = [60, 80, 45, 90, 70, 55];
-              return (
-                <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                  <motion.div
-                    initial={{ height: 0 }}
-                    animate={{ height: heights[i] }}
-                    transition={{ delay: i * 0.1, duration: 0.6 }}
-                    style={{
-                      width: '100%',
-                      maxWidth: 40,
-                      background: i === 2 ? 'var(--gradient-primary)' : 'var(--bg-glass)',
-                      borderRadius: 6,
-                      border: i === 2 ? 'none' : '1px solid var(--border-glass)',
-                    }}
-                  />
-                  <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{month}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <MonthlyAttendanceTrend points={monthlyAttendance} />
 
         <div className="glass-card" style={{ padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
