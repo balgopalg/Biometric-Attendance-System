@@ -18,7 +18,11 @@ from app.models.enrollment import get_profiles_for_paper, count_profiles_for_pap
 from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
 from app.models.user import find_user_by_id, update_user
 from app.services.face_detection import get_detector
-from app.services.face_recognition import generate_embedding, find_best_match, compare_embeddings
+from app.services.face_recognition import (
+    generate_embedding,
+    find_best_match_cached,
+    prepare_profile_candidates,
+)
 from app.services.capture_upload import save_classroom_upload_bundle
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, decode_base64_image
@@ -116,6 +120,19 @@ def _parse_date(value, end_of_day=False):
         return dt
     except Exception:
         return None
+
+
+def _load_session_candidates(session: dict):
+    """Build and cache per-session recognition candidates to avoid repeated DB reads."""
+    candidates = session.get("recognition_candidates")
+    if candidates is not None:
+        return candidates
+
+    paper_id = session.get("paper_id")
+    profiles = get_profiles_for_paper(paper_id)
+    candidates = prepare_profile_candidates(profiles)
+    session["recognition_candidates"] = candidates
+    return candidates
 
 
 def _extract_classroom_faces(img_rgb, img_bgr=None):
@@ -251,6 +268,7 @@ def start_session(user):
         "lecturer_id": str(user["_id"]),
         "recognized": [],
         "started_at": datetime.utcnow(),
+        "recognition_candidates": prepare_profile_candidates(get_profiles_for_paper(paper_id)),
     }
 
     return jsonify({
@@ -283,7 +301,7 @@ def recognize_frame(user):
     if not faces:
         return jsonify({"new_matches": [], "faces_detected": 0, "candidates_count": 0, "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60), "best_similarity_seen": None})
 
-    profiles = get_profiles_for_paper(paper_id)
+    candidates = _load_session_candidates(session)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
 
     new_matches = []
@@ -291,32 +309,26 @@ def recognize_frame(user):
     for face in faces:
         embedding = generate_embedding(face["crop"])
 
-        face_best_similarity = -1.0
-        best_profile = None
-        for profile in profiles:
-            for stored_emb in profile.get("face_embeddings", []):
-                sim = compare_embeddings(embedding, stored_emb)
-                if sim > face_best_similarity:
-                    face_best_similarity = sim
-                    best_profile = profile
+        match, face_best_similarity = find_best_match_cached(
+            embedding, candidates, threshold=threshold
+        )
         if face_best_similarity > best_similarity_seen:
             best_similarity_seen = face_best_similarity
 
-        match = find_best_match(embedding, profiles, threshold=threshold)
         if match and match["user_id"] not in session["recognized"]:
             session["recognized"].append(match["user_id"])
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
             print(f"[RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
-        elif not match and best_profile:
+        elif not match and face_best_similarity >= 0:
             print(f"[RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
 
     return jsonify({
         "new_matches": new_matches,
         "faces_detected": len(faces),
         "total_recognized": len(session["recognized"]),
-        "candidates_count": len(profiles),
+        "candidates_count": len(candidates),
         "threshold": threshold,
         "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
     })
@@ -395,40 +407,34 @@ def recognize_image(user):
             "face_paths": saved_bundle["face_paths"],
         })
     
-    profiles = get_profiles_for_paper(paper_id)
+    candidates = _load_session_candidates(session)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
 
     new_matches = []
     best_similarity_seen = -1.0
     for face in faces:
         embedding = generate_embedding(face["crop"])
-        
-        face_best_similarity = -1.0
-        best_profile = None
-        for profile in profiles:
-            for stored_emb in profile.get("face_embeddings", []):
-                sim = compare_embeddings(embedding, stored_emb)
-                if sim > face_best_similarity:
-                    face_best_similarity = sim
-                    best_profile = profile
+
+        match, face_best_similarity = find_best_match_cached(
+            embedding, candidates, threshold=threshold
+        )
         if face_best_similarity > best_similarity_seen:
             best_similarity_seen = face_best_similarity
-        
-        match = find_best_match(embedding, profiles, threshold=threshold)
+
         if match and match["user_id"] not in session["recognized"]:
             session["recognized"].append(match["user_id"])
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
             print(f"[IMAGE_RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
-        elif not match and best_profile:
+        elif not match and face_best_similarity >= 0:
             print(f"[IMAGE_RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
     
     return jsonify({
         "new_matches": new_matches,
         "faces_detected": len(faces),
         "total_recognized": len(session["recognized"]),
-        "candidates_count": len(profiles),
+        "candidates_count": len(candidates),
         "threshold": threshold,
         "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
         "saved_folder": saved_bundle["folder_path"],

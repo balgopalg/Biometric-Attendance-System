@@ -20,6 +20,7 @@ function fmt(dt) {
 }
 
 export default function AttendanceSession() {
+  const RECOGNITION_DEBUG = false;
   const [params] = useSearchParams();
   const paperIdFromQuery = params.get('paper_id');
 
@@ -47,6 +48,7 @@ export default function AttendanceSession() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const intervalRef = useRef(null);
+  const scanInFlightRef = useRef(false);
 
   const selectedPaper = useMemo(
     () => papers.find((p) => p._id === selectedPaperId) || null,
@@ -210,16 +212,22 @@ export default function AttendanceSession() {
 
   const scanFrame = useCallback(async () => {
     if (!sessionId) return;
+    if (scanInFlightRef.current) return;
+
     const frame = captureFrame();
     if (!frame) return;
 
-    console.debug('[Recognition] Sending frame', {
-      timestamp: new Date().toISOString(),
-      sessionId,
-      paperId: selectedPaperId,
-      framePrefix: frame.slice(0, 40),
-      approxBytes: Math.round((frame.length * 3) / 4),
-    });
+    scanInFlightRef.current = true;
+
+    if (RECOGNITION_DEBUG) {
+      console.debug('[Recognition] Sending frame', {
+        timestamp: new Date().toISOString(),
+        sessionId,
+        paperId: selectedPaperId,
+        framePrefix: frame.slice(0, 40),
+        approxBytes: Math.round((frame.length * 3) / 4),
+      });
+    }
 
     try {
       const res = await api.post('/lecturer/session/recognize', {
@@ -227,15 +235,17 @@ export default function AttendanceSession() {
         frame,
       });
 
-      console.debug('[Recognition] Response', {
-        timestamp: new Date().toISOString(),
-        faces_detected: res.data.faces_detected,
-        candidates_count: res.data.candidates_count,
-        best_similarity_seen: res.data.best_similarity_seen,
-        threshold: res.data.threshold,
-        new_matches: res.data.new_matches,
-        total_recognized: res.data.total_recognized,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.debug('[Recognition] Response', {
+          timestamp: new Date().toISOString(),
+          faces_detected: res.data.faces_detected,
+          candidates_count: res.data.candidates_count,
+          best_similarity_seen: res.data.best_similarity_seen,
+          threshold: res.data.threshold,
+          new_matches: res.data.new_matches,
+          total_recognized: res.data.total_recognized,
+        });
+      }
 
       if (res.data.new_matches?.length > 0) {
         setRecognized((prev) => [...prev, ...res.data.new_matches]);
@@ -249,15 +259,19 @@ export default function AttendanceSession() {
       });
       setScanError('');
     } catch (err) {
-      console.error('[Recognition] Request failed', {
-        timestamp: new Date().toISOString(),
-        sessionId,
-        paperId: selectedPaperId,
-        error: err.response?.data || err.message,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.error('[Recognition] Request failed', {
+          timestamp: new Date().toISOString(),
+          sessionId,
+          paperId: selectedPaperId,
+          error: err.response?.data || err.message,
+        });
+      }
       setScanError(err.response?.data?.error || 'Frame recognition failed');
+    } finally {
+      scanInFlightRef.current = false;
     }
-  }, [sessionId, selectedPaperId, captureFrame]);
+  }, [sessionId, selectedPaperId, captureFrame, RECOGNITION_DEBUG]);
 
   const handleUploadImage = async (imageBlob) => {
     if (!selectedPaperId) {
