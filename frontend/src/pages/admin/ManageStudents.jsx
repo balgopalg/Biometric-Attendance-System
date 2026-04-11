@@ -68,7 +68,6 @@ export default function ManageStudents() {
   const [trainingStudentId, setTrainingStudentId] = useState('');
   const [bulkTraining, setBulkTraining] = useState(false);
   const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
-  const [hiddenInactiveStudentCount, setHiddenInactiveStudentCount] = useState(0);
   const [paperOptions, setPaperOptions] = useState([]);
   const [selectedPaperIds, setSelectedPaperIds] = useState([]);
   const [baseAssignedPaperIds, setBaseAssignedPaperIds] = useState([]);
@@ -115,37 +114,6 @@ export default function ManageStudents() {
     fetchStudents(1, { signal: controller.signal });
     return () => controller.abort();
   }, [debouncedFilters, debouncedSearch, showInactiveRows]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (showInactiveRows) {
-      setHiddenInactiveStudentCount(0);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const params = { page: 1, per_page: 1, include_inactive: true };
-    if (debouncedSearch) params.q = debouncedSearch;
-    if (debouncedFilters.course_id) params.course_id = debouncedFilters.course_id;
-    if (debouncedFilters.paper_id) params.paper_id = debouncedFilters.paper_id;
-    if (debouncedFilters.semester) params.semester = debouncedFilters.semester;
-
-    api.get('/admin/students', { params })
-      .then((r) => {
-        if (cancelled) return;
-        const totalAll = Number(r.data?.total || 0);
-        setHiddenInactiveStudentCount(Math.max(0, totalAll - totalStudents));
-      })
-      .catch(() => {
-        if (!cancelled) setHiddenInactiveStudentCount(0);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [debouncedFilters, debouncedSearch, showInactiveRows, totalStudents]);
 
   useEffect(() => {
     let cancelled = false;
@@ -250,11 +218,6 @@ export default function ManageStudents() {
 
   const activeCourses = useMemo(
     () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
-    [courses]
-  );
-
-  const inactiveCourses = useMemo(
-    () => courses.filter((c) => String(c.status || 'active').toLowerCase() !== 'active'),
     [courses]
   );
 

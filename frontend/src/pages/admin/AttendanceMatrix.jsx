@@ -32,7 +32,7 @@ function toSubjectAbbreviation(name = '') {
   if (!text) return '';
 
   const words = text
-    .replace(/[()\[\]{}]/g, ' ')
+    .replace(/[(){}[\]]/g, ' ')
     .split(/\s+/)
     .filter(Boolean);
 
