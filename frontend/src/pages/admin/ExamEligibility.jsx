@@ -4,12 +4,14 @@ import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
+import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
 
 export default function ExamEligibility() {
   const [courses, setCourses] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [search, setSearch] = useState('');
@@ -33,6 +35,7 @@ export default function ExamEligibility() {
 
   const fetchEligibility = (signal, activeFilters = filters, activeSearch = search) => {
     setLoading(true);
+    setEligibilityError('');
     const params = { ...activeFilters };
     if (activeSearch) params.q = activeSearch;
     delete params.final_eligible;
@@ -49,6 +52,7 @@ export default function ExamEligibility() {
       .catch((err) => {
         if (err?.code === 'ERR_CANCELED') return;
         setRows([]);
+        setEligibilityError(err.response?.data?.error || 'Failed to load exam eligibility data.');
       })
       .finally(() => setLoading(false));
   };
@@ -295,9 +299,18 @@ export default function ExamEligibility() {
   const handleBulkAllow = () => handleBulkOverride(true);
   const handleBulkBlock = () => handleBulkOverride(false);
 
+  if (!loading && eligibilityError) {
+    return (
+      <div className="admin-page">
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load eligibility records" description={eligibilityError} actionLabel="Retry" onAction={() => fetchEligibility()} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>
@@ -394,6 +407,19 @@ export default function ExamEligibility() {
       </div>
 
       <div className="glass-card table-desktop" style={{ overflowX: 'auto' }}>
+        {loading ? (
+          <StatePanel variant="loading" title="Loading eligibility records" description="Analyzing attendance and override status." compact />
+        ) : null}
+
+        {!loading && eligibilityError ? (
+          <StatePanel variant="error" title="Unable to load eligibility records" description={eligibilityError} actionLabel="Retry" onAction={() => fetchEligibility()} compact />
+        ) : null}
+
+        {!loading && !eligibilityError && displayedRows.length === 0 ? (
+          <StatePanel variant="empty" title="No eligibility records found" description="Try changing course, session, or semester filters." compact />
+        ) : null}
+
+        {!loading && !eligibilityError && displayedRows.length > 0 ? (
         <table className="data-table">
           <thead>
             <tr>
@@ -459,15 +485,9 @@ export default function ExamEligibility() {
                 </td>
               </tr>
             ))}
-            {displayedRows.length === 0 && (
-              <tr>
-                <td colSpan="7" style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
-                  {loading ? 'Loading eligibility records...' : 'No eligibility records found.'}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <div className="mobile-card-list" style={{ marginTop: 10 }}>
@@ -537,6 +557,6 @@ export default function ExamEligibility() {
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

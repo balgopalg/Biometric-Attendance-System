@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect } from 'react';
 import api from '../../api/axios';
+import StatePanel from '../../components/ui/StatePanel';
 import { motion } from 'framer-motion';
 import { HiOutlineChevronDown, HiOutlineChevronUp } from 'react-icons/hi';
 
@@ -24,20 +25,40 @@ function formatSessionDateTime(session) {
 export default function AttendanceSummary() {
   const [data, setData] = useState([]);
   const [expandedPaperId, setExpandedPaperId] = useState('');
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState('');
 
   useEffect(() => {
-    api.get('/student/attendance').then((r) => setData(r.data)).catch(() => {});
+    setLoadingSummary(true);
+    setSummaryError('');
+    api.get('/student/attendance').then((r) => setData(r.data)).catch((err) => {
+      setData([]);
+      setSummaryError(err.response?.data?.error || 'Failed to load attendance summary.');
+    }).finally(() => setLoadingSummary(false));
   }, []);
 
   return (
-    <motion.div className="student-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div className="student-page">
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Attendance Summary</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Detailed view of your attendance across all papers.</p>
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
-        <table className="data-table">
+        {loadingSummary ? (
+          <StatePanel variant="loading" title="Loading attendance summary" description="Fetching paper-wise attendance and session history." compact />
+        ) : null}
+
+        {!loadingSummary && summaryError ? (
+          <StatePanel variant="error" title="Unable to load attendance summary" description={summaryError} actionLabel="Retry" onAction={() => window.location.reload()} compact />
+        ) : null}
+
+        {!loadingSummary && !summaryError && data.length === 0 ? (
+          <StatePanel variant="empty" title="No attendance data available" description="Attendance appears once class sessions are recorded." compact />
+        ) : null}
+
+        {!loadingSummary && !summaryError && data.length > 0 ? (
+          <table className="data-table">
           <thead><tr><th>Paper Code</th><th>Paper Name</th><th>Attended</th><th>Total</th><th>Percentage</th><th>Status</th></tr></thead>
           <tbody>
             {data.map((a) => {
@@ -119,10 +140,10 @@ export default function AttendanceSummary() {
                 </Fragment>
               );
             })}
-            {data.length === 0 && <tr><td colSpan="6" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No attendance data available.</td></tr>}
           </tbody>
-        </table>
+          </table>
+        ) : null}
       </div>
-    </motion.div>
+    </div>
   );
 }

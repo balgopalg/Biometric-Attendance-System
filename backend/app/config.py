@@ -22,9 +22,23 @@ class Config:
     MONGO_DB_ACADEMIC = os.getenv("MONGO_DB_ACADEMIC", "biometric_academic")
     MONGO_DB_ATTENDANCE = os.getenv("MONGO_DB_ATTENDANCE", "biometric_attendance_ops")
     MONGO_DB_AUDIT = os.getenv("MONGO_DB_AUDIT", "biometric_audit")
-    # Keep an explicit dev fallback while requiring strong secrets outside local envs.
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-only-change-this-secret")
-    STRICT_JWT_SECRET = _env_bool("STRICT_JWT_SECRET", False)
+    
+    # JWT Secret: MUST be strong in production (64+ chars, random)
+    # Dev fallback only for local/test environments
+    _JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+    if not _JWT_SECRET_KEY and ENV in {"production", "prod", "staging"}:
+        raise RuntimeError(
+            "CRITICAL: JWT_SECRET_KEY not set in production. "
+            "Set via environment variable to a strong random string (64+ characters)"
+        )
+    JWT_SECRET_KEY = _JWT_SECRET_KEY or "dev-only-strong-secret-change-in-prod"
+    
+    # Enforce secret strength validation
+    STRICT_JWT_SECRET = _env_bool("STRICT_JWT_SECRET", ENV in {"production", "prod", "staging"})
+    
+    # Validate JWT secret strength in production
+    if STRICT_JWT_SECRET and len(JWT_SECRET_KEY) < 32:
+        raise RuntimeError("JWT_SECRET_KEY must be at least 32 characters in production")
     CORS_ORIGINS = [
         origin.strip()
         for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -40,9 +54,64 @@ class Config:
     JWT_COOKIE_DOMAIN = os.getenv("JWT_COOKIE_DOMAIN") or None
     JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24 hours in seconds
 
+    # ============ SECURITY HARDENING SETTINGS ============
+    
+    # Rate Limiting
+    RATELIMIT_ENABLED = _env_bool("RATELIMIT_ENABLED", True)
+    RATELIMIT_STORAGE_URL = os.getenv("RATELIMIT_STORAGE_URL", "memory://")  # Use "redis://localhost:6379" for distributed
+    
+    # Brute Force Protection
+    BRUTE_FORCE_PROTECTION_ENABLED = _env_bool("BRUTE_FORCE_PROTECTION_ENABLED", True)
+    LOGIN_LOCKOUT_THRESHOLD = int(os.getenv("LOGIN_LOCKOUT_THRESHOLD", "5"))
+    LOGIN_LOCKOUT_DURATION_MINUTES = int(os.getenv("LOGIN_LOCKOUT_DURATION_MINUTES", "15"))
+    LOGIN_ATTEMPT_WINDOW_MINUTES = int(os.getenv("LOGIN_ATTEMPT_WINDOW_MINUTES", "15"))
+    
+    PIN_MAX_ATTEMPTS = int(os.getenv("PIN_MAX_ATTEMPTS", "3"))
+    PIN_LOCKOUT_DURATION_MINUTES = int(os.getenv("PIN_LOCKOUT_DURATION_MINUTES", "5"))
+    
+    # IP-based Rate Limiting
+    IP_RATELIMIT_THRESHOLD = int(os.getenv("IP_RATELIMIT_THRESHOLD", "100"))
+    IP_RATELIMIT_WINDOW_MINUTES = int(os.getenv("IP_RATELIMIT_WINDOW_MINUTES", "10"))
+    
+    # Password Policy
+    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "12"))
+    PASSWORD_REQUIRE_UPPERCASE = _env_bool("PASSWORD_REQUIRE_UPPERCASE", True)
+    PASSWORD_REQUIRE_LOWERCASE = _env_bool("PASSWORD_REQUIRE_LOWERCASE", True)
+    PASSWORD_REQUIRE_DIGITS = _env_bool("PASSWORD_REQUIRE_DIGITS", True)
+    PASSWORD_REQUIRE_SPECIAL = _env_bool("PASSWORD_REQUIRE_SPECIAL", True)
+    
+    # Session Security
+    SECURE_SESSION_TIMEOUT_MINUTES = int(os.getenv("SECURE_SESSION_TIMEOUT_MINUTES", "30"))
+    REQUIRE_CSRF_ON_MUTATION = _env_bool("REQUIRE_CSRF_ON_MUTATION", True)
+    
+    # Audit Logging
+    AUDIT_LOGGING_ENABLED = _env_bool("AUDIT_LOGGING_ENABLED", True)
+    LOG_SENSITIVE_OPERATIONS = _env_bool("LOG_SENSITIVE_OPERATIONS", True)
+    AUDIT_LOG_RETENTION_DAYS = int(os.getenv("AUDIT_LOG_RETENTION_DAYS", "90"))
+
+    # ============ OBSERVABILITY SETTINGS ============
+
+    # Structured Logging
+    LOGGING_LEVEL = os.getenv("LOGGING_LEVEL", "INFO")
+    LOGGING_FORMAT = os.getenv("LOGGING_FORMAT", "json")  # json or text
+
+    # Error Tracking
+    ERROR_TRACKING_ENABLED = _env_bool("ERROR_TRACKING_ENABLED", ENV in {"production", "prod", "staging"})
+    SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+    SENTRY_SAMPLE_RATE = float(os.getenv("SENTRY_SAMPLE_RATE", "1.0"))
+    SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+
+    # Metrics Collection
+    METRICS_ENABLED = _env_bool("METRICS_ENABLED", True)
+    METRICS_PORT = int(os.getenv("METRICS_PORT", "9090"))
+
+    # Health Checks
+    HEALTH_CHECK_ENABLED = _env_bool("HEALTH_CHECK_ENABLED", True)
+
     # FaceNet cosine similarity threshold (0.6+ recommended for reliable matching)
     # Higher = stricter matching, fewer false positives (absent marked as present)
     # Lower = lenient matching, may have false positives
+    
     FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.60"))
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
     SLOW_REQUEST_THRESHOLD_MS = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "500"))
@@ -54,5 +123,12 @@ class Config:
     TASK_QUEUE_MAX_BACKOFF_SECONDS = int(os.getenv("TASK_QUEUE_MAX_BACKOFF_SECONDS", "300"))
     TASK_QUEUE_BACKOFF_JITTER_RATIO = float(os.getenv("TASK_QUEUE_BACKOFF_JITTER_RATIO", "0.25"))
     TASK_QUEUE_RUNNING_TIMEOUT_SECONDS = int(os.getenv("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", "900"))
+    ACTIVE_SESSION_TIMEOUT_MINUTES = int(os.getenv("ACTIVE_SESSION_TIMEOUT_MINUTES", "180"))
+
+    # Data lifecycle retention defaults
+    UPLOAD_RETENTION_DAYS = int(os.getenv("UPLOAD_RETENTION_DAYS", "14"))
+    DATASET_RETENTION_DAYS = int(os.getenv("DATASET_RETENTION_DAYS", "365"))
+    TRAINER_ARTIFACT_RETENTION_DAYS = int(os.getenv("TRAINER_ARTIFACT_RETENTION_DAYS", "30"))
+    BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
 
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB max upload

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { HiOutlineDocumentDownload } from 'react-icons/hi';
 import api from '../../api/axios';
+import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
 
 const STICKY_ROLL_LEFT = 0;
@@ -65,7 +66,9 @@ export default function AttendanceMatrix() {
   const [loading, setLoading] = useState(false);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
+  const [courses, setCourses] = useState([]);
   const [payload, setPayload] = useState({ dates: [], rows: [], meta: {}, options: {} });
+  const [matrixError, setMatrixError] = useState('');
   const [filters, setFilters] = useState({
     course_id: '',
     academic_session: '',
@@ -75,9 +78,9 @@ export default function AttendanceMatrix() {
   });
 
   const activeCourses = useMemo(() => {
-    const optionsCourses = Array.isArray(payload.options?.courses) ? payload.options.courses : [];
-    return optionsCourses.filter((c) => String(c.status || 'active').toLowerCase() === 'active');
-  }, [payload.options]);
+    const sourceCourses = Array.isArray(courses) ? courses : [];
+    return sourceCourses.filter((c) => String(c.status || 'active').toLowerCase() === 'active');
+  }, [courses]);
 
   const semesterOptions = useMemo(() => {
     const fromPayload = Array.isArray(payload.options?.semesters) ? payload.options.semesters : [];
@@ -97,20 +100,45 @@ export default function AttendanceMatrix() {
   const visibleRows = isFilterComplete ? safeRows : [];
 
   const fetchMatrix = async (signal) => {
+    if (filters.from_date && filters.to_date && filters.from_date > filters.to_date) {
+      const message = 'From date must be before or equal to To date';
+      setMatrixError(message);
+      setPayload({ dates: [], rows: [], meta: {}, options: {} });
+      return;
+    }
     setLoading(true);
+    setMatrixError('');
     try {
       const params = buildQueryParams(filters);
       const res = await api.get('/admin/attendance-matrix', { params, signal });
       setPayload(res.data || { dates: [], rows: [], meta: {}, options: {} });
     } catch (err) {
       if (err?.code !== 'ERR_CANCELED') {
-        toast.error(err.response?.data?.error || 'Failed to load attendance matrix');
+        const message = err.response?.data?.error || 'Failed to load attendance matrix';
+        toast.error(message);
         setPayload({ dates: [], rows: [], meta: {}, options: {} });
+        setMatrixError(message);
       }
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.get('/admin/courses', { signal: controller.signal })
+      .then((res) => {
+        const items = Array.isArray(res.data?.items) ? res.data.items : (Array.isArray(res.data) ? res.data : []);
+        setCourses(items);
+      })
+      .catch((err) => {
+        if (err?.code !== 'ERR_CANCELED') {
+          setCourses([]);
+        }
+      });
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -193,9 +221,18 @@ export default function AttendanceMatrix() {
     return { totalHeld, totalAttended, percentage };
   };
 
+  if (!loading && matrixError) {
+    return (
+      <div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }}>
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load attendance matrix" description={matrixError} actionLabel="Retry" onAction={() => fetchMatrix()} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }}>
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>
@@ -259,6 +296,7 @@ export default function AttendanceMatrix() {
             className="input-field"
             value={filters.from_date}
             onChange={(e) => setFilters((prev) => ({ ...prev, from_date: e.target.value }))}
+            max={filters.to_date || undefined}
             style={{ flex: '1 1 180px', maxWidth: 220 }}
           />
 
@@ -267,6 +305,7 @@ export default function AttendanceMatrix() {
             className="input-field"
             value={filters.to_date}
             onChange={(e) => setFilters((prev) => ({ ...prev, to_date: e.target.value }))}
+            min={filters.from_date || undefined}
             style={{ flex: '1 1 180px', maxWidth: 220 }}
           />
         </div>
@@ -293,13 +332,29 @@ export default function AttendanceMatrix() {
         </div>
       </div>
 
-      {!isFilterComplete && (
-        <div className="glass-card" style={{ padding: 18, marginBottom: 12, color: 'var(--text-muted)' }}>
-          Select Course, Academic Session, and Semester to display the attendance matrix.
-        </div>
-      )}
-
       <div className="glass-card table-desktop" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
+        {loading && !matrixError ? (
+          <StatePanel variant="loading" title="Loading attendance matrix" description="Building date-wise attendance columns and totals." compact />
+        ) : null}
+
+        {!loading && matrixError ? (
+          <StatePanel variant="error" title="Unable to load attendance matrix" description={matrixError} actionLabel="Retry" onAction={() => fetchMatrix()} compact />
+        ) : null}
+
+        {isFilterComplete && !loading && !matrixError && visibleRows.length === 0 ? (
+          <StatePanel variant="empty" title="No attendance records found" description="No sessions match this course/session/semester combination." compact />
+        ) : null}
+
+        {!isFilterComplete ? (
+          <StatePanel
+            variant="empty"
+            title="Select required filters"
+            description="Choose course, academic session, and semester to display the matrix."
+            compact
+          />
+        ) : null}
+
+        {!loading && !matrixError && isFilterComplete && visibleRows.length > 0 ? (
         <div style={{ width: '100%', maxWidth: '100%', overflowX: 'auto', overflowY: 'hidden' }}>
         <table className="data-table attendance-matrix-table" style={{ width: 'max-content', minWidth: '100%' }}>
           <thead>
@@ -485,19 +540,11 @@ export default function AttendanceMatrix() {
                 );
               })()
             ))}
-            {visibleRows.length === 0 && (
-              <tr>
-                <td colSpan={Math.max(totalCols, 3)} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
-                  {!isFilterComplete
-                    ? 'Select Course, Academic Session, and Semester to view data.'
-                    : (loading ? 'Loading attendance matrix...' : 'No attendance records found for selected filters.')}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
         </div>
+        ) : null}
       </div>
-    </motion.div>
+    </div>
   );
 }

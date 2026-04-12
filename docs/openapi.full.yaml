@@ -1,0 +1,2326 @@
+openapi: 3.0.3
+info:
+  title: Biometric Face Attendance API (Full)
+  version: 1.0.0
+  description: |
+    Exhaustive endpoint specification for the backend route surface.
+    Includes all discovered routes from auth, admin, lecturer, student, and recognition blueprints.
+
+servers:
+  - url: http://localhost:5000
+    description: Local development
+
+tags:
+  - name: Auth
+  - name: AdminCourses
+  - name: AdminPapers
+  - name: AdminLecturers
+  - name: AdminStudents
+  - name: AdminJobs
+  - name: AdminAudit
+  - name: AdminAttendance
+  - name: AdminEligibility
+  - name: Lecturer
+  - name: Student
+  - name: Recognition
+
+components:
+  securitySchemes:
+    jwtCookie:
+      type: apiKey
+      in: cookie
+      name: access_token_cookie
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-TOKEN
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    GenericObject:
+      type: object
+      additionalProperties: true
+
+    GenericList:
+      type: array
+      items:
+        $ref: '#/components/schemas/GenericObject'
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password, confirm_password]
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+        confirm_password:
+          type: string
+
+    SetPinRequest:
+      type: object
+      required: [pin]
+      properties:
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+
+    StartSessionRequest:
+      type: object
+      required: [paper_id]
+      properties:
+        paper_id:
+          type: string
+
+    RecognizeFrameRequest:
+      type: object
+      required: [session_id, frame]
+      properties:
+        session_id:
+          type: string
+        frame:
+          type: string
+          description: data URL base64 image
+
+    CommitSessionRequest:
+      type: object
+      required: [session_id, pin]
+      properties:
+        session_id:
+          type: string
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+
+    AdjustSessionRequest:
+      type: object
+      required: [pin, student_ids]
+      properties:
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+        student_ids:
+          type: array
+          items:
+            type: string
+
+    CreateStudentRequest:
+      type: object
+      required: [name, email, course_id]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        course_id:
+          type: string
+        department:
+          type: string
+        enrollment_year:
+          type: integer
+        mobile_no:
+          type: string
+        enrolled_papers:
+          type: array
+          items:
+            type: string
+
+    UpdateStudentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        department:
+          type: string
+        mobile_no:
+          type: string
+        roll_number:
+          type: string
+        reg_number:
+          type: string
+        course_id:
+          type: string
+        enrolled_papers:
+          type: array
+          items:
+            type: string
+        academic_year:
+          type: string
+        academic_session:
+          type: string
+        enrollment_year:
+          type: integer
+        current_semester:
+          type: integer
+
+    BulkPromoteRequest:
+      type: object
+      required: [student_ids]
+      properties:
+        student_ids:
+          type: array
+          items:
+            type: string
+        from_semester:
+          type: integer
+
+    FaceEnrollRequest:
+      type: object
+      required: [user_id, photo]
+      properties:
+        user_id:
+          type: string
+        photo:
+          type: string
+        dataset_photos:
+          type: array
+          items:
+            type: string
+
+    HealthResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        checks:
+          type: object
+          properties:
+            database:
+              type: string
+            indexes_missing:
+              type: array
+              items:
+                type: string
+          additionalProperties: true
+
+    AuthUser:
+      type: object
+      required: [_id, name, email, role, must_change_password]
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string }
+        department: { type: string }
+        must_change_password: { type: boolean }
+
+    LoginSuccessResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthUser'
+
+    LecturerPinStatusResponse:
+      type: object
+      required: [has_pin]
+      properties:
+        has_pin: { type: boolean }
+        pin_last_set:
+          type: string
+          nullable: true
+
+    LecturerPinGenerateResponse:
+      type: object
+      required: [pin, message]
+      properties:
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+        message: { type: string }
+
+    LecturerPaper:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        course_id: { type: string }
+        lecturer_id: { type: string }
+        semester:
+          type: integer
+          nullable: true
+        total_classes: { type: integer }
+        course_name:
+          type: string
+          nullable: true
+        course_code:
+          type: string
+          nullable: true
+        course_status: { type: string }
+        is_course_inactive: { type: boolean }
+        academic_year:
+          type: string
+          nullable: true
+        total_enrolled_students: { type: integer }
+        enrolled_academic_sessions:
+          type: array
+          items: { type: string }
+        enrolled_academic_session:
+          type: string
+          nullable: true
+        enrolled_academic_session_label:
+          type: string
+          nullable: true
+      additionalProperties: true
+
+    LecturerSessionStartResponse:
+      type: object
+      required: [session_id, paper]
+      properties:
+        session_id: { type: string }
+        paper:
+          $ref: '#/components/schemas/LecturerPaper'
+        started_at:
+          type: string
+          nullable: true
+
+    RecognitionMatch:
+      type: object
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        similarity: { type: number }
+        confidence: { type: number }
+      additionalProperties: true
+
+    LecturerSessionRecognitionResponse:
+      type: object
+      required: [new_matches, faces_detected, candidates_count, threshold]
+      properties:
+        new_matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecognitionMatch'
+        faces_detected: { type: integer }
+        total_recognized:
+          type: integer
+          nullable: true
+        candidates_count: { type: integer }
+        threshold: { type: number }
+        best_similarity_seen:
+          type: number
+          nullable: true
+        saved_folder:
+          type: string
+          nullable: true
+        original_path:
+          type: string
+          nullable: true
+        face_paths:
+          type: array
+          items: { type: string }
+          nullable: true
+
+    RecognizedStudent:
+      type: object
+      required: [user_id, name, email]
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+
+    LecturerRecognizedListResponse:
+      type: object
+      required: [students]
+      properties:
+        students:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecognizedStudent'
+
+    LecturerSessionCommitResponse:
+      type: object
+      required: [message, students_marked, session_id, rollback_until]
+      properties:
+        message: { type: string }
+        students_marked: { type: integer }
+        session_id: { type: string }
+        rollback_until: { type: string }
+
+    SessionReviewCandidate:
+      type: object
+      required: [user_id, name, email]
+      properties:
+        user_id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        is_present:
+          type: boolean
+          nullable: true
+
+    LecturerSessionReviewResponse:
+      type: object
+      required: [session_id, present_students, candidates, editable, students_marked]
+      properties:
+        session_id: { type: string }
+        paper:
+          allOf:
+            - $ref: '#/components/schemas/LecturerPaper'
+          nullable: true
+        present_students:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecognizedStudent'
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionReviewCandidate'
+        committed_at:
+          type: string
+          nullable: true
+        rollback_until:
+          type: string
+          nullable: true
+        editable: { type: boolean }
+        students_marked: { type: integer }
+
+    LecturerAdjustSessionResponse:
+      type: object
+      required: [message, review]
+      properties:
+        message: { type: string }
+        review:
+          $ref: '#/components/schemas/LecturerSessionReviewResponse'
+
+    LecturerProgressPaperSummary:
+      type: object
+      properties:
+        paper_id: { type: string }
+        paper_name: { type: string }
+        paper_code: { type: string }
+        course_name:
+          type: string
+          nullable: true
+        academic_year:
+          type: string
+          nullable: true
+        classes_taken: { type: integer }
+        attendance_marks: { type: integer }
+        avg_attendance_per_class: { type: number }
+
+    LecturerProgressSessionRow:
+      type: object
+      properties:
+        session_id: { type: string }
+        paper_id: { type: string }
+        paper_name: { type: string }
+        paper_code: { type: string }
+        course_name:
+          type: string
+          nullable: true
+        academic_year:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          nullable: true
+        students_count: { type: integer }
+        total_students: { type: integer }
+        students:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecognizedStudent'
+        rollback_until:
+          type: string
+          nullable: true
+        editable: { type: boolean }
+
+    LecturerProgressResponse:
+      type: object
+      required: [filters, summary, papers, per_paper, sessions]
+      properties:
+        filters:
+          type: object
+          properties:
+            paper_id:
+              type: string
+              nullable: true
+            from_date:
+              type: string
+              nullable: true
+            to_date:
+              type: string
+              nullable: true
+        summary:
+          type: object
+          required: [total_classes_taken, total_attendance_marks, average_attendance_per_class]
+          properties:
+            total_classes_taken: { type: integer }
+            total_attendance_marks: { type: integer }
+            average_attendance_per_class: { type: number }
+        papers:
+          type: array
+          items:
+            $ref: '#/components/schemas/LecturerPaper'
+        per_paper:
+          type: array
+          items:
+            $ref: '#/components/schemas/LecturerProgressPaperSummary'
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/LecturerProgressSessionRow'
+
+    StudentProfileResponse:
+      type: object
+      required: [student, profile, course_status, is_course_inactive, subjects, papers]
+      properties:
+        student:
+          type: object
+          required: [user_id, name, email]
+          properties:
+            user_id: { type: string }
+            name: { type: string }
+            email: { type: string, format: email }
+            department: { type: string }
+        profile:
+          type: object
+          properties:
+            reg_number: { type: string }
+            academic_year: { type: string }
+            current_semester:
+              type: integer
+              nullable: true
+            course_id: { type: string }
+        course:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/GenericObject'
+        course_status: { type: string }
+        is_course_inactive: { type: boolean }
+        subjects:
+          type: array
+          items:
+            type: object
+            properties:
+              paper_id: { type: string }
+              paper_name: { type: string }
+              paper_code: { type: string }
+              semester:
+                type: integer
+                nullable: true
+              total_classes: { type: integer }
+        papers:
+          type: array
+          items:
+            type: object
+            properties:
+              paper_id: { type: string }
+              paper_name: { type: string }
+              paper_code: { type: string }
+              semester:
+                type: integer
+                nullable: true
+              total_classes: { type: integer }
+
+    StudentAttendanceSessionRow:
+      type: object
+      properties:
+        session_id: { type: string }
+        date: { type: string }
+        date_time: { type: string }
+        timestamp:
+          type: string
+          nullable: true
+        status: { type: string }
+        present: { type: boolean }
+        students_marked: { type: integer }
+
+    StudentAttendancePaperSummary:
+      type: object
+      properties:
+        paper_id: { type: string }
+        paper_name: { type: string }
+        paper_code: { type: string }
+        attended: { type: integer }
+        total_classes: { type: integer }
+        percentage: { type: number }
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudentAttendanceSessionRow'
+
+    StudentPredictionsItem:
+      type: object
+      properties:
+        paper_id: { type: string }
+        paper_name: { type: string }
+        paper_code: { type: string }
+        current_percentage: { type: number }
+        overall_attendance_percentage: { type: number }
+        overall_attended_classes: { type: integer }
+        overall_total_classes: { type: integer }
+        classes_needed_for_75: { type: integer }
+        safe_bunks_remaining: { type: integer }
+
+    StudentExamEligibilityItem:
+      type: object
+      properties:
+        paper_id: { type: string }
+        paper_name: { type: string }
+        paper_code: { type: string }
+        attendance_percentage: { type: number }
+        overall_attendance_percentage: { type: number }
+        overall_attended_classes: { type: integer }
+        overall_total_classes: { type: integer }
+        eligible:
+          type: boolean
+          nullable: true
+        status: { type: string }
+        approval_source: { type: string }
+
+    RecognitionFace:
+      type: object
+      properties:
+        bbox:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: integer }
+        confidence: { type: number }
+
+    RecognitionDetectResponse:
+      type: object
+      required: [faces]
+      properties:
+        faces:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecognitionFace'
+
+    RecognitionIdentifyResponse:
+      type: object
+      required: [matches, faces_detected]
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecognitionMatch'
+        faces_detected: { type: integer }
+
+    AdminCourse:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        department: { type: string }
+        course_duration: { type: integer }
+        status: { type: string }
+      additionalProperties: true
+
+    AdminPaper:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        course_id: { type: string }
+        lecturer_id:
+          type: string
+          nullable: true
+        semester:
+          type: integer
+          nullable: true
+        total_classes: { type: integer }
+      additionalProperties: true
+
+    AdminLecturer:
+      type: object
+      properties:
+        _id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        department: { type: string }
+        role: { type: string }
+      additionalProperties: true
+
+    AdminStudent:
+      type: object
+      properties:
+        _id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        course_id: { type: string }
+        reg_number: { type: string }
+        roll_number: { type: string }
+        academic_session: { type: string }
+        current_semester:
+          type: integer
+          nullable: true
+      additionalProperties: true
+
+    PaginatedCoursesResponse:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminCourse' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    AdminCoursesListResponse:
+      oneOf:
+        - type: array
+          items: { $ref: '#/components/schemas/AdminCourse' }
+        - $ref: '#/components/schemas/PaginatedCoursesResponse'
+
+    PaginatedPapersResponse:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminPaper' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    AdminPapersListResponse:
+      oneOf:
+        - type: array
+          items: { $ref: '#/components/schemas/AdminPaper' }
+        - $ref: '#/components/schemas/PaginatedPapersResponse'
+
+    PaginatedLecturersResponse:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminLecturer' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    AdminLecturersListResponse:
+      oneOf:
+        - type: array
+          items: { $ref: '#/components/schemas/AdminLecturer' }
+        - $ref: '#/components/schemas/PaginatedLecturersResponse'
+
+    PaginatedStudentsResponse:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AdminStudent' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    AdminStudentsListResponse:
+      oneOf:
+        - type: array
+          items: { $ref: '#/components/schemas/AdminStudent' }
+        - $ref: '#/components/schemas/PaginatedStudentsResponse'
+
+    AdminLecturerPapersResponse:
+      type: object
+      required: [assigned, all]
+      properties:
+        assigned:
+          type: array
+          items: { $ref: '#/components/schemas/AdminPaper' }
+        all:
+          type: array
+          items: { $ref: '#/components/schemas/AdminPaper' }
+
+    AdminTempPasswordResponse:
+      type: object
+      required: [temp_password]
+      properties:
+        temp_password: { type: string }
+
+    AdminLecturerResetPinResponse:
+      type: object
+      required: [pin, message]
+      properties:
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+        message: { type: string }
+
+    AdminCreateStudentResponse:
+      type: object
+      required: [temp_password]
+      properties:
+        temp_password: { type: string }
+        profile:
+          allOf:
+            - $ref: '#/components/schemas/GenericObject'
+          nullable: true
+      additionalProperties: true
+
+    StudentOptionItem:
+      type: object
+      properties:
+        _id: { type: string }
+        user_id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        reg_number: { type: string }
+        roll_number: { type: string }
+        academic_session: { type: string }
+        course_id: { type: string }
+        current_semester:
+          type: integer
+          nullable: true
+        course_name:
+          type: string
+          nullable: true
+        is_course_inactive: { type: boolean }
+
+    AdminBulkPromoteResponse:
+      type: object
+      required: [message, promoted_count, skipped_count, skipped_max_semester_count, removed_papers_count]
+      properties:
+        message: { type: string }
+        promoted_count: { type: integer }
+        skipped_count: { type: integer }
+        skipped_max_semester_count: { type: integer }
+        removed_papers_count: { type: integer }
+
+    AdminEnrollFaceResponse:
+      type: object
+      required: [message, faces_detected, dataset_saved_count]
+      properties:
+        message: { type: string }
+        faces_detected: { type: integer }
+        dataset_saved_count: { type: integer }
+        dataset_warning:
+          type: string
+          nullable: true
+
+    AdminUploadPhotoResponse:
+      type: object
+      required: [message, file_path, file_name]
+      properties:
+        message: { type: string }
+        file_path: { type: string }
+        file_name: { type: string }
+
+    AdminTrainingQueuedResponse:
+      type: object
+      required: [message, job_id, status_url, requested_count]
+      properties:
+        message: { type: string }
+        job_id: { type: string }
+        status_url: { type: string }
+        requested_count: { type: integer }
+
+    AdminTrainSingleResponse:
+      type: object
+      required: [message, trained_embeddings, skipped_images, dataset_dir]
+      properties:
+        message: { type: string }
+        trained_embeddings: { type: integer }
+        skipped_images: { type: integer }
+        dataset_dir: { type: string }
+
+    AdminTrainBulkResponse:
+      type: object
+      required: [message, requested_count, success_count, failure_count, total_trained_embeddings, items]
+      properties:
+        message: { type: string }
+        requested_count: { type: integer }
+        success_count: { type: integer }
+        failure_count: { type: integer }
+        total_trained_embeddings: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        trainer:
+          allOf:
+            - $ref: '#/components/schemas/GenericObject'
+          nullable: true
+
+    AdminRebuildAllResponse:
+      type: object
+      required: [message, requested_count, success_count, failure_count, total_trained_embeddings, items]
+      properties:
+        message: { type: string }
+        requested_count: { type: integer }
+        success_count: { type: integer }
+        failure_count: { type: integer }
+        total_trained_embeddings: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        trainer:
+          allOf:
+            - $ref: '#/components/schemas/GenericObject'
+          nullable: true
+
+    BackgroundJob:
+      type: object
+      properties:
+        job_id: { type: string }
+        job_type: { type: string }
+        status: { type: string }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+      additionalProperties: true
+
+    AdminCancelJobResponse:
+      type: object
+      required: [message, job]
+      properties:
+        message: { type: string }
+        job:
+          $ref: '#/components/schemas/BackgroundJob'
+
+    AdminReplayJobResponse:
+      type: object
+      required: [message, job_id, status_url]
+      properties:
+        message: { type: string }
+        job_id: { type: string }
+        status_url: { type: string }
+
+    DeadLetterJobItem:
+      type: object
+      properties:
+        job_id: { type: string }
+        job_type: { type: string }
+        error: { type: string }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        retry_count: { type: integer }
+      additionalProperties: true
+
+    DeadLetterListResponse:
+      type: object
+      required: [items, total, page, per_page]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DeadLetterJobItem' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    DeadLetterReplayBulkResponse:
+      type: object
+      required: [message, requested, replayed, skipped]
+      properties:
+        message: { type: string }
+        requested: { type: integer }
+        replayed: { type: integer }
+        skipped: { type: integer }
+
+    DeadLetterReplayFilteredResponse:
+      type: object
+      required: [message, matched, limit, requested, replayed, skipped]
+      properties:
+        message: { type: string }
+        matched: { type: integer }
+        limit: { type: integer }
+        requested: { type: integer }
+        replayed: { type: integer }
+        skipped: { type: integer }
+
+    AdminJobsMetricsResponse:
+      type: object
+      required: [jobs, queue]
+      properties:
+        jobs:
+          type: object
+          additionalProperties: true
+        queue:
+          type: object
+          additionalProperties: true
+
+    AdminCaptureFacesResponse:
+      type: object
+      required: [message, captured_count, dataset_folder]
+      properties:
+        message: { type: string }
+        captured_count: { type: integer }
+        dataset_folder: { type: string }
+
+    AdminCourseReassignResponse:
+      type: object
+      required: [message, moved_students, moved_papers]
+      properties:
+        message: { type: string }
+        from_course:
+          $ref: '#/components/schemas/AdminCourse'
+        to_course:
+          $ref: '#/components/schemas/AdminCourse'
+        moved_students: { type: integer }
+        moved_papers: { type: integer }
+
+    AuditLogItem:
+      type: object
+      properties:
+        _id: { type: string }
+        action: { type: string }
+        performed_by: { type: string }
+        actor_name: { type: string }
+        actor_email: { type: string }
+        timestamp: { type: string }
+        details: { type: string }
+        rollback_available: { type: boolean }
+        rolled_back: { type: boolean }
+      additionalProperties: true
+
+    AuditLogsResponse:
+      type: object
+      required: [logs, total, page, per_page]
+      properties:
+        logs:
+          type: array
+          items: { $ref: '#/components/schemas/AuditLogItem' }
+        total: { type: integer }
+        page: { type: integer }
+        per_page: { type: integer }
+
+    AdminAttendanceOverrideResponse:
+      oneOf:
+        - type: object
+          required: [message, log]
+          properties:
+            message: { type: string }
+            log:
+              $ref: '#/components/schemas/GenericObject'
+        - type: object
+          required: [message]
+          properties:
+            message: { type: string }
+
+    ExamEligibilitySummaryResponse:
+      type: object
+      required: [total, eligible_count, ineligible_count, items]
+      properties:
+        total: { type: integer }
+        eligible_count: { type: integer }
+        ineligible_count: { type: integer }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    ExamEligibilityOverrideBulkResponse:
+      type: object
+      required: [message, updated]
+      properties:
+        message: { type: string }
+        updated: { type: integer }
+
+    AttendanceMatrixResponse:
+      type: object
+      required: [filters, options, meta, dates, rows]
+      properties:
+        filters:
+          type: object
+          additionalProperties: true
+        options:
+          type: object
+          additionalProperties: true
+        meta:
+          type: object
+          additionalProperties: true
+        dates:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    DashboardStatsResponse:
+      type: object
+      required: [total_students, total_lecturers, total_courses, total_papers, total_attendance, total_audit_logs, system_uptime, monthly_attendance]
+      properties:
+        total_students: { type: integer }
+        total_lecturers: { type: integer }
+        total_courses: { type: integer }
+        active_courses: { type: integer }
+        inactive_courses: { type: integer }
+        total_papers: { type: integer }
+        inactive_papers: { type: integer }
+        total_attendance: { type: integer }
+        total_audit_logs: { type: integer }
+        app_started_at:
+          type: string
+          nullable: true
+        system_uptime_seconds: { type: integer }
+        system_uptime: { type: string }
+        students_by_course:
+          type: object
+          additionalProperties: { type: integer }
+        students_by_year:
+          type: object
+          additionalProperties: { type: integer }
+        monthly_attendance:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              label: { type: string }
+              total: { type: integer }
+
+security:
+  - jwtCookie: []
+
+paths:
+  /api/auth/health:
+    get:
+      tags: [Auth]
+      operationId: authHealth
+      security: []
+      responses:
+        '200': { description: Health status, content: { application/json: { schema: { $ref: '#/components/schemas/HealthResponse' } } } }
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Logged in, content: { application/json: { schema: { $ref: '#/components/schemas/LoginSuccessResponse' } } } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '401': { description: Invalid credentials, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Rate limited/locked, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: authLogout
+      responses:
+        '200': { description: Logged out, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      operationId: authMe
+      responses:
+        '200': { description: Current user, content: { application/json: { schema: { $ref: '#/components/schemas/AuthUser' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/auth/change-password:
+    post:
+      tags: [Auth]
+      operationId: authChangePassword
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangePasswordRequest' }
+      responses:
+        '200': { description: Password changed, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+        '400': { description: Validation failure, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '429': { description: Rate limit, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/admin/courses:
+    get:
+      tags: [AdminCourses]
+      operationId: adminListCourses
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: course_duration
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: string }
+      responses:
+        '200': { description: Course list, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCoursesListResponse' } } } }
+    post:
+      tags: [AdminCourses]
+      operationId: adminCreateCourse
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code, course_duration]
+              properties:
+                name: { type: string }
+                code: { type: string }
+                department: { type: string }
+                course_duration: { type: integer }
+      responses:
+        '201': { description: Course created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCourse' } } } }
+
+  /api/admin/courses/{cid}/semesters:
+    get:
+      tags: [AdminCourses]
+      operationId: adminCourseSemesters
+      parameters:
+        - in: path
+          name: cid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Semester list, content: { application/json: { schema: { type: array, items: { type: integer } } } } }
+
+  /api/admin/courses/{cid}/sessions:
+    get:
+      tags: [AdminCourses]
+      operationId: adminCourseSessions
+      parameters:
+        - in: path
+          name: cid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Session list, content: { application/json: { schema: { type: array, items: { type: string } } } } }
+
+  /api/admin/courses/{cid}:
+    put:
+      tags: [AdminCourses]
+      operationId: adminUpdateCourse
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: cid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenericObject' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+    delete:
+      tags: [AdminCourses]
+      operationId: adminDeleteCourse
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: cid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Deactivated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/papers:
+    get:
+      tags: [AdminPapers]
+      operationId: adminListPapers
+      responses:
+        '200': { description: Papers, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPapersListResponse' } } } }
+    post:
+      tags: [AdminPapers]
+      operationId: adminCreatePaper
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code, course_id, lecturer_id, semester]
+              properties:
+                name: { type: string }
+                code: { type: string }
+                course_id: { type: string }
+                lecturer_id: { type: string }
+                semester: { type: integer }
+      responses:
+        '201': { description: Paper created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminPaper' } } } }
+
+  /api/admin/papers/{pid}:
+    put:
+      tags: [AdminPapers]
+      operationId: adminUpdatePaper
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: pid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenericObject' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+    delete:
+      tags: [AdminPapers]
+      operationId: adminDeletePaper
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: pid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Deleted/deactivated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/papers/bulk-assign:
+    post:
+      tags: [AdminPapers]
+      operationId: adminBulkAssignPaper
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paper_id: { type: string }
+                paper_ids: { type: array, items: { type: string } }
+                lecturer_id: { type: string }
+                course_id: { type: string }
+                student_ids: { type: array, items: { type: string } }
+      responses:
+        '200': { description: Assignment completed, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/lecturers/{lid}/papers:
+    get:
+      tags: [AdminLecturers]
+      operationId: adminGetLecturerPapers
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Lecturer papers, content: { application/json: { schema: { $ref: '#/components/schemas/AdminLecturerPapersResponse' } } } }
+    put:
+      tags: [AdminLecturers]
+      operationId: adminSetLecturerPapers
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paper_ids]
+              properties:
+                paper_ids: { type: array, items: { type: string } }
+      responses:
+        '200': { description: Updated assignments, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/lecturers:
+    get:
+      tags: [AdminLecturers]
+      operationId: adminListLecturers
+      responses:
+        '200': { description: Lecturers list, content: { application/json: { schema: { $ref: '#/components/schemas/AdminLecturersListResponse' } } } }
+    post:
+      tags: [AdminLecturers]
+      operationId: adminCreateLecturer
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                department: { type: string }
+      responses:
+        '201': { description: Lecturer created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTempPasswordResponse' } } } }
+
+  /api/admin/lecturers/{lid}:
+    put:
+      tags: [AdminLecturers]
+      operationId: adminUpdateLecturer
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenericObject' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+    delete:
+      tags: [AdminLecturers]
+      operationId: adminDeleteLecturer
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/lecturers/{lid}/reset-password:
+    post:
+      tags: [AdminLecturers]
+      operationId: adminResetLecturerPassword
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Temporary password issued, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTempPasswordResponse' } } } }
+
+  /api/admin/lecturers/{lid}/reset-pin:
+    post:
+      tags: [AdminLecturers]
+      operationId: adminResetLecturerPin
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: PIN reset, content: { application/json: { schema: { $ref: '#/components/schemas/AdminLecturerResetPinResponse' } } } }
+
+  /api/admin/lecturers/{lid}/pin:
+    put:
+      tags: [AdminLecturers]
+      operationId: adminUpdateLecturerPinForbidden
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: lid
+          required: true
+          schema: { type: string }
+      responses:
+        '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/admin/students:
+    get:
+      tags: [AdminStudents]
+      operationId: adminListStudents
+      responses:
+        '200': { description: Students list, content: { application/json: { schema: { $ref: '#/components/schemas/AdminStudentsListResponse' } } } }
+    post:
+      tags: [AdminStudents]
+      operationId: adminCreateStudent
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateStudentRequest' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCreateStudentResponse' } } } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '409': { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/admin/students/options:
+    get:
+      tags: [AdminStudents]
+      operationId: adminStudentOptions
+      responses:
+        '200':
+          description: Select options
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentOptionItem'
+
+  /api/admin/students/{sid}:
+    put:
+      tags: [AdminStudents]
+      operationId: adminUpdateStudent
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateStudentRequest' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+    delete:
+      tags: [AdminStudents]
+      operationId: adminDeleteStudent
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/students/bulk-promote:
+    post:
+      tags: [AdminStudents]
+      operationId: adminBulkPromoteStudents
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkPromoteRequest' }
+      responses:
+        '200': { description: Promotion summary, content: { application/json: { schema: { $ref: '#/components/schemas/AdminBulkPromoteResponse' } } } }
+
+  /api/admin/student-bulk-promote:
+    post:
+      tags: [AdminStudents]
+      operationId: adminBulkPromoteStudentsAlias
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BulkPromoteRequest' }
+      responses:
+        '200': { description: Promotion summary, content: { application/json: { schema: { $ref: '#/components/schemas/AdminBulkPromoteResponse' } } } }
+
+  /api/admin/students/{sid}/reset-password:
+    post:
+      tags: [AdminStudents]
+      operationId: adminResetStudentPassword
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Temporary password issued, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTempPasswordResponse' } } } }
+
+  /api/admin/students/enroll:
+    post:
+      tags: [AdminStudents]
+      operationId: adminEnrollStudentFace
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FaceEnrollRequest' }
+      responses:
+        '200': { description: Enrollment result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminEnrollFaceResponse' } } } }
+
+  /api/admin/students/upload-photo:
+    post:
+      tags: [AdminStudents]
+      operationId: adminUploadStudentPhoto
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [student_name, image]
+              properties:
+                student_name: { type: string }
+                image: { type: string, format: binary }
+      responses:
+        '201': { description: Uploaded, content: { application/json: { schema: { $ref: '#/components/schemas/AdminUploadPhotoResponse' } } } }
+
+  /api/admin/students/{sid}/train-face:
+    post:
+      tags: [AdminStudents]
+      operationId: adminTrainStudentFace
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                async: { type: boolean }
+      responses:
+        '200': { description: Training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainSingleResponse' } } } }
+        '202': { description: Queued training, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainingQueuedResponse' } } } }
+
+  /api/admin/students/{sid}/train:
+    post:
+      tags: [AdminStudents]
+      operationId: adminTrainStudentFaceAlias
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainSingleResponse' } } } }
+        '202': { description: Queued training, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainingQueuedResponse' } } } }
+
+  /api/admin/student/{sid}/train-face:
+    post:
+      tags: [AdminStudents]
+      operationId: adminTrainStudentFaceAlias2
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: sid
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainSingleResponse' } } } }
+        '202': { description: Queued training, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainingQueuedResponse' } } } }
+
+  /api/admin/students/train-face/bulk:
+    post:
+      tags: [AdminStudents]
+      operationId: adminBulkTrainFace
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [student_ids]
+              properties:
+                student_ids: { type: array, items: { type: string } }
+                async: { type: boolean }
+      responses:
+        '200': { description: Inline bulk training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainBulkResponse' } } } }
+        '202': { description: Queued bulk training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainingQueuedResponse' } } } }
+
+  /api/admin/students/bulk-train-face:
+    post:
+      tags: [AdminStudents]
+      operationId: adminBulkTrainFaceAlias
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [student_ids]
+              properties:
+                student_ids: { type: array, items: { type: string } }
+                async: { type: boolean }
+      responses:
+        '200': { description: Inline bulk training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainBulkResponse' } } } }
+        '202': { description: Queued bulk training result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainingQueuedResponse' } } } }
+
+  /api/admin/students/train-face/rebuild-all:
+    post:
+      tags: [AdminStudents]
+      operationId: adminRebuildAllEmbeddings
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                async: { type: boolean }
+      responses:
+        '200': { description: Inline rebuild result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminRebuildAllResponse' } } } }
+        '202': { description: Queued rebuild result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminTrainingQueuedResponse' } } } }
+
+  /api/admin/jobs/{job_id}:
+    get:
+      tags: [AdminJobs]
+      operationId: adminGetJobStatus
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Job status, content: { application/json: { schema: { $ref: '#/components/schemas/BackgroundJob' } } } }
+
+  /api/admin/jobs/{job_id}/cancel:
+    post:
+      tags: [AdminJobs]
+      operationId: adminCancelJob
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '202': { description: Cancellation result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCancelJobResponse' } } } }
+
+  /api/admin/jobs/{job_id}/replay:
+    post:
+      tags: [AdminJobs]
+      operationId: adminReplayJob
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '202': { description: Replay result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminReplayJobResponse' } } } }
+
+  /api/admin/jobs/dead-letter:
+    get:
+      tags: [AdminJobs]
+      operationId: adminDeadLetterList
+      responses:
+        '200': { description: Dead-letter list, content: { application/json: { schema: { $ref: '#/components/schemas/DeadLetterListResponse' } } } }
+
+  /api/admin/jobs/dead-letter/replay-bulk:
+    post:
+      tags: [AdminJobs]
+      operationId: adminDeadLetterReplayBulk
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [job_ids]
+              properties:
+                job_ids: { type: array, items: { type: string } }
+      responses:
+        '200': { description: Replay summary, content: { application/json: { schema: { $ref: '#/components/schemas/DeadLetterReplayBulkResponse' } } } }
+
+  /api/admin/jobs/dead-letter/replay-filtered:
+    post:
+      tags: [AdminJobs]
+      operationId: adminDeadLetterReplayFiltered
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenericObject' }
+      responses:
+        '200': { description: Replay summary, content: { application/json: { schema: { $ref: '#/components/schemas/DeadLetterReplayFilteredResponse' } } } }
+
+  /api/admin/jobs/metrics:
+    get:
+      tags: [AdminJobs]
+      operationId: adminJobMetrics
+      responses:
+        '200': { description: Queue and job metrics, content: { application/json: { schema: { $ref: '#/components/schemas/AdminJobsMetricsResponse' } } } }
+
+  /api/admin/capture-faces:
+    post:
+      tags: [AdminStudents]
+      operationId: adminCaptureFaces
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_name]
+              properties:
+                user_name: { type: string }
+                total_images: { type: integer }
+      responses:
+        '200': { description: Capture result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCaptureFacesResponse' } } } }
+
+  /api/admin/courses/reassign:
+    post:
+      tags: [AdminCourses]
+      operationId: adminReassignCourseEntities
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_course_id, to_course_id]
+              properties:
+                from_course_id: { type: string }
+                to_course_id: { type: string }
+                move_students: { type: boolean }
+                move_papers: { type: boolean }
+      responses:
+        '200': { description: Reassignment result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminCourseReassignResponse' } } } }
+
+  /api/admin/audit-logs:
+    get:
+      tags: [AdminAudit]
+      operationId: adminListAuditLogs
+      responses:
+        '200': { description: Audit logs, content: { application/json: { schema: { $ref: '#/components/schemas/AuditLogsResponse' } } } }
+
+  /api/admin/audit-logs/{log_id}/rollback:
+    post:
+      tags: [AdminAudit]
+      operationId: adminRollbackAuditLog
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: log_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Rollback result, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+        '400': { description: Rollback not allowed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/admin/attendance/override:
+    post:
+      tags: [AdminAttendance]
+      operationId: adminOverrideAttendance
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, paper_id, student_id, log_id]
+              properties:
+                action:
+                  type: string
+                  enum: [add, remove]
+                paper_id: { type: string }
+                student_id: { type: string }
+                log_id: { type: string }
+      responses:
+        '200': { description: Override result, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAttendanceOverrideResponse' } } } }
+        '201': { description: Override created, content: { application/json: { schema: { $ref: '#/components/schemas/AdminAttendanceOverrideResponse' } } } }
+
+  /api/admin/exam-eligibility-summary:
+    get:
+      tags: [AdminEligibility]
+      operationId: adminEligibilitySummary
+      responses:
+        '200': { description: Eligibility summary, content: { application/json: { schema: { $ref: '#/components/schemas/ExamEligibilitySummaryResponse' } } } }
+
+  /api/admin/exam-eligibility-override:
+    put:
+      tags: [AdminEligibility]
+      operationId: adminEligibilityOverride
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [student_id, paper_id, override_status]
+              properties:
+                student_id: { type: string }
+                paper_id: { type: string }
+                override_status: { type: boolean }
+                reason: { type: string }
+      responses:
+        '200': { description: Override updated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/admin/exam-eligibility-override/bulk:
+    put:
+      tags: [AdminEligibility]
+      operationId: adminEligibilityOverrideBulk
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [overrides]
+              properties:
+                overrides:
+                  type: array
+                  items:
+                    type: object
+                    required: [student_id, paper_id, override_status]
+                    properties:
+                      student_id: { type: string }
+                      paper_id: { type: string }
+                      override_status: { type: boolean }
+                      reason: { type: string }
+      responses:
+        '200': { description: Bulk override result, content: { application/json: { schema: { $ref: '#/components/schemas/ExamEligibilityOverrideBulkResponse' } } } }
+
+  /api/admin/attendance-matrix:
+    get:
+      tags: [AdminAttendance]
+      operationId: adminAttendanceMatrix
+      parameters:
+        - in: query
+          name: course_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: academic_session
+          required: true
+          schema: { type: string }
+        - in: query
+          name: semester
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: from_date
+          schema: { type: string }
+        - in: query
+          name: to_date
+          schema: { type: string }
+        - in: query
+          name: tz_offset_minutes
+          schema: { type: integer }
+      responses:
+        '200': { description: Attendance matrix, content: { application/json: { schema: { $ref: '#/components/schemas/AttendanceMatrixResponse' } } } }
+
+  /api/admin/attendance-matrix/export:
+    get:
+      tags: [AdminAttendance]
+      operationId: adminAttendanceMatrixExportXlsx
+      responses:
+        '200':
+          description: XLSX stream
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+
+  /api/admin/attendance-matrix/export-csv:
+    get:
+      tags: [AdminAttendance]
+      operationId: adminAttendanceMatrixExportCsv
+      responses:
+        '200':
+          description: CSV stream
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /api/admin/stats:
+    get:
+      tags: [AdminAttendance]
+      operationId: adminDashboardStats
+      responses:
+        '200': { description: Dashboard stats, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardStatsResponse' } } } }
+
+  /api/lecturer/papers:
+    get:
+      tags: [Lecturer]
+      operationId: lecturerPapers
+      responses:
+        '200':
+          description: Lecturer papers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LecturerPaper'
+
+  /api/lecturer/pin:
+    get:
+      tags: [Lecturer]
+      operationId: lecturerPinStatus
+      responses:
+        '200': { description: PIN status, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerPinStatusResponse' } } } }
+    put:
+      tags: [Lecturer]
+      operationId: lecturerSetPin
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetPinRequest' }
+      responses:
+        '200': { description: PIN updated, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+        '400': { description: PIN invalid, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/lecturer/pin/generate:
+    post:
+      tags: [Lecturer]
+      operationId: lecturerGeneratePin
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      responses:
+        '200': { description: PIN generated, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerPinGenerateResponse' } } } }
+
+  /api/lecturer/session/start:
+    post:
+      tags: [Lecturer]
+      operationId: lecturerSessionStart
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StartSessionRequest' }
+      responses:
+        '200': { description: Started, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerSessionStartResponse' } } } }
+
+  /api/lecturer/session/recognize:
+    post:
+      tags: [Lecturer]
+      operationId: lecturerSessionRecognizeFrame
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecognizeFrameRequest' }
+      responses:
+        '200': { description: Recognition result, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerSessionRecognitionResponse' } } } }
+
+  /api/lecturer/session/recognize-image:
+    post:
+      tags: [Lecturer]
+      operationId: lecturerSessionRecognizeImage
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [session_id, image]
+              properties:
+                session_id: { type: string }
+                image: { type: string, format: binary }
+      responses:
+        '200': { description: Recognition result, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerSessionRecognitionResponse' } } } }
+
+  /api/lecturer/session/recognized:
+    get:
+      tags: [Lecturer]
+      operationId: lecturerSessionRecognizedList
+      parameters:
+        - in: query
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Recognized students, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerRecognizedListResponse' } } } }
+
+  /api/lecturer/session/stop:
+    post:
+      tags: [Lecturer]
+      operationId: lecturerSessionStop
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+      responses:
+        '200': { description: Stopped, content: { application/json: { schema: { $ref: '#/components/schemas/MessageResponse' } } } }
+
+  /api/lecturer/session/commit:
+    post:
+      tags: [Lecturer]
+      operationId: lecturerSessionCommit
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommitSessionRequest' }
+      responses:
+        '200': { description: Committed, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerSessionCommitResponse' } } } }
+
+  /api/lecturer/session/{session_id}/review:
+    get:
+      tags: [Lecturer]
+      operationId: lecturerSessionReview
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Review payload, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerSessionReviewResponse' } } } }
+
+  /api/lecturer/session/{session_id}/adjust:
+    put:
+      tags: [Lecturer]
+      operationId: lecturerSessionAdjust
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdjustSessionRequest' }
+      responses:
+        '200': { description: Adjusted, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerAdjustSessionResponse' } } } }
+
+  /api/lecturer/progress:
+    get:
+      tags: [Lecturer]
+      operationId: lecturerProgress
+      parameters:
+        - in: query
+          name: paper_id
+          schema: { type: string }
+        - in: query
+          name: from_date
+          schema: { type: string, format: date }
+        - in: query
+          name: to_date
+          schema: { type: string, format: date }
+      responses:
+        '200': { description: Progress analytics, content: { application/json: { schema: { $ref: '#/components/schemas/LecturerProgressResponse' } } } }
+
+  /api/student/profile:
+    get:
+      tags: [Student]
+      operationId: studentProfile
+      responses:
+        '200': { description: Profile payload, content: { application/json: { schema: { $ref: '#/components/schemas/StudentProfileResponse' } } } }
+        '404': { description: Profile not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/student/attendance:
+    get:
+      tags: [Student]
+      operationId: studentAttendance
+      responses:
+        '200':
+          description: Attendance summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentAttendancePaperSummary'
+        '404': { description: Profile not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/student/predictions:
+    get:
+      tags: [Student]
+      operationId: studentPredictions
+      responses:
+        '200':
+          description: Predictions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentPredictionsItem'
+        '404': { description: Profile not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/student/exam-eligibility:
+    get:
+      tags: [Student]
+      operationId: studentExamEligibility
+      responses:
+        '200':
+          description: Eligibility status
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StudentExamEligibilityItem'
+        '404': { description: Profile not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/recognition/detect:
+    post:
+      tags: [Recognition]
+      operationId: recognitionDetect
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [frame]
+              properties:
+                frame: { type: string }
+      responses:
+        '200': { description: Detection result, content: { application/json: { schema: { $ref: '#/components/schemas/RecognitionDetectResponse' } } } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+
+  /api/recognition/identify:
+    post:
+      tags: [Recognition]
+      operationId: recognitionIdentify
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [frame]
+              properties:
+                frame: { type: string }
+      responses:
+        '200': { description: Identification result, content: { application/json: { schema: { $ref: '#/components/schemas/RecognitionIdentifyResponse' } } } }
+        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }

@@ -10,6 +10,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlay, HiOutlinePause, HiOutlineStop, HiOutlineCheckCircle, HiOutlinePhotograph } from 'react-icons/hi';
 import { formatCourseName } from '../../utils/courseDisplay';
+import StatePanel from '../../components/ui/StatePanel';
 
 function fmt(dt) {
   if (!dt) return 'N/A';
@@ -27,6 +28,8 @@ export default function AttendanceSession() {
 
   const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam();
   const [papers, setPapers] = useState([]);
+  const [loadingPapers, setLoadingPapers] = useState(true);
+  const [papersError, setPapersError] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [selectedPaperId, setSelectedPaperId] = useState(paperIdFromQuery || '');
 
@@ -81,6 +84,8 @@ export default function AttendanceSession() {
   const currentAcademicSession = useMemo(() => String(new Date().getFullYear()), []);
 
   const fetchPapers = () => {
+    setLoadingPapers(true);
+    setPapersError('');
     api.get('/lecturer/papers').then((r) => {
       const list = r.data || [];
       setPapers(list);
@@ -100,7 +105,12 @@ export default function AttendanceSession() {
         const firstPaperInCourse = list.find((p) => p.course_id === firstCourseId);
         setSelectedPaperId(firstPaperInCourse?._id || '');
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      setPapers([]);
+      setPapersError(err.response?.data?.error || 'Unable to load assigned papers.');
+    }).finally(() => {
+      setLoadingPapers(false);
+    });
   };
 
   useEffect(() => {
@@ -397,16 +407,16 @@ export default function AttendanceSession() {
   }, [review, nowMs]);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)' } }} />
+    <div>
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: '#1e293b' } }, error: { style: { background: '#1e293b' } } }} />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Take Attendance</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Select paper, verify recognition, then commit with your PIN.</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {!sessionId ? (
             <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive}>
               <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Locked' : 'Start Session'}
@@ -436,15 +446,39 @@ export default function AttendanceSession() {
         </div>
       </div>
 
+      {loadingPapers ? (
+        <StatePanel variant="loading" title="Loading your assigned papers" description="Please wait while we prepare your attendance workspace." />
+      ) : null}
+
+      {!loadingPapers && papersError ? (
+        <StatePanel
+          variant="error"
+          title="Could not load papers"
+          description={papersError}
+          actionLabel="Try again"
+          onAction={fetchPapers}
+        />
+      ) : null}
+
+      {!loadingPapers && !papersError && papers.length === 0 ? (
+        <StatePanel
+          variant="empty"
+          title="No assigned papers yet"
+          description="You cannot start a session until an administrator assigns papers to your account."
+        />
+      ) : null}
+
+      {!loadingPapers && !papersError && papers.length > 0 ? (
+      <>
       <div className="glass-card" style={{ padding: 14, marginBottom: 14 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-          <select className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
+          <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
             <option value="">Select Course</option>
             {courseOptions.map((c) => (
               <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
             ))}
           </select>
-          <select className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
+          <select aria-label="Select paper" className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
             <option value="">{selectedCourseId ? 'Select Paper' : 'Select Course First'}</option>
             {filteredPapers.map((p) => (
               <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' - Locked' : ''}</option>
@@ -475,13 +509,13 @@ export default function AttendanceSession() {
 
       {sessionId && (
         <div className="glass-card" style={{ marginTop: 14, padding: 12 }}>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          <p role="status" aria-live="polite" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             Status: <b>{scanning ? 'Scanning' : 'Paused'}</b> |{' '}
             Faces detected: <b>{diag.faces_detected}</b> | Candidates in this paper: <b>{diag.candidates_count}</b>
             {diag.best_similarity_seen !== null ? ` | Best similarity: ${diag.best_similarity_seen}` : ''}
             {diag.threshold !== null ? ` | Threshold: ${diag.threshold}` : ''}
           </p>
-          {scanError && <p style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--accent-rose)' }}>{scanError}</p>}
+          {scanError && <p role="alert" style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--accent-rose)' }}>{scanError}</p>}
         </div>
       )}
 
@@ -555,6 +589,8 @@ export default function AttendanceSession() {
           isLoading={uploadLoading}
         />
       )}
-    </motion.div>
+      </>
+      ) : null}
+    </div>
   );
 }

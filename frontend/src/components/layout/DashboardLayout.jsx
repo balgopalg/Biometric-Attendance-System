@@ -51,6 +51,17 @@ export default function DashboardLayout() {
   }, []);
 
   useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && isMobile && isSidebarOpen) {
+        setIsSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMobile, isSidebarOpen]);
+
+  useEffect(() => {
     localStorage.setItem('sidebar-collapsed', isSidebarCollapsed ? '1' : '0');
   }, [isSidebarCollapsed]);
 
@@ -70,6 +81,7 @@ export default function DashboardLayout() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
       <Sidebar
         isCollapsed={isSidebarCollapsed}
         isMobile={isMobile}
@@ -83,12 +95,13 @@ export default function DashboardLayout() {
           isMobile={isMobile}
           isSidebarCollapsed={isSidebarCollapsed}
         />
-        <main style={{ flex: 1, minWidth: 0, padding: isMobile ? 14 : 28, overflow: 'auto' }}>
+        <main id="main-content" tabIndex={-1} style={{ flex: 1, minWidth: 0, padding: isMobile ? 14 : 28, overflow: 'auto' }}>
           <Outlet />
         </main>
       </div>
       {isMobile && (
-        <div
+        <button
+          aria-label="Close navigation menu"
           onClick={closeSidebarOnMobile}
           style={{
             position: 'fixed',
@@ -98,6 +111,8 @@ export default function DashboardLayout() {
             opacity: isSidebarOpen ? 1 : 0,
             pointerEvents: isSidebarOpen ? 'auto' : 'none',
             transition: 'opacity 260ms ease',
+            border: 'none',
+            padding: 0,
           }}
         />
       )}

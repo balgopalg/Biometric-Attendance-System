@@ -8,8 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from bson import json_util
+from flask import Flask
+from pymongo import MongoClient
 
-from app import create_app
+from app.config import Config
 from app.extensions import mongo
 
 
@@ -22,7 +24,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    app = create_app(seed_default_admin=False)
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    mongo.cx = MongoClient(app.config["MONGO_URI"])
 
     with app.app_context():
         cfg = app.config

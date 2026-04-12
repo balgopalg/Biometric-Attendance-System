@@ -13,7 +13,7 @@
   --border-glass: rgba(255, 255, 255, 0.08);
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-muted: #7f91ab;
   --accent-purple: #8b5cf6;
   --accent-cyan: #06b6d4;
   --accent-emerald: #10b981;
@@ -56,7 +56,7 @@
   --border-glass: #e2e8f0;
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #94a3b8;
+  --text-muted: #64748b;
   --accent-purple: #7c3aed;
   --accent-cyan: #0891b2;
   --accent-emerald: #059669;
@@ -104,6 +104,62 @@ body {
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Toast Animations (GPU-Accelerated) ─── */
+@keyframes slideIn {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+}
+
+.skip-link {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 1000;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transform: translateY(-150%);
+  opacity: 0;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent-cyan) 80%, white 20%);
+  outline-offset: 2px;
 }
 
 /* ─── Scrollbar Styling ─── */
@@ -220,6 +276,14 @@ body {
 .btn-danger:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 25px rgba(244, 63, 94, 0.3);
+}
+
+@media (max-width: 768px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger {
+    min-height: 40px;
+  }
 }
 
 /* ─── Input ─── */
@@ -892,5 +956,16 @@ body {
   .admin-page .mobile-card-list,
   .mobile-card-list {
     display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

@@ -33,6 +33,28 @@ def create_app(config_class=Config, seed_default_admin=True):
         resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
         supports_credentials=app.config.get("CORS_SUPPORTS_CREDENTIALS", True),
     )
+    
+    # Initialize rate limiter with storage backend
+    if app.config.get("RATELIMIT_ENABLED", True):
+        try:
+            from .security.rate_limiter import limiter
+            limiter.init_app(app)
+        except Exception as exc:
+            app.logger.warning("Rate limiter disabled: %s", exc)
+
+    # Initialize observability (logging, error tracking, metrics)
+    try:
+        from .observability.logging import configure_logging
+        from .observability.error_tracking import register_error_handlers
+        from .observability.metrics import register_metrics_middleware
+        from .observability.health import health_bp
+
+        configure_logging(app, log_level=app.config.get("LOGGING_LEVEL", "INFO"))
+        register_error_handlers(app)
+        register_metrics_middleware(app)
+        app.register_blueprint(health_bp, url_prefix="/api/health")
+    except Exception as exc:
+        app.logger.warning("Observability features disabled: %s", exc)
 
     @app.after_request
     def _security_headers(response):
@@ -158,11 +180,20 @@ def _ensure_indexes(mongo, config):
     _create_index_safe(sessions, [("lecturer_id", ASCENDING), ("created_at", DESCENDING)], name="ix_sessions_lecturer_created")
     _create_index_safe(sessions, [("rollback_until", ASCENDING)], name="ix_sessions_rollback_until")
 
+    active_sessions = client[config["MONGO_DB_ATTENDANCE"]]["active_sessions"]
+    _create_index_safe(active_sessions, [("session_id", ASCENDING)], unique=True, name="uq_active_sessions_id")
+    _create_index_safe(active_sessions, [("lecturer_id", ASCENDING), ("updated_at", DESCENDING)], name="ix_active_sessions_lecturer_updated")
+    _create_index_safe(active_sessions, [("expires_at", ASCENDING)], name="ix_active_sessions_expires_at")
+
     background_jobs = client[config["MONGO_DB_ATTENDANCE"]]["background_jobs"]
     _create_index_safe(background_jobs, [("job_id", ASCENDING)], unique=True, name="uq_jobs_id")
     _create_index_safe(background_jobs, [("status", ASCENDING), ("created_at", DESCENDING)], name="ix_jobs_status_created")
     _create_index_safe(background_jobs, [("status", ASCENDING), ("next_attempt_at", ASCENDING)], name="ix_jobs_status_next_attempt")
     _create_index_safe(background_jobs, [("updated_at", DESCENDING)], name="ix_jobs_updated")
+
+    schema_migrations = client[config["MONGO_DB_ATTENDANCE"]]["schema_migrations"]
+    _create_index_safe(schema_migrations, [("migration_id", ASCENDING)], unique=True, name="uq_schema_migrations_id")
+    _create_index_safe(schema_migrations, [("applied_at", DESCENDING)], name="ix_schema_migrations_applied_at")
 
     overrides = client[config["MONGO_DB_ATTENDANCE"]]["exam_eligibility_overrides"]
     _create_index_safe(

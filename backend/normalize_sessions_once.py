@@ -1,55 +1,37 @@
-from datetime import datetime
+from flask import Flask
+from pymongo import MongoClient
 
-from app import create_app
-from app.extensions import get_collection
+from app.config import Config
+from app.extensions import mongo
+from migrations.runner import apply_pending, migration_status
 
 
 def main():
-    app = create_app(seed_default_admin=False)
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    mongo.cx = MongoClient(app.config["MONGO_URI"])
     with app.app_context():
-        sessions_col = get_collection("attendance", "attendance_sessions")
-        total = 0
-        updated = 0
+        target = "20260413_001"
+        status_rows = migration_status()
+        target_row = next((row for row in status_rows if row["migration_id"] == target), None)
 
-        for doc in sessions_col.find({}):
-            total += 1
-            session_id = doc.get("session_id") or str(doc.get("_id"))
-            lecturer_id = doc.get("lecturer_id")
-            paper_id = doc.get("paper_id")
-            student_ids = doc.get("student_ids") or []
-            if not isinstance(student_ids, list):
-                student_ids = [student_ids]
+        if target_row and target_row.get("applied"):
+            print(
+                "Migration 20260413_001 already applied. "
+                "Use 'python migrate.py status' for tracked migration history."
+            )
+            return
 
-            seen = set()
-            normalized_students = []
-            for sid in student_ids:
-                text = str(sid).strip() if sid is not None else ""
-                if not text or text in seen:
-                    continue
-                seen.add(text)
-                normalized_students.append(text)
+        executed = apply_pending(target_migration_id=target)
+        applied = next((row for row in executed if row["migration_id"] == target), None)
+        if not applied:
+            print("No migration applied. Use 'python migrate.py status' for details.")
+            return
 
-            committed_at = doc.get("committed_at") or doc.get("last_updated_at") or doc.get("created_at")
-            academic_session = doc.get("academic_session") or doc.get("academic_year")
-            if not academic_session and isinstance(committed_at, datetime):
-                academic_session = str(committed_at.year)
-
-            patch = {
-                "session_id": str(session_id),
-                "lecturer_id": str(lecturer_id) if lecturer_id is not None else "",
-                "paper_id": str(paper_id) if paper_id is not None else "",
-                "student_ids": normalized_students,
-                "academic_session": str(academic_session) if academic_session else "",
-                "academic_year": str(academic_session) if academic_session else "",
-                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.utcnow(),
-            }
-            if committed_at:
-                patch["committed_at"] = committed_at
-
-            sessions_col.update_one({"_id": doc.get("_id")}, {"$set": patch})
-            updated += 1
-
-        print(f"Normalized attendance_sessions: updated {updated}/{total} documents")
+        print(
+            "Applied migration 20260413_001 normalize_attendance_sessions "
+            f"in {applied['duration_ms']}ms result={applied['result']}"
+        )
 
 
 if __name__ == "__main__":

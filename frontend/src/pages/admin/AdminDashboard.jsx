@@ -1,9 +1,12 @@
-import { Suspense, lazy, useState, useEffect, useMemo } from 'react';
+import { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
 import api from '../../api/axios';
 import StatsCard from '../../components/ui/StatsCard';
 import { motion } from 'framer-motion';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { formatCourseName } from '../../utils/courseDisplay';
+import StatePanel from '../../components/ui/StatePanel';
+import toast from 'react-hot-toast';
+import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlineUsers,
   HiOutlineAcademicCap,
@@ -37,7 +40,10 @@ function parseUtcTimestamp(value) {
 }
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
   const [stats, setStats] = useState({});
+  const [loadingStats, setLoadingStats] = useState(true);
+  const [statsError, setStatsError] = useState('');
   const [uptimeTick, setUptimeTick] = useState(0);
   const [queueMetrics, setQueueMetrics] = useState(null);
   const [loadingQueueMetrics, setLoadingQueueMetrics] = useState(false);
@@ -47,9 +53,18 @@ export default function AdminDashboard() {
   const [loadingEligibility, setLoadingEligibility] = useState(false);
   const [filters, setFilters] = useState({ academic_session: '', course_id: '', semester: '' });
   const debouncedFilters = useDebouncedValue(filters, 300);
+  const [welcomeShown, setWelcomeShown] = useState(false);
 
   const fetchStats = () => {
-    api.get('/admin/stats').then((r) => setStats(r.data)).catch(() => {});
+    setLoadingStats(true);
+    setStatsError('');
+    api.get('/admin/stats')
+      .then((r) => setStats(r.data || {}))
+      .catch((err) => {
+        setStats({});
+        setStatsError(err.response?.data?.error || 'Failed to load dashboard overview.');
+      })
+      .finally(() => setLoadingStats(false));
   };
 
   const fetchQueueMetrics = () => {
@@ -300,8 +315,39 @@ export default function AdminDashboard() {
     setFilters((prev) => ({ ...prev, semester: value }));
   };
 
+  if (loadingStats) {
+    return (
+      <div className="admin-page">
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Dashboard</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>Overview of your attendance management system.</p>
+        </div>
+        <StatePanel variant="loading" title="Loading dashboard overview" description="Fetching live operational metrics and summaries." compact />
+      </div>
+    );
+  }
+
+  if (statsError) {
+    return (
+      <div className="admin-page">
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Dashboard</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>Overview of your attendance management system.</p>
+        </div>
+        <StatePanel
+          variant="error"
+          title="Unable to load dashboard"
+          description={statsError}
+          actionLabel="Retry"
+          onAction={fetchStats}
+          compact
+        />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div className="admin-page">
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Dashboard</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>Overview of your attendance management system.</p>
@@ -318,7 +364,7 @@ export default function AdminDashboard() {
         <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
         <Suspense fallback={<div className="glass-card" style={{ padding: 20, minHeight: 220 }} />}>
           <MonthlyAttendanceTrend points={monthlyAttendance} />
         </Suspense>
@@ -348,6 +394,8 @@ export default function AdminDashboard() {
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Delayed</span><b>{queueMetrics?.queue?.delayed_depth ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queued Retries</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.queued_retries ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem' }}>{queueMetrics?.jobs?.next_retry_job?.next_attempt_at ? new Date(queueMetrics.jobs.next_retry_job.next_attempt_at).toLocaleString() : 'None'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
             </div>
@@ -380,7 +428,7 @@ export default function AdminDashboard() {
                   </div>
                 ))}
                 {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 && (
-                  <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>No dead-letter jobs right now.</p>
+                  <StatePanel variant="empty" title="No dead-letter jobs" description="Queue replay is healthy for the current monitoring window." compact />
                 )}
               </div>
             </div>
@@ -405,6 +453,6 @@ export default function AdminDashboard() {
           onSemesterChange={handleSemesterChange}
         />
       </Suspense>
-    </motion.div>
+    </div>
   );
 }

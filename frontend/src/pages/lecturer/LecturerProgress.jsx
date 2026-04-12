@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import StatsCard from '../../components/ui/StatsCard';
 import { HiOutlineCalendar, HiOutlineChartBar, HiOutlineUsers } from 'react-icons/hi';
 import Modal from '../../components/ui/Modal';
+import StatePanel from '../../components/ui/StatePanel';
 import PinCommitModal from './PinCommitModal';
 import { formatCourseName } from '../../utils/courseDisplay';
 
@@ -24,16 +25,31 @@ export default function LecturerProgress() {
   const [showHistory, setShowHistory] = useState(false);
   const [showRecommitPin, setShowRecommitPin] = useState(false);
   const [adjustIds, setAdjustIds] = useState([]);
+  const [loadingProgress, setLoadingProgress] = useState(false);
+  const [progressError, setProgressError] = useState('');
 
   const fetchProgress = () => {
+    if (filters.from_date && filters.to_date && filters.from_date > filters.to_date) {
+      setData({ summary: {}, papers: [], per_paper: [], sessions: [] });
+      setProgressError('From date must be before or equal to To date.');
+      setLoadingProgress(false);
+      return;
+    }
+    setLoadingProgress(true);
+    setProgressError('');
     const params = {};
     if (filters.paper_id) params.paper_id = filters.paper_id;
     if (filters.from_date) params.from_date = filters.from_date;
     if (filters.to_date) params.to_date = filters.to_date;
+    params.tz_offset_minutes = new Date().getTimezoneOffset();
 
     api.get('/lecturer/progress', { params })
       .then((r) => setData(r.data || { summary: {}, papers: [], per_paper: [], sessions: [] }))
-      .catch(() => setData({ summary: {}, papers: [], per_paper: [], sessions: [] }));
+      .catch((err) => {
+        setData({ summary: {}, papers: [], per_paper: [], sessions: [] });
+        setProgressError(err.response?.data?.error || 'Failed to load lecturer progress.');
+      })
+      .finally(() => setLoadingProgress(false));
   };
 
   useEffect(() => {
@@ -73,8 +89,36 @@ export default function LecturerProgress() {
     return (sessionReview.candidates || []).filter((x) => !present.has(x.user_id));
   }, [sessionReview]);
 
+  if (loadingProgress) {
+    return (
+      <div className="lecturer-page">
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
+            Track classes taken and attendance per class within a selected date range.
+          </p>
+        </div>
+        <StatePanel variant="loading" title="Loading attendance history" description="Collecting subject summaries and class sessions." compact />
+      </div>
+    );
+  }
+
+  if (progressError) {
+    return (
+      <div className="lecturer-page">
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
+            Track classes taken and attendance per class within a selected date range.
+          </p>
+        </div>
+        <StatePanel variant="error" title="Unable to load attendance history" description={progressError} actionLabel="Retry" onAction={fetchProgress} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="lecturer-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div className="lecturer-page">
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
@@ -89,8 +133,8 @@ export default function LecturerProgress() {
             <option key={p._id} value={p._id}>{p.name} ({p.code})</option>
           ))}
         </select>
-        <input className="input-field" type="date" value={filters.from_date} onChange={(e) => setFilters({ ...filters, from_date: e.target.value })} />
-        <input className="input-field" type="date" value={filters.to_date} onChange={(e) => setFilters({ ...filters, to_date: e.target.value })} />
+        <input className="input-field" type="date" value={filters.from_date} max={filters.to_date || undefined} onChange={(e) => setFilters({ ...filters, from_date: e.target.value })} />
+        <input className="input-field" type="date" value={filters.to_date} min={filters.from_date || undefined} onChange={(e) => setFilters({ ...filters, to_date: e.target.value })} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 22 }}>
@@ -102,6 +146,7 @@ export default function LecturerProgress() {
       <div className="glass-card" style={{ padding: 18, marginBottom: 16 }}>
         <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 10 }}>Per Subject Summary</h3>
         <div style={{ overflowX: 'auto' }}>
+          {perPaperSorted.length > 0 ? (
           <table className="data-table">
             <thead>
               <tr>
@@ -127,12 +172,14 @@ export default function LecturerProgress() {
               {perPaperSorted.length === 0 && <tr><td colSpan="6" style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>No class data in selected filters.</td></tr>}
             </tbody>
           </table>
+          ) : null}
         </div>
       </div>
 
       <div className="glass-card" style={{ padding: 18 }}>
         <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 10 }}>Class-wise Attendance</h3>
         <div style={{ overflowX: 'auto' }}>
+          {(data.sessions || []).length > 0 ? (
           <table className="data-table">
             <thead>
               <tr>
@@ -165,6 +212,7 @@ export default function LecturerProgress() {
               {(data.sessions || []).length === 0 && <tr><td colSpan="6" style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>No class sessions found in selected date range.</td></tr>}
             </tbody>
           </table>
+          ) : null}
         </div>
       </div>
 
@@ -241,6 +289,6 @@ export default function LecturerProgress() {
         confirmLabel="Confirm Re-Commit"
         loadingLabel="Re-committing..."
       />
-    </motion.div>
+    </div>
   );
 }

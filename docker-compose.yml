@@ -1,0 +1,101 @@
+services:
+  mongo:
+    image: mongo:7.0
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    pull_policy: never
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: finalbhaiauhebani-backend:latest
+    pull_policy: never
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "0"
+      MONGO_URI: mongodb://mongo:27017/biometric_attendance
+      TASK_QUEUE_ENABLED: "1"
+      TASK_QUEUE_REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:8080
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_dataset:/app/dataset
+      - backend_trainer:/app/trainer
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/auth/health', timeout=5)"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    image: finalbhaiauhebani-backend:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    env_file:
+      - ./backend/.env
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "0"
+      MONGO_URI: mongodb://mongo:27017/biometric_attendance
+      TASK_QUEUE_ENABLED: "1"
+      TASK_QUEUE_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_dataset:/app/dataset
+      - backend_trainer:/app/trainer
+
+  frontend:
+    image: finalbhaiauhebani-frontend:latest
+    pull_policy: never
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  backend_uploads:
+  backend_dataset:
+  backend_trainer:

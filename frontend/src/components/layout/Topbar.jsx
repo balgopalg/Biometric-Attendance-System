@@ -23,6 +23,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button
           onClick={onToggleSidebar}
+          aria-label={isMobile ? 'Toggle navigation menu' : (isSidebarCollapsed ? 'Expand sidebar navigation' : 'Collapse sidebar navigation')}
           title={isMobile ? 'Open menu' : (isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar')}
           style={{
             width: 36,
@@ -46,6 +47,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           style={{
             width: 36, height: 36, borderRadius: '50%',
@@ -59,7 +61,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
           {theme === 'dark' ? <HiOutlineSun size={18} /> : <HiOutlineMoon size={18} />}
         </button>
         {/* Notifications */}
-        <button style={{
+        <button aria-label="View notifications" style={{
           width: 36, height: 36, borderRadius: '50%',
           background: 'var(--bg-glass)', border: '1px solid var(--border-glass)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',

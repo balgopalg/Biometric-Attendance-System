@@ -18,7 +18,6 @@ export default function Login() {
     setLoading(true);
     try {
       const user = await login(email, password);
-      toast.success(`Welcome, ${user.name}!`);
       const dest = user.role === 'admin' ? '/admin' : user.role === 'lecturer' ? '/lecturer' : '/student';
       navigate(dest);
     } catch (err) {
@@ -35,7 +34,7 @@ export default function Login() {
       background: 'var(--bg-primary)',
       position: 'relative', overflow: 'hidden',
     }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)' } }} />
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: '#1e293b' } }, error: { style: { background: '#1e293b' } } }} />
 
       {/* Background gradient orbs */}
       <div style={{
@@ -49,10 +48,7 @@ export default function Login() {
         bottom: -80, left: -80, pointerEvents: 'none',
       }} />
 
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
         style={{
           width: 420, padding: 40,
           background: 'var(--bg-secondary)',
@@ -119,7 +115,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Email</label>
+            <label htmlFor="login-email" style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Email</label>
             <div style={{ position: 'relative' }}>
               <HiOutlineMail size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
@@ -134,7 +130,7 @@ export default function Login() {
             </div>
           </div>
           <div>
-            <label style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Password</label>
+            <label htmlFor="login-password" style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Password</label>
             <div style={{ position: 'relative' }}>
               <HiOutlineLockClosed size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
@@ -148,18 +144,26 @@ export default function Login() {
               />
             </div>
           </div>
-          <button type="submit" className="btn-primary" disabled={loading}
-            style={{ width: '100%', justifyContent: 'center', padding: '12px 24px', marginTop: 8 }}
+          <button type="submit" disabled={loading}
+            style={{
+              width: '100%',
+              padding: '11px 16px',
+              marginTop: 8,
+              borderRadius: 10,
+              border: '1px solid rgba(59,130,246,0.5)',
+              background: '#2563eb',
+              color: '#ffffff',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.7 : 1,
+            }}
             id="login-submit"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
-
-        <p style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 24 }}>
-          Default admin: admin@system.com / admin123
-        </p>
-      </motion.div>
+      </div>
     </div>
   );
 }

@@ -11,6 +11,28 @@ This system provides:
 - Attendance analytics and eligibility views for students
 - Audit trail with rollback support for eligible admin actions
 
+## Documentation Bundle
+
+- API contract (OpenAPI): [docs/openapi.yaml](docs/openapi.yaml)
+- Full API contract (all endpoints): [docs/openapi.full.yaml](docs/openapi.full.yaml)
+- Operations manual (what/when/why/how): [docs/SYSTEM_OPERATIONS_MANUAL.md](docs/SYSTEM_OPERATIONS_MANUAL.md)
+- Workflow payloads and validation examples: [docs/API_WORKFLOW_GUIDE.md](docs/API_WORKFLOW_GUIDE.md)
+- CLI command runbook: [docs/CLI_COMMAND_RUNBOOK.md](docs/CLI_COMMAND_RUNBOOK.md)
+- Incident response and recovery policy: [docs/INCIDENT_RESPONSE_AND_RECOVERY.md](docs/INCIDENT_RESPONSE_AND_RECOVERY.md)
+- Biometric privacy and compliance policy: [docs/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md](docs/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md)
+- Release management policy: [docs/RELEASE_MANAGEMENT_POLICY.md](docs/RELEASE_MANAGEMENT_POLICY.md)
+- API lifecycle policy: [docs/API_LIFECYCLE_POLICY.md](docs/API_LIFECYCLE_POLICY.md)
+- Deployment guide (Docker baseline): [docs/DEPLOYMENT_PRODUCTION.md](docs/DEPLOYMENT_PRODUCTION.md)
+- Docker step-by-step run guide: [docs/DOCKER_RUN_STEP_BY_STEP.md](docs/DOCKER_RUN_STEP_BY_STEP.md)
+
+## Deployment Assets
+
+- Compose stack: [docker-compose.yml](docker-compose.yml)
+- Backend container: [backend/Dockerfile](backend/Dockerfile)
+- Frontend container: [frontend/Dockerfile](frontend/Dockerfile)
+- Backend staging env template: [backend/.env.staging.example](backend/.env.staging.example)
+- Backend production env template: [backend/.env.production.example](backend/.env.production.example)
+
 ## Tech Stack
 
 | Layer | Technology |

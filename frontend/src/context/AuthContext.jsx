@@ -1,5 +1,6 @@
 import { createContext, useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
+import toast from 'react-hot-toast';
 
 const AuthContext = createContext(null);
 
@@ -17,6 +18,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
+    toast.remove();
     api.post('/auth/logout').catch(() => {});
     localStorage.removeItem('user');
     setUser(null);

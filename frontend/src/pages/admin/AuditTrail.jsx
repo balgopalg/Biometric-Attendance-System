@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
+import StatePanel from '../../components/ui/StatePanel';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck, HiOutlineRefresh } from 'react-icons/hi';
@@ -14,6 +15,8 @@ export default function AuditTrail() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [logsError, setLogsError] = useState('');
 
   const actionSuggestions = useMemo(() => {
     const commonActions = [
@@ -45,7 +48,9 @@ export default function AuditTrail() {
   }, []);
 
   const fetchLogs = (p = page) => {
-    const params = { page: p, per_page: PER_PAGE };
+    setLoadingLogs(true);
+    setLogsError('');
+    const params = { page: p, per_page: PER_PAGE, tz_offset_minutes: new Date().getTimezoneOffset() };
     if (keyword) params.action = keyword;
     if (dateFrom) params.from = dateFrom;
     if (dateTo) params.to = dateTo;
@@ -71,12 +76,18 @@ export default function AuditTrail() {
       .catch(() => {
         setLogs([]);
         setTotal(0);
-      });
+        setLogsError('Failed to load audit logs.');
+      })
+      .finally(() => setLoadingLogs(false));
   };
 
   useEffect(() => { fetchLogs(1); }, []);
 
   const handleFilter = () => {
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      toast.error('From date must be before or equal to To date');
+      return;
+    }
     setPage(1);
     fetchLogs(1);
   };
@@ -100,6 +111,8 @@ export default function AuditTrail() {
     if (a.includes('UPDATE') || a.includes('ASSIGN')) return 'badge-warning';
     return 'badge-purple';
   };
+
+  const resolveLogIp = (log) => log?.ip || log?.ip_address || '—';
 
   const isFallbackRollbackCandidate = (log) => {
     const action = String(log?.action || '').toUpperCase();
@@ -128,9 +141,18 @@ export default function AuditTrail() {
     }
   };
 
+  if (!loadingLogs && logsError) {
+    return (
+      <div className="admin-page">
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load audit logs" description={logsError} actionLabel="Retry" onAction={() => fetchLogs(page)} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -167,6 +189,7 @@ export default function AuditTrail() {
             style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }}
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
+            max={dateTo || undefined}
           />
         </div>
         <div>
@@ -177,6 +200,7 @@ export default function AuditTrail() {
             style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
+            min={dateFrom || undefined}
           />
         </div>
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end' }}>
@@ -191,6 +215,19 @@ export default function AuditTrail() {
 
       {/* Table */}
       <div className="glass-card table-desktop" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
+        {loadingLogs ? (
+          <StatePanel variant="loading" title="Loading audit logs" description="Retrieving activity history and rollback status." compact />
+        ) : null}
+
+        {!loadingLogs && logsError ? (
+          <StatePanel variant="error" title="Unable to load audit logs" description={logsError} actionLabel="Retry" onAction={() => fetchLogs(page)} compact />
+        ) : null}
+
+        {!loadingLogs && !logsError && logs.length === 0 ? (
+          <StatePanel variant="empty" title="No audit logs yet" description="New actions will appear here for traceability and rollback." compact />
+        ) : null}
+
+        {!loadingLogs && !logsError && logs.length > 0 ? (
         <table className="data-table" style={{ minWidth: 980 }}>
           <thead>
             <tr>
@@ -227,7 +264,7 @@ export default function AuditTrail() {
                   </span>
                 </td>
                 <td style={{ fontSize: '0.82rem' }}>{log.target_type || '—'}</td>
-                <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{log.ip || '—'}</td>
+                <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{resolveLogIp(log)}</td>
                 <td style={{ textAlign: 'right', minWidth: 140 }}>
                   {log.rolled_back ? (
                     <span className="badge badge-success">Rolled Back</span>
@@ -250,11 +287,9 @@ export default function AuditTrail() {
                 </td>
               </tr>
             ))}
-            {logs.length === 0 && (
-              <tr><td colSpan="7" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No audit logs yet.</td></tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <div className="mobile-card-list" style={{ marginTop: 10 }}>
@@ -294,7 +329,7 @@ export default function AuditTrail() {
               </div>
               <div className="mobile-card-row">
                 <span className="mobile-card-label">IP</span>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{log.ip || '—'}</span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{resolveLogIp(log)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                 {log.rolled_back ? (
@@ -345,6 +380,6 @@ export default function AuditTrail() {
           </button>
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }

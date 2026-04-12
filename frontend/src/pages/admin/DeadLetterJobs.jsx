@@ -3,6 +3,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
+import StatePanel from '../../components/ui/StatePanel';
 
 const PER_PAGE = 20;
 
@@ -20,11 +21,13 @@ export default function DeadLetterJobs() {
   const [estimatedReplayPreviewItems, setEstimatedReplayPreviewItems] = useState([]);
   const [loadingEstimatedReplayCount, setLoadingEstimatedReplayCount] = useState(false);
   const [selected, setSelected] = useState([]);
+  const [jobsError, setJobsError] = useState('');
   const [filters, setFilters] = useState({ q: '', job_type: '', from: '', to: '', sort_by: 'updated_at', sort_dir: 'desc' });
 
   const fetchJobs = (nextPage = page) => {
     setLoading(true);
-    const params = { page: nextPage, per_page: PER_PAGE };
+    setJobsError('');
+    const params = { page: nextPage, per_page: PER_PAGE, tz_offset_minutes: new Date().getTimezoneOffset() };
     if (filters.q) params.q = filters.q;
     if (filters.job_type) params.job_type = filters.job_type;
     if (filters.from) params.from = filters.from;
@@ -49,6 +52,7 @@ export default function DeadLetterJobs() {
       .catch(() => {
         setItems([]);
         setTotal(0);
+        setJobsError('Failed to load dead-letter jobs.');
       })
       .finally(() => setLoading(false));
   };
@@ -124,6 +128,7 @@ export default function DeadLetterJobs() {
         to: filters.to,
         sort_by: filters.sort_by,
         sort_dir: filters.sort_dir,
+        tz_offset_minutes: new Date().getTimezoneOffset(),
         limit: 500,
       };
       const res = await api.post('/admin/jobs/dead-letter/replay-filtered', payload);
@@ -144,7 +149,7 @@ export default function DeadLetterJobs() {
     setLoadingEstimatedReplayCount(true);
 
     try {
-      const params = { page: 1, per_page: 5 };
+      const params = { page: 1, per_page: 5, tz_offset_minutes: new Date().getTimezoneOffset() };
       if (filters.q) params.q = filters.q;
       if (filters.job_type) params.job_type = filters.job_type;
       if (filters.from) params.from = filters.from;
@@ -173,7 +178,13 @@ export default function DeadLetterJobs() {
     }
   };
 
-  const applyFilters = () => fetchJobs(1);
+  const applyFilters = () => {
+    if (filters.from && filters.to && filters.from > filters.to) {
+      toast.error('From date must be before or equal to To date');
+      return;
+    }
+    fetchJobs(1);
+  };
 
   const resetFilters = () => {
     setFilters({ q: '', job_type: '', from: '', to: '', sort_by: 'updated_at', sort_dir: 'desc' });
@@ -181,8 +192,8 @@ export default function DeadLetterJobs() {
   };
 
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
         <div>
@@ -211,11 +222,11 @@ export default function DeadLetterJobs() {
         </div>
         <div>
           <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>From</label>
-          <input type="date" className="input-field" style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }} value={filters.from} onChange={(e) => setFilters((p) => ({ ...p, from: e.target.value }))} />
+          <input type="date" className="input-field" style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }} value={filters.from} max={filters.to || undefined} onChange={(e) => setFilters((p) => ({ ...p, from: e.target.value }))} />
         </div>
         <div>
           <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>To</label>
-          <input type="date" className="input-field" style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }} value={filters.to} onChange={(e) => setFilters((p) => ({ ...p, to: e.target.value }))} />
+          <input type="date" className="input-field" style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }} value={filters.to} min={filters.from || undefined} onChange={(e) => setFilters((p) => ({ ...p, to: e.target.value }))} />
         </div>
         <div>
           <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Sort By</label>
@@ -252,6 +263,19 @@ export default function DeadLetterJobs() {
       </div>
 
       <div className="glass-card table-desktop" style={{ overflowX: 'auto' }}>
+        {loading ? (
+          <StatePanel variant="loading" title="Loading dead-letter jobs" description="Fetching failed jobs and replay metadata." compact />
+        ) : null}
+
+        {!loading && jobsError ? (
+          <StatePanel variant="error" title="Unable to load dead-letter jobs" description={jobsError} actionLabel="Retry" onAction={() => fetchJobs(page)} compact />
+        ) : null}
+
+        {!loading && !jobsError && !items.length ? (
+          <StatePanel variant="empty" title="No dead-letter jobs found" description="Queue replay backlog is currently clear for this filter." compact />
+        ) : null}
+
+        {!loading && !jobsError && items.length > 0 ? (
         <table className="data-table" style={{ minWidth: 980 }}>
           <thead>
             <tr>
@@ -259,9 +283,11 @@ export default function DeadLetterJobs() {
                 <input type="checkbox" checked={allOnPageSelected} onChange={toggleSelectAll} />
               </th>
               <th>Updated At</th>
+              <th>Dead-Lettered At</th>
               <th>Job ID</th>
               <th>Job Type</th>
               <th>Attempts</th>
+              <th>Retry Count</th>
               <th>Error</th>
               <th style={{ textAlign: 'right' }}>Action</th>
             </tr>
@@ -271,9 +297,11 @@ export default function DeadLetterJobs() {
               <tr key={job.job_id}>
                 <td><input type="checkbox" checked={selected.includes(job.job_id)} onChange={() => toggleSelect(job.job_id)} /></td>
                 <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{job.updated_at ? new Date(job.updated_at).toLocaleString() : '—'}</td>
+                <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{job.dead_lettered_at ? new Date(job.dead_lettered_at).toLocaleString() : '—'}</td>
                 <td style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{job.job_id}</td>
                 <td style={{ fontSize: '0.8rem' }}>{job.job_type || '—'}</td>
                 <td style={{ fontSize: '0.8rem' }}>{Number(job.attempts || 0)}/{Number(job.max_attempts || 0)}</td>
+                <td style={{ fontSize: '0.8rem' }}>{Number(job.retry_count || Math.max(0, Number(job.attempts || 0) - 1))}</td>
                 <td style={{ maxWidth: 340, fontSize: '0.76rem', color: 'var(--accent-rose)' }}>{job.error || '—'}</td>
                 <td style={{ textAlign: 'right' }}>
                   <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.75rem' }} disabled={replayJobId === job.job_id} onClick={() => replayOne(job.job_id)}>
@@ -282,11 +310,9 @@ export default function DeadLetterJobs() {
                 </td>
               </tr>
             ))}
-            {!items.length && (
-              <tr><td colSpan="7" style={{ textAlign: 'center', padding: 28, color: 'var(--text-muted)' }}>No dead-letter jobs found.</td></tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 10, marginTop: 14 }}>
@@ -350,6 +376,6 @@ export default function DeadLetterJobs() {
           </button>
         </div>
       </Modal>
-    </motion.div>
+    </div>
   );
 }

@@ -173,6 +173,11 @@ def _create_background_job(job_type, payload=None):
             "attempts": 0,
             "max_attempts": max_attempts,
             "payload": payload or {},
+            "retry_count": 0,
+            "retry_in_seconds": None,
+            "last_error_at": None,
+            "dead_lettered_at": None,
+            "error_history": [],
             "training_total_faces": 0,
             "training_processed_faces": 0,
             "training_trained_faces": 0,
@@ -386,6 +391,7 @@ def process_background_job(job_id):
             training_message="Cancelled by user",
             finished_at=_utcnow(),
             cancelled_at=_utcnow(),
+            retry_in_seconds=None,
         )
         return {"status": "cancelled"}
 
@@ -413,6 +419,7 @@ def process_background_job(job_id):
             result=result,
             error=None,
             finished_at=_utcnow(),
+            retry_in_seconds=None,
         )
         _clear_query_cache()
         return {"status": "completed", "result": result}
@@ -425,19 +432,40 @@ def process_background_job(job_id):
             finished_at=_utcnow(),
             cancelled_at=_utcnow(),
             error=None,
+            retry_in_seconds=None,
         )
         return {"status": "cancelled"}
     except Exception as exc:
         current_app.logger.exception("Background job %s failed", job_id)
         error_text = str(exc)
+        error_now = _utcnow()
+        existing_history = job.get("error_history") or []
+        if not isinstance(existing_history, list):
+            existing_history = []
+
+        next_history = list(existing_history)
+        next_history.append(
+            {
+                "attempt": current_attempt,
+                "error": error_text,
+                "at": error_now,
+            }
+        )
+        if len(next_history) > 10:
+            next_history = next_history[-10:]
+
         if current_attempt < max_attempts:
             delay_seconds = _compute_retry_delay_seconds(current_attempt)
-            next_attempt = _utcnow() + timedelta(seconds=delay_seconds)
+            next_attempt = error_now + timedelta(seconds=delay_seconds)
             _update_background_job(
                 job_id,
                 status="queued",
                 error=error_text,
                 next_attempt_at=next_attempt,
+                retry_count=current_attempt,
+                retry_in_seconds=delay_seconds,
+                last_error_at=error_now,
+                error_history=next_history,
             )
 
             try:
@@ -460,7 +488,12 @@ def process_background_job(job_id):
             job_id,
             status="dead_letter",
             error=error_text,
-            finished_at=_utcnow(),
+            finished_at=error_now,
+            dead_lettered_at=error_now,
+            retry_count=max(0, current_attempt - 1),
+            retry_in_seconds=None,
+            last_error_at=error_now,
+            error_history=next_history,
         )
         return {
             "status": "dead_letter",
@@ -2694,6 +2727,10 @@ def _requeue_dead_letter_job_by_id(job_id):
                 "updated_at": now,
                 "started_at": None,
                 "finished_at": None,
+                "retry_count": 0,
+                "retry_in_seconds": None,
+                "last_error_at": None,
+                "dead_lettered_at": None,
             }
         },
     )
@@ -2720,6 +2757,7 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
     to_raw = _as_text(filters.get("to", ""))
     sort_by = _as_text(filters.get("sort_by", "updated_at")).lower()
     sort_dir = _as_text(filters.get("sort_dir", "desc")).lower()
+    tz_offset_minutes = _to_int(filters.get("tz_offset_minutes", 0), 0)
 
     allowed_sort_by = {"updated_at", "created_at", "attempts", "job_type"}
     if sort_by not in allowed_sort_by:
@@ -2732,16 +2770,18 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
         query["job_type"] = job_type
 
     ts_filter = {}
-    if from_raw:
-        try:
-            ts_filter["$gte"] = datetime.fromisoformat(from_raw)
-        except ValueError as exc:
-            raise ValueError("Invalid from date format") from exc
-    if to_raw:
-        try:
-            ts_filter["$lte"] = datetime.fromisoformat(to_raw)
-        except ValueError as exc:
-            raise ValueError("Invalid to date format") from exc
+    from_local = _parse_iso_date(from_raw)
+    to_local = _parse_iso_date(to_raw)
+    if from_raw and not from_local:
+        raise ValueError("Invalid from date format")
+    if to_raw and not to_local:
+        raise ValueError("Invalid to date format")
+
+    if from_local:
+        ts_filter["$gte"] = _local_midnight_to_utc(from_local, tz_offset_minutes)
+    if to_local:
+        to_local_exclusive = to_local + timedelta(days=1)
+        ts_filter["$lt"] = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
     if ts_filter:
         query["updated_at"] = ts_filter
 
@@ -2758,6 +2798,10 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
                 "payload": 1,
                 "attempts": 1,
                 "max_attempts": 1,
+                "retry_count": 1,
+                "last_error_at": 1,
+                "dead_lettered_at": 1,
+                "error_history": 1,
                 "created_at": 1,
                 "updated_at": 1,
             },
@@ -2796,6 +2840,7 @@ def list_dead_letter_jobs(user):
         "to": request.args.get("to", ""),
         "sort_by": request.args.get("sort_by", "updated_at"),
         "sort_dir": request.args.get("sort_dir", "desc"),
+        "tz_offset_minutes": request.args.get("tz_offset_minutes", 0),
         "page": request.args.get("page", 1),
         "per_page": request.args.get("per_page", 20),
     }
@@ -2860,6 +2905,7 @@ def replay_dead_letter_jobs_filtered(user):
         "to": d.get("to", ""),
         "sort_by": d.get("sort_by", "updated_at"),
         "sort_dir": d.get("sort_dir", "desc"),
+        "tz_offset_minutes": d.get("tz_offset_minutes", 0),
     }
     limit = max(1, min(_to_int(d.get("limit", 500), 500), 1000))
 
@@ -2938,6 +2984,32 @@ def get_job_metrics(user):
     stale_running_count = int(
         jobs.count_documents({"status": "running", "updated_at": {"$lte": stale_cutoff}})
     )
+    queued_retry_count = int(
+        jobs.count_documents({
+            "status": "queued",
+            "retry_count": {"$gt": 0},
+            "next_attempt_at": {"$ne": None},
+        })
+    )
+    next_retry_candidates = list(
+        jobs.find(
+            {
+                "status": "queued",
+                "retry_count": {"$gt": 0},
+                "next_attempt_at": {"$ne": None},
+            },
+            {
+                "_id": 0,
+                "job_id": 1,
+                "job_type": 1,
+                "next_attempt_at": 1,
+                "retry_count": 1,
+                "error": 1,
+            },
+        )
+    )
+    next_retry_candidates.sort(key=lambda row: row.get("next_attempt_at") or datetime.max)
+    next_retry_job = next_retry_candidates[0] if next_retry_candidates else None
     dead_letter_last_24h = int(
         jobs.count_documents({"status": "dead_letter", "updated_at": {"$gte": _utcnow() - timedelta(hours=24)}})
     )
@@ -2966,6 +3038,8 @@ def get_job_metrics(user):
                 "total": int(sum(summary.values())),
                 **summary,
                 "stale_running": stale_running_count,
+                "queued_retries": queued_retry_count,
+                "next_retry_job": sanitise_mongo_doc(next_retry_job) if next_retry_job else None,
                 "dead_letter_last_24h": dead_letter_last_24h,
                 "recent_dead_letter_jobs": recent_dead_letter_jobs,
             },
@@ -3085,6 +3159,7 @@ def list_audit_logs(user):
     action = _as_text(request.args.get("action", "")).upper()
     date_from = _as_text(request.args.get("from", ""))
     date_to = _as_text(request.args.get("to", ""))
+    tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
 
     filters = {}
     if action:
@@ -3092,17 +3167,14 @@ def list_audit_logs(user):
         filters["action"] = {"$regex": re.escape(action), "$options": "i"}
 
     ts_filter = {}
-    try:
-        if date_from:
-            ts_filter["$gte"] = datetime.strptime(date_from, "%Y-%m-%d")
-    except ValueError:
-        pass
-    try:
-        if date_to:
-            # Inclusive end date: < next day midnight UTC.
-            ts_filter["$lt"] = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
-    except ValueError:
-        pass
+    parsed_from = _parse_iso_date(date_from)
+    parsed_to = _parse_iso_date(date_to)
+
+    if parsed_from:
+        ts_filter["$gte"] = _local_midnight_to_utc(parsed_from, tz_offset_minutes)
+    if parsed_to:
+        parsed_to_exclusive = parsed_to + timedelta(days=1)
+        ts_filter["$lt"] = _local_midnight_to_utc(parsed_to_exclusive, tz_offset_minutes)
 
     if ts_filter:
         filters["timestamp"] = ts_filter
@@ -3136,7 +3208,7 @@ def list_audit_logs(user):
         else:
             item["target_type"] = item.get("details") or "System"
 
-        item["ip"] = item.get("ip") or ""
+        item["ip"] = item.get("ip") or item.get("ip_address") or ""
 
         rollback_payload = item.get("rollback")
         ts = item.get("timestamp")
@@ -3276,13 +3348,11 @@ def exam_eligibility_summary(user):
     sessions_col = get_collection("attendance", "attendance_sessions")
 
     classes_happened_by_paper = {}
-    classes_happened_by_paper_lecturer = {}
     for row in sessions_col.aggregate([
         {
             "$group": {
                 "_id": {
                     "paper_id": "$paper_id",
-                    "lecturer_id": "$lecturer_id",
                 },
                 "count": {"$sum": 1},
             }
@@ -3290,13 +3360,10 @@ def exam_eligibility_summary(user):
     ]):
         gid = row.get("_id") or {}
         gid_paper = _as_text(gid.get("paper_id"))
-        gid_lecturer = _as_text(gid.get("lecturer_id"))
         count = int(row.get("count", 0) or 0)
 
         if gid_paper:
             classes_happened_by_paper[gid_paper] = classes_happened_by_paper.get(gid_paper, 0) + count
-            if gid_lecturer:
-                classes_happened_by_paper_lecturer[(gid_paper, gid_lecturer)] = count
 
     selected_profiles = []
     relevant_student_ids = []
@@ -3425,11 +3492,9 @@ def exam_eligibility_summary(user):
             lecturer_id_for_paper = _as_text(paper.get("lecturer_id", ""))
             profile_created_at = profile.get("created_at")
 
-            # Count classes conducted for this subject by the assigned lecturer,
+            # Count classes for this subject across all lecturers,
             # scoped to sessions after the student was enrolled.
             session_query = {"paper_id": {"$in": _id_variants(pid_text)}}
-            if lecturer_id_for_paper:
-                session_query["lecturer_id"] = {"$in": _id_variants(lecturer_id_for_paper)}
 
             if profile_created_at:
                 session_query["$or"] = [
@@ -3445,10 +3510,6 @@ def exam_eligibility_summary(user):
                     },
                 ]
                 classes_happened = int(sessions_col.count_documents(session_query) or 0)
-            elif lecturer_id_for_paper:
-                classes_happened = int(
-                    classes_happened_by_paper_lecturer.get((pid_text, lecturer_id_for_paper), 0) or 0
-                )
             else:
                 classes_happened = int(classes_happened_by_paper.get(pid_text, 0) or 0)
 
@@ -3665,6 +3726,12 @@ def _parse_iso_date(value):
         return None
 
 
+def _local_midnight_to_utc(local_midnight, tz_offset_minutes):
+    if not isinstance(local_midnight, datetime):
+        return None
+    return local_midnight + timedelta(minutes=_to_int(tz_offset_minutes, 0))
+
+
 def _build_attendance_matrix_payload(args):
     course_id = _as_text(args.get("course_id", ""))
     academic_session = _normalise_year(args.get("academic_session", "")) or _normalise_year(args.get("academic_year", ""))
@@ -3679,8 +3746,14 @@ def _build_attendance_matrix_payload(args):
 
     from_date = _parse_iso_date(args.get("from_date", ""))
     to_date = _parse_iso_date(args.get("to_date", ""))
+
+    range_start_utc = None
+    range_end_utc = None
+    if from_date:
+        range_start_utc = _local_midnight_to_utc(from_date, tz_offset_minutes)
     if to_date:
-        to_date = to_date + timedelta(days=1)
+        to_local_exclusive = to_date + timedelta(days=1)
+        range_end_utc = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
 
     courses = sanitise_many(get_all_courses(["name", "code", "status", "course_duration"]))
     papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id"]))
@@ -3793,10 +3866,10 @@ def _build_attendance_matrix_payload(args):
         session_query["paper_id"] = {"$in": paper_match_ids}
 
         committed_range = {}
-        if from_date:
-            committed_range["$gte"] = from_date
-        if to_date:
-            committed_range["$lt"] = to_date
+        if range_start_utc:
+            committed_range["$gte"] = range_start_utc
+        if range_end_utc:
+            committed_range["$lt"] = range_end_utc
         if committed_range:
             session_query["committed_at"] = committed_range
 
