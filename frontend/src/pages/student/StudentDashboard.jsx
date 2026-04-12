@@ -72,17 +72,28 @@ export default function StudentDashboard() {
   );
 
   useEffect(() => {
-    api.get('/student/attendance').then((r) => setAttendance(r.data)).catch(() => {});
-    api.get('/student/predictions').then((r) => setPredictions(r.data)).catch(() => {});
+    api.get('/student/attendance').then((r) => {
+      setAttendance(Array.isArray(r.data) ? r.data : []);
+    }).catch(() => {
+      setAttendance([]);
+    });
+    api.get('/student/predictions').then((r) => {
+      setPredictions(Array.isArray(r.data) ? r.data : []);
+    }).catch(() => {
+      setPredictions([]);
+    });
     api.get('/student/profile').then((r) => setProfile(r.data)).catch(() => {});
   }, []);
 
-  const lectureStartedPapers = attendance.filter((a) => Number(a.total_classes || 0) > 0);
+  const safeAttendance = Array.isArray(attendance) ? attendance : [];
+  const safePredictions = Array.isArray(predictions) ? predictions : [];
+
+  const lectureStartedPapers = safeAttendance.filter((a) => Number(a.total_classes || 0) > 0);
   const avgPct = lectureStartedPapers.length > 0
     ? Math.round(lectureStartedPapers.reduce((s, a) => s + a.percentage, 0) / lectureStartedPapers.length)
     : null;
 
-  const overallPrediction = predictions[0] || null;
+  const overallPrediction = safePredictions[0] || null;
 
   return (
     <motion.div className="student-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -107,7 +118,7 @@ export default function StudentDashboard() {
           value={avgPct === null ? 'No Lectures yet' : `${avgPct}%`}
           color="var(--accent-purple)"
         />
-        <StatsCard icon={HiOutlineAcademicCap} label="Enrolled Papers" value={attendance.length} color="var(--accent-cyan)" />
+        <StatsCard icon={HiOutlineAcademicCap} label="Enrolled Papers" value={safeAttendance.length} color="var(--accent-cyan)" />
       </div>
 
       <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
@@ -152,7 +163,7 @@ export default function StudentDashboard() {
       {/* Per-paper attendance rings */}
       <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Attendance by Paper</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
-        {attendance.map((a) => {
+        {safeAttendance.map((a) => {
           const pct = a.percentage;
           const hasLectures = Number(a.total_classes || 0) > 0;
           const color = !hasLectures
