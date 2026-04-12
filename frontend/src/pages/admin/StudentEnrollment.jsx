@@ -4,6 +4,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
+import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
 
 function normalizeSearchText(value) {
@@ -50,6 +51,8 @@ export default function StudentEnrollment() {
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [preview, setPreview] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [studentsError, setStudentsError] = useState('');
   const fileRef = useRef();
   const pickerRef = useRef();
   const debouncedFilters = useDebouncedValue(filters, 250);
@@ -67,6 +70,8 @@ export default function StudentEnrollment() {
     const controller = new AbortController();
 
     const fetchStudents = async () => {
+      setLoadingStudents(true);
+      setStudentsError('');
       const baseParams = { limit: 500, include_inactive: true };
       if (debouncedFilters.course_id) baseParams.course_id = debouncedFilters.course_id;
       if (debouncedFilters.academic_session) baseParams.academic_session = debouncedFilters.academic_session;
@@ -98,6 +103,9 @@ export default function StudentEnrollment() {
       } catch (err) {
         if (err?.code === 'ERR_CANCELED') return;
         setStudents([]);
+        setStudentsError(err.response?.data?.error || 'Failed to load student options.');
+      } finally {
+        if (!controller.signal.aborted) setLoadingStudents(false);
       }
     };
 
@@ -234,8 +242,8 @@ export default function StudentEnrollment() {
   };
 
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: '#1e293b' } }, error: { style: { background: '#1e293b' } } }} />
 
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Face Enrollment</h2>
@@ -283,6 +291,14 @@ export default function StudentEnrollment() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+        {loadingStudents && students.length === 0 ? (
+          <StatePanel variant="loading" title="Loading students" description="Preparing searchable student options." compact />
+        ) : null}
+
+        {!loadingStudents && studentsError ? (
+          <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => setFilters({ ...filters })} compact />
+        ) : null}
+
         {/* Upload Panel */}
         <div className="glass-card" style={{ padding: 24 }}>
           <div style={{ marginBottom: 16 }}>
@@ -426,6 +442,6 @@ export default function StudentEnrollment() {
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

@@ -54,9 +54,7 @@ export default function ChangePassword() {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'var(--bg-primary)', padding: 20,
     }}>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+      <div
         style={{
           width: '100%', maxWidth: 440,
           background: 'var(--bg-card)',
@@ -150,7 +148,7 @@ export default function ChangePassword() {
             {submitting ? 'Saving...' : 'Save New Password'}
           </button>
         </form>
-      </motion.div>
+      </div>
     </div>
   );
 }

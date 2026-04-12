@@ -31,11 +31,10 @@ from app.utils.helpers import sanitise_mongo_doc, decode_base64_image
 
 lecturer_bp = Blueprint("lecturer", __name__)
 
-# In-memory active session store (would use Redis in production)
-_sessions = {}
 ROLLBACK_MINUTES = 30
 _SESSIONS_NORMALIZED = False
 _SESSIONS_NORMALIZE_LOCK = Lock()
+_DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES = 180
 
 
 def _normalize_attendance_sessions_once():
@@ -149,6 +148,85 @@ def _get_session_doc(session_id):
     return sessions.find_one({"session_id": session_id})
 
 
+def _active_sessions_collection():
+    return get_collection("attendance", "active_sessions")
+
+
+def _active_session_timeout_minutes():
+    raw = current_app.config.get("ACTIVE_SESSION_TIMEOUT_MINUTES", _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES)
+    try:
+        return max(10, int(raw))
+    except (TypeError, ValueError):
+        return _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES
+
+
+def _create_active_session(session_id, *, paper_id, lecturer_id):
+    now = datetime.utcnow()
+    timeout_minutes = _active_session_timeout_minutes()
+    expires_at = now + timedelta(minutes=timeout_minutes)
+    _active_sessions_collection().update_one(
+        {"session_id": session_id},
+        {
+            "$set": {
+                "session_id": session_id,
+                "paper_id": str(paper_id),
+                "lecturer_id": str(lecturer_id),
+                "recognized": [],
+                "started_at": now,
+                "updated_at": now,
+                "expires_at": expires_at,
+            }
+        },
+        upsert=True,
+    )
+
+
+def _get_active_session(session_id):
+    if not session_id:
+        return None
+
+    session = _active_sessions_collection().find_one({"session_id": str(session_id)})
+    if not session:
+        return None
+
+    expires_at = session.get("expires_at")
+    if isinstance(expires_at, datetime) and expires_at <= datetime.utcnow():
+        _active_sessions_collection().delete_one({"session_id": str(session_id)})
+        return None
+
+    return session
+
+
+def _touch_active_session(session_id):
+    now = datetime.utcnow()
+    timeout_minutes = _active_session_timeout_minutes()
+    _active_sessions_collection().update_one(
+        {"session_id": str(session_id)},
+        {
+            "$set": {
+                "updated_at": now,
+                "expires_at": now + timedelta(minutes=timeout_minutes),
+            }
+        },
+    )
+
+
+def _save_recognized_students(session_id, recognized_ids):
+    _active_sessions_collection().update_one(
+        {"session_id": str(session_id)},
+        {
+            "$set": {
+                "recognized": list(recognized_ids),
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
+
+
+def _delete_active_session(session_id):
+    _active_sessions_collection().delete_one({"session_id": str(session_id)})
+
+
 def _within_rollback(session_doc):
     rollback_until = session_doc.get("rollback_until")
     if not rollback_until:
@@ -214,17 +292,21 @@ def _parse_date(value, end_of_day=False):
         return None
 
 
-def _load_session_candidates(session: dict):
-    """Build and cache per-session recognition candidates to avoid repeated DB reads."""
-    candidates = session.get("recognition_candidates")
-    if candidates is not None:
-        return candidates
+def _local_midnight_to_utc(local_midnight, tz_offset_minutes):
+    if not isinstance(local_midnight, datetime):
+        return None
+    try:
+        minutes = int(tz_offset_minutes)
+    except Exception:
+        minutes = 0
+    return local_midnight + timedelta(minutes=minutes)
 
+
+def _load_session_candidates(session: dict):
+    """Build recognition candidates from durable session context."""
     paper_id = session.get("paper_id")
     profiles = get_profiles_for_paper(paper_id)
-    candidates = prepare_profile_candidates(profiles)
-    session["recognition_candidates"] = candidates
-    return candidates
+    return prepare_profile_candidates(profiles)
 
 
 def _extract_classroom_faces(img_rgb, img_bgr=None):
@@ -355,18 +437,13 @@ def start_session(user):
         return jsonify({"error": "You are not assigned to this paper"}), 403
 
     session_id = str(uuid.uuid4())
-    _sessions[session_id] = {
-        "paper_id": paper_id,
-        "lecturer_id": str(user["_id"]),
-        "recognized": [],
-        "started_at": datetime.utcnow(),
-        "recognition_candidates": prepare_profile_candidates(get_profiles_for_paper(paper_id)),
-    }
+    _create_active_session(session_id, paper_id=paper_id, lecturer_id=str(user["_id"]))
+    active = _get_active_session(session_id) or {}
 
     return jsonify({
         "session_id": session_id,
         "paper": _enrich_paper(paper),
-        "started_at": _sessions[session_id]["started_at"],
+        "started_at": active.get("started_at"),
     })
 
 
@@ -378,12 +455,17 @@ def recognize_frame(user):
     session_id = d.get("session_id")
     frame_b64 = d.get("frame")
 
-    if not session_id or session_id not in _sessions:
+    if not session_id:
         return jsonify({"error": "Invalid session"}), 400
     if not frame_b64:
         return jsonify({"error": "frame is required"}), 400
 
-    session = _sessions[session_id]
+    session = _get_active_session(session_id)
+    if not session:
+        return jsonify({"error": "Invalid session"}), 400
+    if str(session.get("lecturer_id")) != str(user["_id"]):
+        return jsonify({"error": "Unauthorized"}), 403
+
     paper_id = session["paper_id"]
 
     img = decode_base64_image(frame_b64)
@@ -416,6 +498,9 @@ def recognize_frame(user):
         elif not match and face_best_similarity >= 0:
             print(f"[RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
 
+    _save_recognized_students(session_id, session.get("recognized") or [])
+    _touch_active_session(session_id)
+
     return jsonify({
         "new_matches": new_matches,
         "faces_detected": len(faces),
@@ -432,7 +517,7 @@ def recognize_image(user):
     """Accept an uploaded classroom image, run detection + recognition, return new matches."""
     session_id = request.form.get("session_id")
     
-    if not session_id or session_id not in _sessions:
+    if not session_id:
         return jsonify({"error": "Invalid session"}), 400
     
     if "image" not in request.files:
@@ -442,7 +527,12 @@ def recognize_image(user):
     if not file or file.filename == "":
         return jsonify({"error": "No image file selected"}), 400
     
-    session = _sessions[session_id]
+    session = _get_active_session(session_id)
+    if not session:
+        return jsonify({"error": "Invalid session"}), 400
+    if str(session.get("lecturer_id")) != str(user["_id"]):
+        return jsonify({"error": "Unauthorized"}), 403
+
     paper_id = session["paper_id"]
     paper = get_paper_by_id(paper_id)
     subject_label = (paper or {}).get("code") or (paper or {}).get("name") or "classroom"
@@ -521,6 +611,9 @@ def recognize_image(user):
             print(f"[IMAGE_RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
         elif not match and face_best_similarity >= 0:
             print(f"[IMAGE_RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
+
+    _save_recognized_students(session_id, session.get("recognized") or [])
+    _touch_active_session(session_id)
     
     return jsonify({
         "new_matches": new_matches,
@@ -539,15 +632,22 @@ def recognize_image(user):
 @role_required("lecturer")
 def session_recognized_list(user):
     session_id = request.args.get("session_id")
-    if not session_id or session_id not in _sessions:
+    if not session_id:
         return jsonify({"error": "Invalid session"}), 400
 
-    session = _sessions[session_id]
+    session = _get_active_session(session_id)
+    if not session:
+        return jsonify({"error": "Invalid session"}), 400
+    if str(session.get("lecturer_id")) != str(user["_id"]):
+        return jsonify({"error": "Unauthorized"}), 403
+
     students = []
     for uid in session["recognized"]:
         u = find_user_by_id(uid)
         if u:
             students.append({"user_id": uid, "name": u["name"], "email": u["email"]})
+
+    _touch_active_session(session_id)
     return jsonify({"students": students})
 
 
@@ -561,14 +661,14 @@ def stop_session(user):
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
 
-    session = _sessions.get(session_id)
+    session = _get_active_session(session_id)
     if not session:
         return jsonify({"message": "Session already stopped"}), 200
 
     if str(session.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "Unauthorized"}), 403
 
-    del _sessions[session_id]
+    _delete_active_session(session_id)
 
     log_action(
         "STOP_ATTENDANCE_SESSION",
@@ -587,7 +687,7 @@ def commit_session(user):
     session_id = d.get("session_id")
     pin = str(d.get("pin", "")).strip()
 
-    if not session_id or session_id not in _sessions:
+    if not session_id:
         return jsonify({"error": "Invalid session"}), 400
 
     stored_pin = str(user.get("pin", "")).strip()
@@ -596,7 +696,12 @@ def commit_session(user):
     if pin != stored_pin:
         return jsonify({"error": "Invalid PIN"}), 403
 
-    session = _sessions[session_id]
+    session = _get_active_session(session_id)
+    if not session:
+        return jsonify({"error": "Invalid session"}), 400
+    if str(session.get("lecturer_id")) != str(user["_id"]):
+        return jsonify({"error": "Unauthorized"}), 403
+
     paper_id = session["paper_id"]
     lecturer_id = session["lecturer_id"]
     present_student_ids = list(session["recognized"])
@@ -633,7 +738,7 @@ def commit_session(user):
         details=f"Paper {paper_id}, {len(present_student_ids)} students, session {session_id}",
     )
 
-    del _sessions[session_id]
+    _delete_active_session(session_id)
 
     return jsonify({
         "message": "Attendance committed successfully",
@@ -727,8 +832,11 @@ def lecturer_progress(user):
 
     lecturer_id = str(user["_id"])
     paper_id = request.args.get("paper_id", "").strip()
-    from_date = _parse_date(request.args.get("from_date", ""), end_of_day=False)
-    to_date = _parse_date(request.args.get("to_date", ""), end_of_day=True)
+    tz_offset_minutes = request.args.get("tz_offset_minutes", 0)
+    from_local = _parse_date(request.args.get("from_date", ""), end_of_day=False)
+    to_local_exclusive = _parse_date(request.args.get("to_date", ""), end_of_day=True)
+    from_date = _local_midnight_to_utc(from_local, tz_offset_minutes)
+    to_date = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
 
     lecturer_id_variants = [lecturer_id]
     try:

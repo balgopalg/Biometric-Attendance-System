@@ -3,6 +3,7 @@ import api from '../../api/axios';
 import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
+import StatePanel from '../../components/ui/StatePanel';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
@@ -17,6 +18,8 @@ import {
 
 const EMPTY_FORM = { name: '', email: '' };
 const PAGE_SIZE = 10;
+
+const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
 
 export default function ManageLecturers() {
   const [lecturers, setLecturers] = useState([]);
@@ -36,13 +39,17 @@ export default function ManageLecturers() {
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ course_id: '', semester: '', paper_id: '' });
   const [form, setForm] = useState(EMPTY_FORM);
+  const [loadingLecturers, setLoadingLecturers] = useState(false);
+  const [lecturersError, setLecturersError] = useState('');
 
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
-    api.get('/admin/papers').then((r) => setPapers(r.data)).catch(() => {});
+    api.get('/admin/courses').then((r) => setCourses(extractItems(r.data))).catch(() => {});
+    api.get('/admin/papers').then((r) => setPapers(extractItems(r.data))).catch(() => {});
   };
 
   const fetchLecturers = (nextPage = 1) => {
+    setLoadingLecturers(true);
+    setLecturersError('');
     const params = {};
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
@@ -61,7 +68,11 @@ export default function ManageLecturers() {
       setLecturers(items);
       setTotalLecturers(resolvedTotal);
       setPage(Number(r.data?.page || nextPage));
-    }).catch(() => {});
+    }).catch((err) => {
+      setLecturers([]);
+      setTotalLecturers(0);
+      setLecturersError(err.response?.data?.error || 'Failed to load lecturers.');
+    }).finally(() => setLoadingLecturers(false));
   };
 
   useEffect(() => {
@@ -177,9 +188,18 @@ export default function ManageLecturers() {
     toast.success('Credentials copied');
   };
 
+  if (!loadingLecturers && lecturersError) {
+    return (
+      <div className="admin-page">
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load lecturers" description={lecturersError} actionLabel="Retry" onAction={() => fetchLecturers(page)} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
@@ -213,6 +233,19 @@ export default function ManageLecturers() {
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
+        {loadingLecturers ? (
+          <StatePanel variant="loading" title="Loading lecturers" description="Retrieving lecturer records and assignments." compact />
+        ) : null}
+
+        {!loadingLecturers && lecturersError ? (
+          <StatePanel variant="error" title="Unable to load lecturers" description={lecturersError} actionLabel="Retry" onAction={() => fetchLecturers(page)} compact />
+        ) : null}
+
+        {!loadingLecturers && !lecturersError && lecturers.length === 0 ? (
+          <StatePanel variant="empty" title="No lecturers found" description="Try another filter or add a new lecturer." compact />
+        ) : null}
+
+        {!loadingLecturers && !lecturersError && lecturers.length > 0 ? (
         <table className="data-table">
           <thead>
             <tr>
@@ -275,11 +308,9 @@ export default function ManageLecturers() {
                 </td>
               </tr>
             ))}
-            {lecturers.length === 0 && (
-              <tr><td colSpan="4" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No lecturers found.</td></tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <Pagination page={page} total={totalLecturers} perPage={PAGE_SIZE} onPageChange={fetchLecturers} />
@@ -372,6 +403,6 @@ export default function ManageLecturers() {
           </button>
         </div>
       </Modal>
-    </motion.div>
+    </div>
   );
 }

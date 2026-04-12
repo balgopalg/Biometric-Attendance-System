@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
+import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
@@ -9,6 +10,8 @@ import { HiOutlinePlus, HiOutlineSearch, HiOutlinePencil, HiOutlineTrash } from 
 
 const EMPTY_FORM = { name: '', code: '', department: '', course_duration: '' };
 const PAGE_SIZE = 10;
+
+const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
 
 export default function ManageCourses() {
   const [courses, setCourses] = useState([]);
@@ -29,30 +32,41 @@ export default function ManageCourses() {
     move_students: true,
     move_papers: true,
   });
+  const [loadingCourses, setLoadingCourses] = useState(false);
+  const [coursesError, setCoursesError] = useState('');
 
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setAllCourses(r.data)).catch(() => {});
+    api.get('/admin/courses').then((r) => setAllCourses(extractItems(r.data))).catch(() => {});
   };
 
-  const fetchCourses = (nextPage = 1) => {
+  const fetchCourses = async (nextPage = 1) => {
+    setLoadingCourses(true);
+    setCoursesError('');
     const params = {};
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
     if (search) params.q = search;
     if (durationFilter) params.course_duration = durationFilter;
     if (statusFilter) params.status = statusFilter;
-    api.get('/admin/courses', { params }).then((r) => {
+    try {
+      const r = await api.get('/admin/courses', { params });
       const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
       const resolvedTotal = Number(r.data?.total || items.length || 0);
       const maxPage = Math.max(1, Math.ceil(resolvedTotal / PAGE_SIZE));
       if (resolvedTotal > 0 && nextPage > maxPage) {
-        fetchCourses(maxPage);
+        await fetchCourses(maxPage);
         return;
       }
       setCourses(items);
       setTotalCourses(resolvedTotal);
       setPage(Number(r.data?.page || nextPage));
-    }).catch(() => {});
+    } catch (err) {
+      setCourses([]);
+      setTotalCourses(0);
+      setCoursesError(err.response?.data?.error || 'Failed to load courses.');
+    } finally {
+      setLoadingCourses(false);
+    }
   };
 
   useEffect(() => {
@@ -208,9 +222,18 @@ export default function ManageCourses() {
     </>
   );
 
+  if (!loadingCourses && coursesError) {
+    return (
+      <div className="admin-page">
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load courses" description={coursesError} actionLabel="Retry" onAction={() => fetchCourses(page)} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
@@ -252,49 +275,60 @@ export default function ManageCourses() {
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Name</th>
-              <th>Department</th>
-              <th>Duration</th>
-              <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((c) => (
-              <tr key={c._id}>
-                <td><span className="badge badge-info">{c.code}</span></td>
-                <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{formatCourseName(c.name, { status: c.status })}</td>
-                <td>{c.department || 'N/A'}</td>
-                <td>{c.course_duration ? `${c.course_duration} year${c.course_duration > 1 ? 's' : ''}` : 'N/A'}</td>
-                <td>
-                  <span className={`badge ${String(c.status || 'active').toLowerCase() === 'active' ? 'badge-success' : 'badge-warning'}`}>
-                    {String(c.status || 'active').toLowerCase()}
-                  </span>
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button className="icon-btn" title="Edit" onClick={() => openEdit(c)}><HiOutlinePencil size={15} /></button>
-                    {String(c.status || 'active').toLowerCase() === 'active' ? (
-                      <button className="icon-btn danger" title="Mark Inactive" onClick={() => handleDelete(c._id)}><HiOutlineTrash size={15} /></button>
-                    ) : (
-                      <>
-                        <button className="icon-btn" title="Reassign" onClick={() => openReassign(c._id)}>R</button>
-                        <button className="icon-btn" title="Reactivate" onClick={() => handleReactivate(c._id)}><HiOutlinePlus size={15} /></button>
-                      </>
-                    )}
-                  </div>
-                </td>
+        {loadingCourses ? (
+          <StatePanel variant="loading" title="Loading courses" description="Fetching course records and filters." compact />
+        ) : null}
+
+        {!loadingCourses && coursesError ? (
+          <StatePanel variant="error" title="Unable to load courses" description={coursesError} actionLabel="Retry" onAction={() => fetchCourses(page)} compact />
+        ) : null}
+
+        {!loadingCourses && !coursesError && filtered.length === 0 ? (
+          <StatePanel variant="empty" title="No courses found" description="Try changing filters or add a new course." compact />
+        ) : null}
+
+        {!loadingCourses && !coursesError && filtered.length > 0 ? (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Department</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan="6" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No courses found.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((c) => (
+                <tr key={c._id}>
+                  <td><span className="badge badge-info">{c.code}</span></td>
+                  <td style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{formatCourseName(c.name, { status: c.status })}</td>
+                  <td>{c.department || 'N/A'}</td>
+                  <td>{c.course_duration ? `${c.course_duration} year${c.course_duration > 1 ? 's' : ''}` : 'N/A'}</td>
+                  <td>
+                    <span className={`badge ${String(c.status || 'active').toLowerCase() === 'active' ? 'badge-success' : 'badge-warning'}`}>
+                      {String(c.status || 'active').toLowerCase()}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <button className="icon-btn" title="Edit" onClick={() => openEdit(c)}><HiOutlinePencil size={15} /></button>
+                      {String(c.status || 'active').toLowerCase() === 'active' ? (
+                        <button className="icon-btn danger" title="Mark Inactive" onClick={() => handleDelete(c._id)}><HiOutlineTrash size={15} /></button>
+                      ) : (
+                        <>
+                          <button className="icon-btn" title="Reassign" onClick={() => openReassign(c._id)}>R</button>
+                          <button className="icon-btn" title="Reactivate" onClick={() => handleReactivate(c._id)}><HiOutlinePlus size={15} /></button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
       </div>
 
       <Pagination page={page} total={totalCourses} perPage={PAGE_SIZE} onPageChange={fetchCourses} />
@@ -363,6 +397,6 @@ export default function ManageCourses() {
           </div>
         </div>
       </Modal>
-    </motion.div>
+    </div>
   );
 }

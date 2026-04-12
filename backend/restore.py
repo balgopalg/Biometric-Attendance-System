@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 
 from bson import json_util
+from flask import Flask
+from pymongo import MongoClient
 
-from app import create_app
+from app.config import Config
 from app.extensions import mongo
 
 
@@ -38,7 +40,9 @@ def main() -> None:
         print("Refusing to drop existing data without --yes")
         return
 
-    app = create_app(seed_default_admin=False)
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    mongo.cx = MongoClient(app.config["MONGO_URI"])
 
     with app.app_context():
         for entry in manifest.get("files", []):

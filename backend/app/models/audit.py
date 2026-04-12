@@ -8,9 +8,24 @@ from app.extensions import get_collection
 ROLLBACK_WINDOW_HOURS = 24
 
 
-def log_action(action, performed_by, target_user=None, details="", rollback=None, rollback_until=None):
+def log_action(
+    action=None,
+    performed_by=None,
+    target_user=None,
+    details="",
+    rollback=None,
+    rollback_until=None,
+    **kwargs,
+):
     logs = get_collection("audit", "audit_logs")
     ts = datetime.utcnow()
+
+    # Backward-compatible mapping for newer keyword call style used by some routes.
+    action = action or kwargs.get("action")
+    performed_by = performed_by or kwargs.get("performed_by") or kwargs.get("user_id") or "system"
+    target_user = target_user if target_user is not None else kwargs.get("target_user")
+    details = details or kwargs.get("details") or kwargs.get("description", "")
+
     doc = {
         "action": action,
         "performed_by": performed_by,
@@ -18,6 +33,12 @@ def log_action(action, performed_by, target_user=None, details="", rollback=None
         "details": details,
         "timestamp": ts,
     }
+    if kwargs.get("resource_type"):
+        doc["resource_type"] = kwargs.get("resource_type")
+    if kwargs.get("ip_address"):
+        doc["ip_address"] = kwargs.get("ip_address")
+    if kwargs.get("user_agent"):
+        doc["user_agent"] = kwargs.get("user_agent")
     if rollback:
         doc["rollback"] = rollback
         doc["rollback_until"] = rollback_until or (ts + timedelta(hours=ROLLBACK_WINDOW_HOURS))

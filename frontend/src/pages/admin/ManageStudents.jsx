@@ -8,6 +8,7 @@ import FaceEnrollmentModal from '../../components/admin/FaceEnrollmentModal';
 import TrainingProgressPanel from '../../components/admin/TrainingProgressPanel';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import Pagination from '../../components/ui/Pagination';
+import StatePanel from '../../components/ui/StatePanel';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
@@ -33,6 +34,8 @@ const EMPTY_FORM = {
   reg_number: '',
 };
 const PAGE_SIZE = 10;
+
+const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
 
 export default function ManageStudents() {
   const [students, setStudents] = useState([]);
@@ -73,6 +76,8 @@ export default function ManageStudents() {
   const [trainingJobUrl, setTrainingJobUrl] = useState('');
   const [trainingSyncErrorShown, setTrainingSyncErrorShown] = useState(false);
   const [trainingCancelPending, setTrainingCancelPending] = useState(false);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [studentsError, setStudentsError] = useState('');
   const [paperOptions, setPaperOptions] = useState([]);
   const [selectedPaperIds, setSelectedPaperIds] = useState([]);
   const [baseAssignedPaperIds, setBaseAssignedPaperIds] = useState([]);
@@ -81,12 +86,14 @@ export default function ManageStudents() {
   const fetchStudentsRef = useRef(null);
 
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
-    api.get('/admin/papers').then((r) => setPapers(r.data)).catch(() => {});
+    api.get('/admin/courses').then((r) => setCourses(extractItems(r.data))).catch(() => {});
+    api.get('/admin/papers').then((r) => setPapers(extractItems(r.data))).catch(() => {});
   };
 
   const fetchStudents = (nextPage = 1, options = {}) => {
     const signal = options.signal;
+    setLoadingStudents(true);
+    setStudentsError('');
     const params = {};
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
@@ -108,6 +115,12 @@ export default function ManageStudents() {
       setPage(Number(r.data?.page || nextPage));
     }).catch((err) => {
       if (err?.code === 'ERR_CANCELED') return;
+      setStudents([]);
+      setTotalStudents(0);
+      setStudentsError(err.response?.data?.error || 'Failed to load students.');
+    }).finally(() => {
+      if (signal?.aborted) return;
+      setLoadingStudents(false);
     });
   };
 
@@ -213,6 +226,15 @@ export default function ManageStudents() {
     () => (showInactiveRows ? students : students.filter((s) => !s.is_course_inactive)),
     [students, showInactiveRows]
   );
+
+  if (!loadingStudents && studentsError) {
+    return (
+      <div className="admin-page">
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => fetchStudents(page)} compact />
+      </div>
+    );
+  }
 
   const subjectOptions = useMemo(() => {
     return papers.filter((p) => {
@@ -783,8 +805,8 @@ export default function ManageStudents() {
   );
 
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
       <TrainingProgressPanel
         job={trainingJob}
         onCancel={handleCancelTrainingJob}
@@ -877,6 +899,19 @@ export default function ManageStudents() {
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
+        {loadingStudents ? (
+          <StatePanel variant="loading" title="Loading students" description="Fetching student records and enrollment status." compact />
+        ) : null}
+
+        {!loadingStudents && studentsError ? (
+          <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => fetchStudents(page)} compact />
+        ) : null}
+
+        {!loadingStudents && !studentsError && filtered.length === 0 ? (
+          <StatePanel variant="empty" title="No students found" description="Try adjusting filters or add a new student." compact />
+        ) : null}
+
+        {!loadingStudents && !studentsError && filtered.length > 0 ? (
         <table className="data-table">
           <thead>
             <tr>
@@ -983,11 +1018,9 @@ export default function ManageStudents() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan="10" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No students found.</td></tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Student" width={560}>
@@ -1225,6 +1258,6 @@ export default function ManageStudents() {
           onSuccess={handleFaceEnrollSuccess}
         />
       )}
-    </motion.div>
+    </div>
   );
 }

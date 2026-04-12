@@ -50,6 +50,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
 
   return (
     <aside
+      aria-label="Primary"
       style={{
         width: isCollapsed ? 76 : 220,
         minHeight: '100vh',
@@ -140,7 +141,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       </div>
 
       {/* Navigation */}
-      <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, padding: '12px 10px', overflowY: 'auto' }}>
+      <nav aria-label="Sidebar navigation" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, padding: '12px 10px', overflowY: 'auto' }}>
         {links.map((link, index) => (
           <NavLink
             key={link.to}
@@ -185,6 +186,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       <div style={{ padding: '12px 10px 16px', borderTop: '1px solid var(--sidebar-divider)' }}>
         <button
           onClick={handleLogout}
+          aria-label="Log out"
           title={isCollapsed ? 'Log out' : undefined}
           style={{
             display: 'flex', alignItems: 'center', gap: isCollapsed ? 0 : 12,

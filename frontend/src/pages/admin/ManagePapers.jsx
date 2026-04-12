@@ -5,12 +5,15 @@ import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import Pagination from '../../components/ui/Pagination';
+import StatePanel from '../../components/ui/StatePanel';
 import toast, { Toaster } from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil } from 'react-icons/hi';
 
 const EMPTY_FORM = { name: '', code: '', course_id: '', lecturer_id: '', semester: '' };
 const PAGE_SIZE = 10;
+
+const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
 
 export default function ManagePapers() {
   const [papers, setPapers] = useState([]);
@@ -28,13 +31,17 @@ export default function ManagePapers() {
   const [showInactiveRows, setShowInactiveRows] = useAdminPreference('show_inactive_faded_rows', true);
 
   const [form, setForm] = useState(EMPTY_FORM);
+  const [loadingPapers, setLoadingPapers] = useState(false);
+  const [papersError, setPapersError] = useState('');
 
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
-    api.get('/admin/lecturers').then((r) => setLecturers(r.data)).catch(() => {});
+    api.get('/admin/courses').then((r) => setCourses(extractItems(r.data))).catch(() => {});
+    api.get('/admin/lecturers').then((r) => setLecturers(extractItems(r.data))).catch(() => {});
   };
 
   const fetchPapers = (nextPage = 1) => {
+    setLoadingPapers(true);
+    setPapersError('');
     const params = {};
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
@@ -53,7 +60,11 @@ export default function ManagePapers() {
       setPapers(items);
       setTotalPapers(resolvedTotal);
       setPage(Number(r.data?.page || nextPage));
-    }).catch(() => {});
+    }).catch((err) => {
+      setPapers([]);
+      setTotalPapers(0);
+      setPapersError(err.response?.data?.error || 'Failed to load subjects.');
+    }).finally(() => setLoadingPapers(false));
   };
 
   useEffect(() => {
@@ -267,9 +278,18 @@ export default function ManagePapers() {
     </>
   );
 
+  if (!loadingPapers && papersError) {
+    return (
+      <div className="admin-page">
+        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
+        <StatePanel variant="error" title="Unable to load subjects" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
+      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
@@ -332,6 +352,19 @@ export default function ManagePapers() {
       )}
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
+        {loadingPapers ? (
+          <StatePanel variant="loading" title="Loading subjects" description="Fetching subject records for selected filters." compact />
+        ) : null}
+
+        {!loadingPapers && papersError ? (
+          <StatePanel variant="error" title="Unable to load subjects" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
+        ) : null}
+
+        {!loadingPapers && !papersError && filtered.length === 0 ? (
+          <StatePanel variant="empty" title="No subjects found" description="Try changing filters or create a new subject." compact />
+        ) : null}
+
+        {!loadingPapers && !papersError && filtered.length > 0 ? (
         <table className="data-table">
           <thead>
             <tr>
@@ -363,11 +396,9 @@ export default function ManagePapers() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan="7" style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>No papers found.</td></tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <Pagination page={page} total={totalPapers} perPage={PAGE_SIZE} onPageChange={fetchPapers} />
@@ -379,6 +410,6 @@ export default function ManagePapers() {
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Subject" width={520}>
         {PaperForm({ onSubmit: handleUpdate, submitLabel: 'Save Changes' })}
       </Modal>
-    </motion.div>
+    </div>
   );
 }

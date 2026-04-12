@@ -1,14 +1,17 @@
-export default function Spinner({ size = 24 }) {
+export default function Spinner({ size = 24, ariaLabel = 'Loading' }) {
   return (
-    <div style={{
-      width: size, height: size,
-      border: '3px solid var(--border-glass)',
-      borderTopColor: 'var(--accent-purple)',
-      borderRadius: '50%',
-      animation: 'spin 0.6s linear infinite',
-      display: 'inline-block',
-    }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
+    <span
+      role="status"
+      aria-label={ariaLabel}
+      style={{
+        width: size,
+        height: size,
+        border: '3px solid var(--border-glass)',
+        borderTopColor: 'var(--accent-purple)',
+        borderRadius: '50%',
+        display: 'inline-block',
+        animation: 'spin 0.75s linear infinite',
+      }}
+    />
   );
 }

@@ -1,13 +1,21 @@
 import { useState, useEffect } from 'react';
 import api from '../../api/axios';
+import StatePanel from '../../components/ui/StatePanel';
 import { motion } from 'framer-motion';
 import { HiOutlineDocumentText, HiOutlineCheckCircle, HiOutlineXCircle } from 'react-icons/hi';
 
 export default function ExamPortal() {
   const [eligibility, setEligibility] = useState([]);
+  const [loadingPortal, setLoadingPortal] = useState(false);
+  const [portalError, setPortalError] = useState('');
 
   useEffect(() => {
-    api.get('/student/exam-eligibility').then((r) => setEligibility(r.data)).catch(() => {});
+    setLoadingPortal(true);
+    setPortalError('');
+    api.get('/student/exam-eligibility').then((r) => setEligibility(r.data)).catch((err) => {
+      setEligibility([]);
+      setPortalError(err.response?.data?.error || 'Failed to load exam portal data.');
+    }).finally(() => setLoadingPortal(false));
   }, []);
 
   const eligible = eligibility.filter((e) => e.eligible).length;
@@ -23,8 +31,40 @@ export default function ExamPortal() {
     ? 'badge-info'
     : (overallPct >= 75 ? 'badge-success' : 'badge-danger');
 
+  if (loadingPortal) {
+    return (
+      <div>
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Exam Portal</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+            Your exam eligibility status — {eligible}/{total} papers eligible
+          </p>
+        </div>
+        <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+          <StatePanel variant="loading" title="Loading exam eligibility" description="Calculating overall and paper-wise eligibility status." compact />
+        </div>
+      </div>
+    );
+  }
+
+  if (portalError) {
+    return (
+      <div>
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Exam Portal</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+            Your exam eligibility status — {eligible}/{total} papers eligible
+          </p>
+        </div>
+        <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+          <StatePanel variant="error" title="Unable to load exam eligibility" description={portalError} actionLabel="Retry" onAction={() => window.location.reload()} compact />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div>
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Exam Portal</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
@@ -103,13 +143,10 @@ export default function ExamPortal() {
             );
           })()
         ))}
-        {eligibility.length === 0 && (
-          <div className="glass-card" style={{ padding: 30, textAlign: 'center' }}>
-            <HiOutlineDocumentText size={32} style={{ color: 'var(--text-muted)', marginBottom: 8 }} />
-            <p style={{ color: 'var(--text-muted)' }}>No exam eligibility data available.</p>
-          </div>
-        )}
+        {eligibility.length === 0 ? (
+          <StatePanel variant="empty" title="No eligibility data available" description="Eligibility cards appear after attendance is processed." compact />
+        ) : null}
       </div>
-    </motion.div>
+    </div>
   );
 }

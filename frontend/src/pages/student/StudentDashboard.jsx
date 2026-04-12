@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../api/axios';
 import { formatCourseName } from '../../utils/courseDisplay';
 import StatsCard from '../../components/ui/StatsCard';
+import StatePanel from '../../components/ui/StatePanel';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator, HiOutlineSparkles, HiOutlineBookOpen } from 'react-icons/hi';
+import { useAuth } from '../../hooks/useAuth';
 
 function parseSemesterValue(value) {
   if (value === null || value === undefined) return null;
@@ -55,9 +58,13 @@ function parseSemesterFromPaper(paper) {
 }
 
 export default function StudentDashboard() {
+  const { user } = useAuth();
+  const welcomeShownRef = useRef(false);
   const [attendance, setAttendance] = useState([]);
   const [predictions, setPredictions] = useState([]);
   const [profile, setProfile] = useState(null);
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [dashboardError, setDashboardError] = useState('');
 
   const assignedPapers = profile?.papers || profile?.subjects || [];
   const courseStatus = String(profile?.course_status || profile?.course?.status || 'active').toLowerCase();
@@ -72,17 +79,29 @@ export default function StudentDashboard() {
   );
 
   useEffect(() => {
-    api.get('/student/attendance').then((r) => {
-      setAttendance(Array.isArray(r.data) ? r.data : []);
-    }).catch(() => {
+    if (!welcomeShownRef.current && user?.name) {
+      toast.success(`Welcome, ${user.name}!`);
+      welcomeShownRef.current = true;
+    }
+  }, [user?.name]);
+
+  useEffect(() => {
+    setLoadingDashboard(true);
+    setDashboardError('');
+    Promise.all([
+      api.get('/student/attendance'),
+      api.get('/student/predictions'),
+      api.get('/student/profile'),
+    ]).then(([attendanceRes, predictionsRes, profileRes]) => {
+      setAttendance(Array.isArray(attendanceRes.data) ? attendanceRes.data : []);
+      setPredictions(Array.isArray(predictionsRes.data) ? predictionsRes.data : []);
+      setProfile(profileRes.data || null);
+    }).catch((err) => {
       setAttendance([]);
-    });
-    api.get('/student/predictions').then((r) => {
-      setPredictions(Array.isArray(r.data) ? r.data : []);
-    }).catch(() => {
       setPredictions([]);
-    });
-    api.get('/student/profile').then((r) => setProfile(r.data)).catch(() => {});
+      setProfile(null);
+      setDashboardError(err.response?.data?.error || 'Failed to load student dashboard.');
+    }).finally(() => setLoadingDashboard(false));
   }, []);
 
   const safeAttendance = Array.isArray(attendance) ? attendance : [];
@@ -96,8 +115,24 @@ export default function StudentDashboard() {
 
   const overallPrediction = safePredictions[0] || null;
 
+  if (loadingDashboard) {
+    return (
+      <div className="student-page">
+        <StatePanel variant="loading" title="Loading dashboard" description="Preparing attendance summaries and predictions." compact />
+      </div>
+    );
+  }
+
+  if (dashboardError) {
+    return (
+      <div className="student-page">
+        <StatePanel variant="error" title="Unable to load dashboard" description={dashboardError} actionLabel="Retry" onAction={() => window.location.reload()} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div className="student-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div className="student-page">
       <section className="glass-card student-hero-card">
         <div className="student-hero-top">
           <div>
@@ -253,6 +288,6 @@ export default function StudentDashboard() {
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }

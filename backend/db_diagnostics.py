@@ -11,8 +11,11 @@ What it checks:
 from __future__ import annotations
 
 from collections import OrderedDict
+from flask import Flask
+from pymongo import MongoClient
 
-from app import create_app
+from app.config import Config
+from app import _ensure_indexes
 from app.extensions import get_collection
 
 EXPECTED_INDEXES = OrderedDict(
@@ -23,7 +26,13 @@ EXPECTED_INDEXES = OrderedDict(
         ("academic", "student_profiles"): {"uq_profiles_user", "uq_profiles_reg", "ix_profiles_course", "ix_profiles_year"},
         ("attendance", "attendance_logs"): {"uq_attendance_session_paper_student", "ix_attendance_timestamp", "ix_attendance_paper_student"},
         ("attendance", "attendance_sessions"): {"uq_sessions_id", "ix_sessions_lecturer_created", "ix_sessions_rollback_until"},
+        ("attendance", "active_sessions"): {
+            "uq_active_sessions_id",
+            "ix_active_sessions_lecturer_updated",
+            "ix_active_sessions_expires_at",
+        },
         ("attendance", "background_jobs"): {"uq_jobs_id", "ix_jobs_status_created", "ix_jobs_status_next_attempt", "ix_jobs_updated"},
+        ("attendance", "schema_migrations"): {"uq_schema_migrations_id", "ix_schema_migrations_applied_at"},
         ("attendance", "exam_eligibility_overrides"): {"uq_overrides_student_paper"},
         ("audit", "audit_logs"): {"ix_audit_timestamp", "ix_audit_action"},
     }
@@ -36,15 +45,21 @@ COUNT_TARGETS = [
     ("academic", "student_profiles"),
     ("attendance", "attendance_logs"),
     ("attendance", "attendance_sessions"),
+    ("attendance", "active_sessions"),
     ("attendance", "background_jobs"),
+    ("attendance", "schema_migrations"),
     ("attendance", "exam_eligibility_overrides"),
     ("audit", "audit_logs"),
 ]
 
 
 def main() -> int:
-    app = create_app(seed_default_admin=False)
+    app = Flask(__name__)
+    app.config.from_object(Config)
+    from app.extensions import mongo
+    mongo.cx = MongoClient(app.config["MONGO_URI"])
     with app.app_context():
+        _ensure_indexes(mongo, app.config)
         print("Database counts:")
         for alias, collection_name in COUNT_TARGETS:
             collection = get_collection(alias, collection_name)
