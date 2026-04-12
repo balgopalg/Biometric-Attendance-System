@@ -694,6 +694,113 @@ body {
   box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.28);
 }
 
+/* Student dashboard corporate styling */
+.student-page .student-hero-card {
+  padding: 24px;
+  margin-bottom: 22px;
+  background:
+    radial-gradient(120% 180% at 0% 0%, color-mix(in srgb, var(--accent-cyan) 18%, transparent) 0%, transparent 60%),
+    linear-gradient(145deg, color-mix(in srgb, var(--bg-card) 92%, #ffffff 8%), color-mix(in srgb, var(--bg-card) 96%, var(--accent-cyan) 4%));
+  border: 1px solid color-mix(in srgb, var(--border-glass) 56%, var(--accent-cyan) 44%);
+}
+
+.student-page .student-hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.student-page .student-hero-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.student-page .student-hero-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  margin-top: 6px;
+}
+
+.student-page .student-hero-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.student-page .student-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.student-page .student-kpi-grid .stat-card {
+  border: 1px solid color-mix(in srgb, var(--border-glass) 72%, var(--accent-cyan) 28%);
+  background: linear-gradient(170deg, color-mix(in srgb, var(--bg-card) 97%, #ffffff 3%), var(--bg-card));
+}
+
+.student-page .student-section-card {
+  padding: 20px;
+  margin-bottom: 24px;
+  border: 1px solid color-mix(in srgb, var(--border-glass) 80%, var(--accent-cyan) 20%);
+}
+
+.student-page .student-section-head {
+  margin-bottom: 14px;
+}
+
+.student-page .student-section-head h3 {
+  font-size: 0.95rem;
+  font-weight: 750;
+  margin-bottom: 4px;
+}
+
+.student-page .student-section-head p {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.student-page .student-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.student-page .student-paper-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.student-page .student-rings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.student-page .student-rings-grid .glass-card {
+  border: 1px solid color-mix(in srgb, var(--border-glass) 82%, var(--accent-purple) 18%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 98%, #ffffff 2%), var(--bg-card));
+}
+
+.student-page .student-pred-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+[data-theme="light"] .student-page .student-hero-card {
+  background:
+    radial-gradient(130% 180% at 0% 0%, rgba(8, 145, 178, 0.12) 0%, transparent 60%),
+    linear-gradient(145deg, #ffffff, color-mix(in srgb, #ffffff 90%, #e6f4f1 10%));
+}
+
 /* ─── Responsive Tweaks ─── */
 @media (max-width: 1024px) {
   .admin-page .filter-bar {
@@ -721,6 +828,17 @@ body {
   .lecturer-page .glass-card,
   .student-page .glass-card {
     border-radius: 12px;
+  }
+
+  .student-page .student-hero-card {
+    padding: 18px;
+  }
+
+  .student-page .student-kpi-grid,
+  .student-page .student-rings-grid,
+  .student-page .student-pred-grid,
+  .student-page .student-meta-grid {
+    gap: 12px;
   }
 
   .glass-card {
@@ -752,6 +870,14 @@ body {
   .data-table th {
     padding: 10px 12px;
     font-size: 0.66rem;
+  }
+
+  .student-page .student-hero-title {
+    font-size: 1.16rem;
+  }
+
+  .student-page .student-hero-subtitle {
+    font-size: 0.78rem;
   }
 
   .data-table td {

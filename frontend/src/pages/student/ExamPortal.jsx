@@ -12,6 +12,16 @@ export default function ExamPortal() {
 
   const eligible = eligibility.filter((e) => e.eligible).length;
   const total = eligibility.length;
+  const overall = eligibility[0] || null;
+  const overallPct = Number(overall?.overall_attendance_percentage ?? overall?.attendance_percentage ?? 0);
+  const overallAttended = Number(overall?.overall_attended_classes ?? 0);
+  const overallTotal = Number(overall?.overall_total_classes ?? 0);
+  const overallStatus = overallTotal <= 0
+    ? 'No Lectures Yet'
+    : (overallPct >= 75 ? 'Eligible Zone' : 'Below Threshold');
+  const overallStatusClass = overallTotal <= 0
+    ? 'badge-info'
+    : (overallPct >= 75 ? 'badge-success' : 'badge-danger');
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -22,7 +32,32 @@ export default function ExamPortal() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+      <div className="glass-card" style={{ padding: 20, marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 4 }}>Overall Attendance Summary</h3>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Combined attendance across all enrolled papers</p>
+          </div>
+          <span className={`badge ${overallStatusClass}`}>{overallStatus}</span>
+        </div>
+
+        <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
+          <div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Overall Percentage</p>
+            <p style={{ fontSize: '1.15rem', fontWeight: 800 }}>{overallTotal <= 0 ? 'N/A' : `${overallPct}%`}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Attended Classes</p>
+            <p style={{ fontSize: '1.15rem', fontWeight: 800 }}>{overallAttended}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Total Classes</p>
+            <p style={{ fontSize: '1.15rem', fontWeight: 800 }}>{overallTotal}</p>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
         {eligibility.map((e) => (
           (() => {
             const isNoLecturesYet = e.eligible === null || String(e.status || '').toLowerCase().includes('no lectures');
@@ -34,40 +69,33 @@ export default function ExamPortal() {
             return (
           <motion.div
             key={e.paper_id}
-            whileHover={{ y: -4 }}
+            whileHover={{ y: -3 }}
             className="glass-card"
             style={{
-              padding: 24, position: 'relative', overflow: 'hidden',
-              borderLeft: `3px solid ${borderColor}`,
+              padding: 16, position: 'relative', overflow: 'hidden',
+              borderLeft: `2px solid ${borderColor}`,
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <span className="badge badge-info" style={{ marginBottom: 8 }}>{e.paper_code}</span>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: 8 }}>{e.paper_name}</h4>
+                <span className="badge badge-info" style={{ marginBottom: 6, fontSize: '0.7rem' }}>{e.paper_code}</span>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginTop: 6 }}>{e.paper_name}</h4>
               </div>
               {isEligible
-                ? <HiOutlineCheckCircle size={28} style={{ color: iconColor }} />
-                : <HiOutlineXCircle size={28} style={{ color: iconColor }} />
+                ? <HiOutlineCheckCircle size={24} style={{ color: iconColor }} />
+                : <HiOutlineXCircle size={24} style={{ color: iconColor }} />
               }
             </div>
-            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Attendance</p>
-                <p style={{
-                  fontSize: '1.2rem', fontWeight: 800,
-                  color: borderColor,
-                }}>{e.attendance_percentage}%</p>
-              </div>
-              <span className={`badge ${statusClass}`} style={{ fontSize: '0.8rem', padding: '5px 14px' }}>
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
+              <span className={`badge ${statusClass}`} style={{ fontSize: '0.75rem', padding: '4px 12px' }}>
                 {e.status}
               </span>
             </div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 8 }}>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 6 }}>
               {e.approval_source || 'Auto approved'}
             </p>
             {!isEligible && !isNoLecturesYet && (
-              <p style={{ fontSize: '0.72rem', color: 'var(--accent-rose)', marginTop: 10, padding: '6px 10px', background: 'rgba(244,63,94,0.06)', borderRadius: 6 }}>
+              <p style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', marginTop: 8, padding: '5px 8px', background: 'rgba(244,63,94,0.06)', borderRadius: 6 }}>
                 ⚠ You need at least 75% attendance for exam eligibility.
               </p>
             )}

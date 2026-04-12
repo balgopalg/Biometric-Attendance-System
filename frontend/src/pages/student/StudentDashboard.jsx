@@ -3,7 +3,7 @@ import api from '../../api/axios';
 import { formatCourseName } from '../../utils/courseDisplay';
 import StatsCard from '../../components/ui/StatsCard';
 import { motion } from 'framer-motion';
-import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator } from 'react-icons/hi';
+import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator, HiOutlineSparkles, HiOutlineBookOpen } from 'react-icons/hi';
 
 function parseSemesterValue(value) {
   if (value === null || value === undefined) return null;
@@ -92,15 +92,32 @@ export default function StudentDashboard() {
   const avgPct = lectureStartedPapers.length > 0
     ? Math.round(lectureStartedPapers.reduce((s, a) => s + a.percentage, 0) / lectureStartedPapers.length)
     : null;
+  const onTrackCount = lectureStartedPapers.filter((a) => Number(a.percentage || 0) >= 75).length;
 
   const overallPrediction = safePredictions[0] || null;
 
   return (
     <motion.div className="student-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome, <span className="gradient-text">Student</span></h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Your attendance overview at a glance.</p>
-      </div>
+      <section className="glass-card student-hero-card">
+        <div className="student-hero-top">
+          <div>
+            <h1 className="student-hero-title">
+              <HiOutlineSparkles size={20} style={{ color: 'var(--accent-cyan)' }} />
+              Welcome, <span className="gradient-text">Student</span>
+            </h1>
+            <p className="student-hero-subtitle">
+              View your attendance performance and current examination eligibility status.
+            </p>
+          </div>
+          <div className="student-hero-badges">
+            <span className="badge badge-info">{currentSemester}</span>
+            <span className="badge badge-purple">{profile?.course?.code || 'Course N/A'}</span>
+            <span className={`badge ${avgPct !== null && avgPct >= 75 ? 'badge-success' : 'badge-warning'}`}>
+              {avgPct === null ? 'No Lectures yet' : `Overall ${avgPct}%`}
+            </span>
+          </div>
+        </div>
+      </section>
 
       {isCourseInactive && (
         <div className="glass-card" style={{ padding: '12px 16px', marginBottom: 20, borderLeft: '3px solid var(--accent-rose)' }}>
@@ -111,7 +128,7 @@ export default function StudentDashboard() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
+      <div className="student-kpi-grid">
         <StatsCard
           icon={HiOutlineChartBar}
           label="Average Attendance"
@@ -119,11 +136,15 @@ export default function StudentDashboard() {
           color="var(--accent-purple)"
         />
         <StatsCard icon={HiOutlineAcademicCap} label="Enrolled Papers" value={safeAttendance.length} color="var(--accent-cyan)" />
+        <StatsCard icon={HiOutlineBookOpen} label="On Track Papers" value={`${onTrackCount}/${lectureStartedPapers.length || safeAttendance.length || 0}`} color="var(--accent-emerald)" />
       </div>
 
-      <div className="glass-card" style={{ padding: 20, marginBottom: 24 }}>
-        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Course Details</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+      <section className="glass-card student-section-card">
+        <div className="student-section-head">
+          <h3>Course Details</h3>
+          <p>Academic profile and enrolled paper information</p>
+        </div>
+        <div className="student-meta-grid">
           <div>
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Registration No</p>
             <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{profile?.profile?.reg_number || 'N/A'}</p>
@@ -152,17 +173,20 @@ export default function StudentDashboard() {
         {assignedPapers.length === 0 ? (
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No papers assigned yet.</p>
         ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className="student-paper-tags">
             {assignedPapers.map((s) => (
               <span key={s.paper_id} className="badge badge-info">{s.paper_code} - {s.paper_name}</span>
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {/* Per-paper attendance rings */}
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Attendance by Paper</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
+      <div className="student-section-head">
+        <h3>Attendance by Paper</h3>
+        <p>Each ring shows your current attendance per paper</p>
+      </div>
+      <div className="student-rings-grid">
         {safeAttendance.map((a) => {
           const pct = a.percentage;
           const hasLectures = Number(a.total_classes || 0) > 0;
@@ -171,7 +195,10 @@ export default function StudentDashboard() {
             : (pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)');
           const deg = hasLectures ? (pct / 100) * 360 : 0;
           return (
-            <motion.div key={a.paper_id} whileHover={{ y: -4 }} className="glass-card" style={{ padding: 20, textAlign: 'center' }}>
+            <motion.div key={a.paper_id} whileHover={{ y: -4 }} className="glass-card" style={{ padding: 18, textAlign: 'center' }}>
+              <div style={{ marginBottom: 8 }}>
+                <span className="badge badge-info">{a.paper_code || 'Paper'}</span>
+              </div>
               <div style={{
                 width: 80, height: 80, borderRadius: '50%', margin: '0 auto 12px',
                 background: `conic-gradient(${color} ${deg}deg, rgba(255,255,255,0.06) ${deg}deg)`,
@@ -184,7 +211,7 @@ export default function StudentDashboard() {
                   fontWeight: 800, fontSize: '1rem', color,
                 }}>{hasLectures ? `${Math.round(pct)}%` : '—'}</div>
               </div>
-              <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{a.paper_name}</p>
+              <p style={{ fontSize: '0.8rem', fontWeight: 700 }}>{a.paper_name}</p>
               <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{a.attended} / {a.total_classes} classes</p>
               <span className={`badge ${!hasLectures ? 'badge-info' : (pct >= 75 ? 'badge-success' : 'badge-danger')}`} style={{ marginTop: 8 }}>
                 {!hasLectures ? 'No Lectures yet' : (pct >= 75 ? 'On Track' : 'At Risk')}
@@ -195,10 +222,11 @@ export default function StudentDashboard() {
       </div>
 
       {/* Predictions */}
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
         <HiOutlineCalculator size={18} style={{ color: 'var(--accent-amber)' }} /> Overall Predictions
       </h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+      <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginBottom: 14 }}>Combined projection based on all enrolled papers</p>
+      <div className="student-pred-grid">
         {overallPrediction ? (
           <div className="glass-card" style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
