@@ -49,6 +49,9 @@ backend/uploads/
 uploads/
 instance/
 backend/dataset/
+backend/trainer/*.keras
+backend/trainer/*.h5
+!backend/trainer/.gitkeep
 
 # Local environment files
 .env

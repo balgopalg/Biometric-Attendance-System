@@ -67,6 +67,7 @@ from app.models.user import (
 from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, normalize_embedding
 from app.services.capture_upload import capture_faces_for_user, save_student_upload, save_cropped_face_dataset
+from utilities.train_model import train_and_save_face_model
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
 
@@ -79,6 +80,8 @@ _ELIGIBILITY_CACHE_TTL_SECONDS = 20
 _QUEUE_CLIENT = None
 _QUEUE_CLIENT_LOCK = Lock()
 _QUEUE_UNAVAILABLE_LOGGED = False
+class _JobCancelledError(Exception):
+    """Raised when a background job cancellation request is detected."""
 
 
 def _utcnow():
@@ -119,6 +122,42 @@ def _clear_query_cache():
         _QUERY_CACHE.clear()
 
 
+def _update_training_job_progress(
+    job_id,
+    *,
+    total_faces=None,
+    processed_faces=None,
+    trained_faces=None,
+    failed_faces=None,
+    stage=None,
+    message=None,
+):
+    updates = {}
+    if total_faces is not None:
+        updates["training_total_faces"] = max(0, _to_int(total_faces, 0))
+    if processed_faces is not None:
+        updates["training_processed_faces"] = max(0, _to_int(processed_faces, 0))
+    if trained_faces is not None:
+        updates["training_trained_faces"] = max(0, _to_int(trained_faces, 0))
+    if failed_faces is not None:
+        updates["training_failed_faces"] = max(0, _to_int(failed_faces, 0))
+    if stage is not None:
+        updates["training_stage"] = _as_text(stage)
+    if message is not None:
+        updates["training_message"] = _as_text(message)
+
+    current_job = _get_background_job(job_id) or {}
+    total = updates.get("training_total_faces", _to_int(current_job.get("training_total_faces"), 0))
+    processed = updates.get("training_processed_faces", _to_int(current_job.get("training_processed_faces"), 0))
+
+    if total > 0:
+        updates["training_progress_percent"] = round((processed / total) * 100, 2)
+    else:
+        updates["training_progress_percent"] = 0
+
+    _update_background_job(job_id, **updates)
+
+
 def _create_background_job(job_type, payload=None):
     job_id = str(uuid4())
     now = _utcnow()
@@ -134,6 +173,15 @@ def _create_background_job(job_type, payload=None):
             "attempts": 0,
             "max_attempts": max_attempts,
             "payload": payload or {},
+            "training_total_faces": 0,
+            "training_processed_faces": 0,
+            "training_trained_faces": 0,
+            "training_failed_faces": 0,
+            "training_stage": "queued",
+            "training_message": "Queued",
+            "training_progress_percent": 0,
+            "cancel_requested": False,
+            "cancelled_at": None,
         }
     )
     return job_id
@@ -149,6 +197,16 @@ def _update_background_job(job_id, **updates):
 
 def _get_background_job(job_id):
     return get_collection("attendance", "background_jobs").find_one({"job_id": job_id})
+
+def _is_job_cancel_requested(job_id):
+    job = _get_background_job(job_id)
+    if not job:
+        return False
+    return bool(job.get("cancel_requested", False))
+
+def _raise_if_job_cancelled(job_id):
+    if job_id and _is_job_cancel_requested(job_id):
+        raise _JobCancelledError("Job cancelled by user")
 
 
 def _get_queue_names():
@@ -292,15 +350,21 @@ def _schedule_local_retry(job_id, delay_seconds):
 def _execute_background_job(job):
     job_type = _as_text(job.get("job_type"))
     payload = job.get("payload") or {}
+    job_id = _as_text(job.get("job_id"))
+
+    if job_type == "train_face_from_dataset":
+        actor_id = _as_text(payload.get("actor_id"))
+        user_id = _as_text(payload.get("user_id"))
+        return _train_single_face_job(actor_id, user_id, job_id=job_id)
 
     if job_type == "bulk_train_face":
         actor_id = _as_text(payload.get("actor_id"))
         student_ids = payload.get("student_ids") or []
-        return _train_bulk_faces_job(actor_id, student_ids)
+        return _train_bulk_faces_job(actor_id, student_ids, job_id=job_id)
 
     if job_type == "rebuild_all_face_embeddings":
         actor_id = _as_text(payload.get("actor_id"))
-        return _rebuild_all_faces_job(actor_id)
+        return _rebuild_all_faces_job(actor_id, job_id=job_id)
 
     raise ValueError(f"Unsupported background job type: {job_type}")
 
@@ -311,8 +375,19 @@ def process_background_job(job_id):
         return {"status": "missing"}
 
     status = _as_text(job.get("status")).lower()
-    if status in {"completed", "dead_letter"}:
+    if status in {"completed", "dead_letter", "cancelled"}:
         return {"status": "skipped", "reason": status}
+
+    if bool(job.get("cancel_requested", False)):
+        _update_background_job(
+            job_id,
+            status="cancelled",
+            training_stage="cancelled",
+            training_message="Cancelled by user",
+            finished_at=_utcnow(),
+            cancelled_at=_utcnow(),
+        )
+        return {"status": "cancelled"}
 
     max_attempts = max(1, _to_int(job.get("max_attempts"), 3))
     attempts = max(0, _to_int(job.get("attempts"), 0))
@@ -324,18 +399,34 @@ def process_background_job(job_id):
         attempts=current_attempt,
         started_at=job.get("started_at") or _utcnow(),
         next_attempt_at=None,
+        training_stage="running",
     )
     try:
+        _raise_if_job_cancelled(job_id)
         result = _execute_background_job(job)
         _update_background_job(
             job_id,
             status="completed",
+            training_stage="completed",
+            training_message="Training complete",
+            training_progress_percent=100,
             result=result,
             error=None,
             finished_at=_utcnow(),
         )
         _clear_query_cache()
         return {"status": "completed", "result": result}
+    except _JobCancelledError:
+        _update_background_job(
+            job_id,
+            status="cancelled",
+            training_stage="cancelled",
+            training_message="Cancelled by user",
+            finished_at=_utcnow(),
+            cancelled_at=_utcnow(),
+            error=None,
+        )
+        return {"status": "cancelled"}
     except Exception as exc:
         current_app.logger.exception("Background job %s failed", job_id)
         error_text = str(exc)
@@ -718,6 +809,22 @@ def _train_embeddings_from_dataset_for_user(user_id):
         "trained_embeddings": len(embeddings),
         "skipped_images": skipped,
     }
+
+
+def _refresh_face_trainer_artifact():
+    """Rebuild the showcase .h5 trainer from the current dataset tree."""
+    try:
+        return train_and_save_face_model(
+            dataset_root="dataset",
+            trainer_dir="trainer",
+            model_filename="face_trainer.keras",
+        )
+    except Exception as exc:
+        current_app.logger.exception("Face trainer export failed")
+        return {
+            "model_path": None,
+            "error": str(exc),
+        }
 
 
 def _resolve_student_identity(student_identifier):
@@ -2109,8 +2216,43 @@ def upload_student_photo(user):
     }), 201
 
 
-def _train_single_face_job(actor_id, user_id):
+def _train_single_face_job(actor_id, user_id, job_id=None):
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message="Training 1 of 1 face",
+        )
+
     train_result = _train_embeddings_from_dataset_for_user(user_id)
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=1,
+            trained_faces=1,
+            failed_faces=0,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=1,
+            trained_faces=1,
+            failed_faces=0,
+            stage="completed",
+            message="Training complete",
+        )
     log_action(
         "TRAIN_FACE_FROM_DATASET",
         actor_id,
@@ -2118,7 +2260,8 @@ def _train_single_face_job(actor_id, user_id):
         details=(
             f"dataset={train_result['dataset_dir']}, "
             f"trained={train_result['trained_embeddings']}, "
-            f"skipped={train_result['skipped_images']}"
+            f"skipped={train_result['skipped_images']}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
         ),
     )
     return {
@@ -2126,18 +2269,42 @@ def _train_single_face_job(actor_id, user_id):
         "trained_embeddings": train_result["trained_embeddings"],
         "skipped_images": train_result["skipped_images"],
         "dataset_dir": train_result["dataset_dir"],
+        "trainer": trainer_result,
     }
 
 
-def _train_bulk_faces_job(actor_id, student_ids):
+def _train_bulk_faces_job(actor_id, student_ids, job_id=None):
     items = []
     total_trained_embeddings = 0
     success_count = 0
+    failure_count = 0
 
-    for sid in student_ids:
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(student_ids),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message=f"Training 0 of {len(student_ids)} faces",
+        )
+
+    for index, sid in enumerate(student_ids, start=1):
+        _raise_if_job_cancelled(job_id)
         user_id, _ = _resolve_student_identity(sid)
         if not user_id:
             items.append({"student_id": sid, "success": False, "error": "Student not found"})
+            failure_count += 1
+            if job_id:
+                _update_training_job_progress(
+                    job_id,
+                    processed_faces=index,
+                    trained_faces=success_count,
+                    failed_faces=failure_count,
+                    stage="training",
+                    message=f"Training {success_count} of {len(student_ids)} faces",
+                )
             continue
 
         try:
@@ -2155,14 +2322,38 @@ def _train_bulk_faces_job(actor_id, student_ids):
             )
         except ValueError as exc:
             items.append({"student_id": _as_text(user_id), "success": False, "error": str(exc)})
+            failure_count += 1
 
-    failure_count = len(student_ids) - success_count
+        if job_id:
+            _update_training_job_progress(
+                job_id,
+                processed_faces=index,
+                trained_faces=success_count,
+                failed_faces=failure_count,
+                stage="training",
+                message=f"Training {success_count} of {len(student_ids)} faces",
+            )
+
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(student_ids),
+            processed_faces=len(student_ids),
+            trained_faces=success_count,
+            failed_faces=failure_count,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
     log_action(
         "BULK_TRAIN_FACE_FROM_DATASET",
         actor_id,
         details=(
             f"requested={len(student_ids)}, success={success_count}, "
-            f"failed={failure_count}, trained_embeddings={total_trained_embeddings}"
+            f"failed={failure_count}, trained_embeddings={total_trained_embeddings}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
         ),
     )
     return {
@@ -2172,10 +2363,11 @@ def _train_bulk_faces_job(actor_id, student_ids):
         "failure_count": failure_count,
         "total_trained_embeddings": total_trained_embeddings,
         "items": items,
+        "trainer": trainer_result,
     }
 
 
-def _rebuild_all_faces_job(actor_id):
+def _rebuild_all_faces_job(actor_id, job_id=None):
     profiles = get_all_profiles(["user_id"])
     if not profiles:
         return {"error": "No student profiles found"}
@@ -2185,11 +2377,32 @@ def _rebuild_all_faces_job(actor_id):
     failure_count = 0
     total_trained_embeddings = 0
 
-    for profile in profiles:
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(profiles),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message=f"Training 0 of {len(profiles)} faces",
+        )
+
+    for index, profile in enumerate(profiles, start=1):
+        _raise_if_job_cancelled(job_id)
         user_id = _as_text(profile.get("user_id"))
         if not user_id:
             failure_count += 1
             items.append({"student_id": None, "success": False, "error": "Missing user_id"})
+            if job_id:
+                _update_training_job_progress(
+                    job_id,
+                    processed_faces=index,
+                    trained_faces=success_count,
+                    failed_faces=failure_count,
+                    stage="training",
+                    message=f"Training {success_count} of {len(profiles)} faces",
+                )
             continue
 
         try:
@@ -2209,12 +2422,36 @@ def _rebuild_all_faces_job(actor_id):
             failure_count += 1
             items.append({"student_id": user_id, "success": False, "error": str(exc)})
 
+        if job_id:
+            _update_training_job_progress(
+                job_id,
+                processed_faces=index,
+                trained_faces=success_count,
+                failed_faces=failure_count,
+                stage="training",
+                message=f"Training {success_count} of {len(profiles)} faces",
+            )
+
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(profiles),
+            processed_faces=len(profiles),
+            trained_faces=success_count,
+            failed_faces=failure_count,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
     log_action(
         "REBUILD_ALL_FACE_EMBEDDINGS",
         actor_id,
         details=(
             f"requested={len(profiles)}, success={success_count}, failure={failure_count}, "
-            f"trained_embeddings={total_trained_embeddings}"
+            f"trained_embeddings={total_trained_embeddings}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
         ),
     )
 
@@ -2225,6 +2462,7 @@ def _rebuild_all_faces_job(actor_id):
         "failure_count": failure_count,
         "total_trained_embeddings": total_trained_embeddings,
         "items": items,
+        "trainer": trainer_result,
     }
 
 
@@ -2237,6 +2475,34 @@ def train_face_from_dataset(user, sid):
     user_id, _ = _resolve_student_identity(sid)
     if not user_id:
         return jsonify({"error": "Student not found"}), 404
+
+    d = request.get_json(silent=True) or {}
+    async_requested = _to_bool(d.get("async", False))
+
+    if async_requested:
+        job_id = _launch_background_job(
+            current_app._get_current_object(),
+            "train_face_from_dataset",
+            {
+                "actor_id": str(user["_id"]),
+                "user_id": str(user_id),
+            },
+        )
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="queued",
+            message="Queued",
+        )
+        return jsonify({
+            "message": "Face training queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+            "requested_count": 1,
+        }), 202
 
     try:
         train_result = _train_single_face_job(str(user["_id"]), user_id)
@@ -2273,10 +2539,20 @@ def bulk_train_face_from_dataset(user):
                 "student_ids": student_ids,
             },
         )
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(student_ids),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="queued",
+            message="Queued",
+        )
         return jsonify({
             "message": "Bulk training queued",
             "job_id": job_id,
             "status_url": f"/api/admin/jobs/{job_id}",
+            "requested_count": len(student_ids),
         }), 202
 
     result = _train_bulk_faces_job(str(user["_id"]), student_ids)
@@ -2297,10 +2573,21 @@ def rebuild_all_face_embeddings(user):
             "rebuild_all_face_embeddings",
             {"actor_id": str(user["_id"])},
         )
+        profiles = get_all_profiles(["user_id"])
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(profiles),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="queued",
+            message="Queued",
+        )
         return jsonify({
             "message": "Face embeddings rebuild queued",
             "job_id": job_id,
             "status_url": f"/api/admin/jobs/{job_id}",
+            "requested_count": len(profiles),
         }), 202
 
     result = _rebuild_all_faces_job(str(user["_id"]))
@@ -2317,6 +2604,50 @@ def get_job_status(user, job_id):
     if not job:
         return jsonify({"error": "Job not found"}), 404
     return jsonify(sanitise_mongo_doc(job))
+
+@admin_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
+@role_required("admin")
+def cancel_background_job(user, job_id):
+    job = _get_background_job(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    status = _as_text(job.get("status")).lower()
+    if status in {"completed", "dead_letter", "cancelled"}:
+        return jsonify({"error": f"Cannot cancel job in '{status}' state"}), 400
+
+    now = _utcnow()
+    if status == "queued":
+        _update_background_job(
+            job_id,
+            status="cancelled",
+            cancel_requested=True,
+            cancelled_at=now,
+            finished_at=now,
+            training_stage="cancelled",
+            training_message="Cancelled by user",
+        )
+    else:
+        _update_background_job(
+            job_id,
+            cancel_requested=True,
+            training_stage="cancelling",
+            training_message="Cancellation requested",
+        )
+
+    log_action(
+        "CANCEL_BACKGROUND_JOB",
+        str(user["_id"]),
+        details=f"job_id={job_id}, previous_status={status}",
+    )
+
+    updated = _get_background_job(job_id)
+    return jsonify(
+        {
+            "message": "Cancellation requested",
+            "job": sanitise_mongo_doc(updated) if updated else {"job_id": job_id},
+        }
+    ), 202
 
 
 @admin_bp.route("/jobs/<job_id>/replay", methods=["POST"])

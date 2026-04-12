@@ -1,10 +1,11 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import api from '../../api/axios';
 import useAdminPreference from '../../hooks/useAdminPreference';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
 import FaceEnrollmentModal from '../../components/admin/FaceEnrollmentModal';
+import TrainingProgressPanel from '../../components/admin/TrainingProgressPanel';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import Pagination from '../../components/ui/Pagination';
 import toast, { Toaster } from 'react-hot-toast';
@@ -68,11 +69,16 @@ export default function ManageStudents() {
   const [trainingStudentId, setTrainingStudentId] = useState('');
   const [bulkTraining, setBulkTraining] = useState(false);
   const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
+  const [trainingJob, setTrainingJob] = useState(null);
+  const [trainingJobUrl, setTrainingJobUrl] = useState('');
+  const [trainingSyncErrorShown, setTrainingSyncErrorShown] = useState(false);
+  const [trainingCancelPending, setTrainingCancelPending] = useState(false);
   const [paperOptions, setPaperOptions] = useState([]);
   const [selectedPaperIds, setSelectedPaperIds] = useState([]);
   const [baseAssignedPaperIds, setBaseAssignedPaperIds] = useState([]);
   const [loadingStudentPapers, setLoadingStudentPapers] = useState(false);
   const [savingStudentPapers, setSavingStudentPapers] = useState(false);
+  const fetchStudentsRef = useRef(null);
 
   const fetchMetadata = () => {
     api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
@@ -240,6 +246,65 @@ export default function ManageStudents() {
     [bulkStudents]
   );
 
+
+  useEffect(() => {
+    fetchStudentsRef.current = fetchStudents;
+  });
+
+  useEffect(() => {
+    if (!trainingJobUrl) return undefined;
+
+    let cancelled = false;
+    let intervalId = null;
+    let hideTimer = null;
+
+    const syncTrainingJob = async () => {
+      try {
+        const res = await api.get(trainingJobUrl);
+        if (cancelled) return;
+
+        const job = res.data || {};
+        setTrainingJob(job);
+
+        const status = String(job.status || '').toLowerCase();
+        if (status === 'completed' || status === 'dead_letter' || status === 'cancelled') {
+          if (intervalId) window.clearInterval(intervalId);
+          setTrainingJobUrl('');
+
+          if (status === 'completed') {
+            if (fetchStudentsRef.current) {
+              fetchStudentsRef.current(1);
+            }
+          } else if (status === 'cancelled') {
+            toast('Face training cancelled');
+          } else if (!trainingSyncErrorShown) {
+            toast.error(job?.error || 'Face training job failed');
+            setTrainingSyncErrorShown(true);
+          }
+
+          hideTimer = window.setTimeout(() => {
+            if (!cancelled) {
+              setTrainingJob(null);
+            }
+          }, 2200);
+        }
+      } catch (err) {
+        if (!trainingSyncErrorShown) {
+          toast.error('Unable to sync training progress right now');
+          setTrainingSyncErrorShown(true);
+        }
+      }
+    };
+
+    syncTrainingJob();
+    intervalId = window.setInterval(syncTrainingJob, 1000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) window.clearInterval(intervalId);
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+  }, [trainingJobUrl, trainingSyncErrorShown]);
   useEffect(() => {
     const visibleIds = new Set(filtered.map((s) => s.user_id || s._id));
     setSelectedStudentIds((prev) => prev.filter((id) => visibleIds.has(id)));
@@ -436,6 +501,68 @@ export default function ManageStudents() {
     fetchStudents(1);
   };
 
+  const normalizeJobStatusUrl = (rawStatusUrl) => {
+    const raw = String(rawStatusUrl || '').trim();
+    if (!raw) return '';
+
+    // Axios client already has baseURL '/api'. If backend returns '/api/...',
+    // convert it to '/...' to avoid '/api/api/...' requests.
+    if (raw.startsWith('/api/')) {
+      return raw.slice(4);
+    }
+    if (raw.startsWith('/admin/')) {
+      return raw;
+    }
+
+    try {
+      const parsed = new URL(raw, window.location.origin);
+      const path = parsed.pathname || '';
+      if (path.startsWith('/api/')) return path.slice(4);
+      return path;
+    } catch {
+      return raw;
+    }
+  };
+
+  const startTrainingProgress = (response, totalFaces) => {
+    const statusUrl = normalizeJobStatusUrl(response.data?.status_url);
+    if (!statusUrl) return;
+
+    setTrainingSyncErrorShown(false);
+    setTrainingJob({
+      job_id: response.data?.job_id,
+      status: 'queued',
+      training_total_faces: Number(response.data?.requested_count || totalFaces || 0),
+      training_processed_faces: 0,
+      training_trained_faces: 0,
+      training_failed_faces: 0,
+      training_stage: 'queued',
+      training_message: response.data?.message || 'Queued',
+      training_progress_percent: 0,
+    });
+    setTrainingCancelPending(false);
+    setTrainingJobUrl(statusUrl);
+  };
+
+  const handleCancelTrainingJob = async () => {
+    const jobId = trainingJob?.job_id;
+    if (!jobId || trainingCancelPending) return;
+
+    try {
+      setTrainingCancelPending(true);
+      const res = await api.post(`/admin/jobs/${jobId}/cancel`);
+      const updated = res.data?.job;
+      if (updated) {
+        setTrainingJob(updated);
+      }
+      toast.success('Cancellation requested');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to cancel training job');
+    } finally {
+      setTrainingCancelPending(false);
+    }
+  };
+
   const handleTrainFace = async (student) => {
     const sid = student.user_id || student._id;
     if (!sid) {
@@ -448,7 +575,13 @@ export default function ManageStudents() {
 
     try {
       setTrainingStudentId(sid);
-      const res = await api.post(`/admin/students/${sid}/train-face`);
+      const res = await api.post(`/admin/students/${sid}/train-face`, { async: true });
+      if (res.status === 202 || res.data?.job_id) {
+        startTrainingProgress(res, 1);
+        toast.success('Face training started');
+        return;
+      }
+
       const trained = Number(res.data?.trained_embeddings || 0);
       const skipped = Number(res.data?.skipped_images || 0);
       toast.success(`Training done. Embeddings: ${trained}, skipped images: ${skipped}`);
@@ -483,6 +616,7 @@ export default function ManageStudents() {
       });
 
       if (res.status === 202 || res.data?.job_id) {
+        startTrainingProgress(res, selectedStudentIds.length);
         toast.success(`Bulk training queued. Job: ${res.data?.job_id}`);
         return;
       }
@@ -519,6 +653,7 @@ export default function ManageStudents() {
       const res = await api.post('/admin/students/train-face/rebuild-all', { async: true });
 
       if (res.status === 202 || res.data?.job_id) {
+        startTrainingProgress(res, Number(res.data?.requested_count || 0));
         toast.success(`Rebuild queued. Job: ${res.data?.job_id}`);
         return;
       }
@@ -650,6 +785,11 @@ export default function ManageStudents() {
   return (
     <motion.div className="admin-page" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+      <TrainingProgressPanel
+        job={trainingJob}
+        onCancel={handleCancelTrainingJob}
+        cancelling={trainingCancelPending}
+      />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
