@@ -52,6 +52,6 @@ This policy defines how the system handles production incidents and how recovery
 - Must include root cause, contributing factors, corrective actions, and owner with due date
 
 ## Operational Links
-- Command runbook: docs/CLI_COMMAND_RUNBOOK.md
-- System operations manual: docs/SYSTEM_OPERATIONS_MANUAL.md
-- Data lifecycle and retention: backend/DATA_LIFECYCLE.md
+- Command runbook: /docs/operations/CLI_COMMAND_RUNBOOK.md
+- System operations manual: /docs/operations/SYSTEM_OPERATIONS_MANUAL.md
+- Data lifecycle and retention: /docs/backend/DATA_LIFECYCLE.md

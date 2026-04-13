@@ -7,14 +7,10 @@ import Modal from '../../components/ui/Modal';
 import StatePanel from '../../components/ui/StatePanel';
 import PinCommitModal from './PinCommitModal';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { formatDateTimeIndia, getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
 
 function formatDateTime(value) {
-  if (!value) return 'N/A';
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return 'N/A';
-  }
+  return formatDateTimeIndia(value, { dateStyle: 'short', timeStyle: 'medium' });
 }
 
 export default function LecturerProgress() {
@@ -41,7 +37,7 @@ export default function LecturerProgress() {
     if (filters.paper_id) params.paper_id = filters.paper_id;
     if (filters.from_date) params.from_date = filters.from_date;
     if (filters.to_date) params.to_date = filters.to_date;
-    params.tz_offset_minutes = new Date().getTimezoneOffset();
+    params.tz_offset_minutes = getIndiaTimezoneOffsetMinutes();
 
     api.get('/lecturer/progress', { params })
       .then((r) => setData(r.data || { summary: {}, papers: [], per_paper: [], sessions: [] }))

@@ -2,7 +2,9 @@
 
 from flask import Blueprint, request, jsonify, current_app
 
+from app.security.rate_limiter import limiter
 from app.utils.helpers import decode_base64_image
+from app.utils.auth_decorators import role_required
 from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, find_best_match
 from app.models.enrollment import get_all_profiles
@@ -12,7 +14,9 @@ recognition_bp = Blueprint("recognition", __name__)
 
 
 @recognition_bp.route("/detect", methods=["POST"])
-def detect_faces():
+@role_required("lecturer", "admin")
+@limiter.limit("30 per minute")
+def detect_faces(user):
     """Accept a base64 frame → return face bounding boxes."""
     d = request.get_json(silent=True) or {}
     frame = d.get("frame")
@@ -35,7 +39,9 @@ def detect_faces():
 
 
 @recognition_bp.route("/identify", methods=["POST"])
-def identify_faces():
+@role_required("lecturer", "admin")
+@limiter.limit("20 per minute")
+def identify_faces(user):
     """Full pipeline: frame → detect → embed → match → return student IDs."""
     d = request.get_json(silent=True) or {}
     frame = d.get("frame")

@@ -3,44 +3,99 @@ import api from '../api/axios';
 import toast from 'react-hot-toast';
 
 const AuthContext = createContext(null);
+const USER_STORAGE_KEY = 'user';
+
+function getUserStorage() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readUserFromStorage() {
+  const storage = getUserStorage();
+  if (!storage) return null;
+
+  const saved = storage.getItem(USER_STORAGE_KEY);
+  if (!saved) return null;
+
+  try {
+    return JSON.parse(saved);
+  } catch {
+    storage.removeItem(USER_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeUserToStorage(userData) {
+  const storage = getUserStorage();
+  if (!storage) return;
+  storage.setItem(USER_STORAGE_KEY, JSON.stringify(userData));
+}
+
+function clearUserStorage() {
+  const storage = getUserStorage();
+  if (!storage) return;
+  storage.removeItem(USER_STORAGE_KEY);
+}
+
+let meRequestPromise = null;
+
+function fetchCurrentUserOnce() {
+  if (meRequestPromise) return meRequestPromise;
+
+  meRequestPromise = api.get('/auth/me')
+    .then((res) => res.data)
+    .catch(() => null)
+    .finally(() => {
+      meRequestPromise = null;
+    });
+
+  return meRequestPromise;
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user');
-    if (!saved) return null;
-    try {
-      return JSON.parse(saved);
-    } catch {
-      localStorage.removeItem('user');
-      return null;
-    }
+    return readUserFromStorage();
   });
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
     toast.remove();
     api.post('/auth/logout').catch(() => {});
-    localStorage.removeItem('user');
+    clearUserStorage();
     setUser(null);
   }, []);
 
   useEffect(() => {
-    api.get('/auth/me')
-      .then((res) => {
-        setUser(res.data);
-        localStorage.setItem('user', JSON.stringify(res.data));
-      })
-      .catch(() => {
-        localStorage.removeItem('user');
+    let active = true;
+
+    fetchCurrentUserOnce()
+      .then((currentUser) => {
+        if (!active) return;
+        if (currentUser) {
+          setUser(currentUser);
+          writeUserToStorage(currentUser);
+          return;
+        }
+
+        clearUserStorage();
         setUser(null);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
     const { user: userData } = res.data;
-    localStorage.setItem('user', JSON.stringify(userData));
+    writeUserToStorage(userData);
     setUser(userData);
     return userData;
   };
@@ -49,7 +104,7 @@ export function AuthProvider({ children }) {
     setUser((prev) => {
       if (!prev) return prev;
       const updated = { ...prev, must_change_password: false };
-      localStorage.setItem('user', JSON.stringify(updated));
+      writeUserToStorage(updated);
       return updated;
     });
   };

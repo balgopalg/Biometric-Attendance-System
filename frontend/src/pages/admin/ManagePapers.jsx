@@ -6,7 +6,7 @@ import Modal from '../../components/ui/Modal';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil } from 'react-icons/hi';
 
@@ -281,7 +281,6 @@ export default function ManagePapers() {
   if (!loadingPapers && papersError) {
     return (
       <div className="admin-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <StatePanel variant="error" title="Unable to load subjects" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
       </div>
     );
@@ -289,7 +288,6 @@ export default function ManagePapers() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>

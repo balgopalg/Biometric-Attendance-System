@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/axios';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
@@ -302,7 +302,6 @@ export default function ExamEligibility() {
   if (!loading && eligibilityError) {
     return (
       <div className="admin-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <StatePanel variant="error" title="Unable to load eligibility records" description={eligibilityError} actionLabel="Retry" onAction={() => fetchEligibility()} compact />
       </div>
     );
@@ -310,7 +309,6 @@ export default function ExamEligibility() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>

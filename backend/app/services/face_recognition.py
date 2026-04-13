@@ -1,10 +1,33 @@
 """Face recognition service using FaceNet embeddings + cosine similarity."""
 
+import os
+import warnings
+
 import numpy as np
+from flask import current_app, has_app_context
+
+from app.models.enrollment import decode_face_embedding
 
 # We use keras-facenet which provides a ready-to-use InceptionResNetV1 model.
 # It will be lazily loaded on first call to avoid slow startup.
 _model = None
+_model_is_stub = False
+
+
+def _current_env():
+    if has_app_context():
+        try:
+            env = current_app.config.get("ENV")
+            if env:
+                return str(env).strip().lower()
+        except Exception:
+            pass
+
+    return (os.getenv("FLASK_ENV") or os.getenv("ENV") or "").strip().lower()
+
+
+def is_model_stub() -> bool:
+    return _model_is_stub
 
 
 def normalize_embedding(embedding: list) -> list:
@@ -17,17 +40,22 @@ def normalize_embedding(embedding: list) -> list:
 
 
 def _load_model():
-    global _model
+    global _model, _model_is_stub
     if _model is not None:
         return _model
 
     try:
         from keras_facenet import FaceNet
         _model = FaceNet()
-    except Exception:
+        _model_is_stub = False
+    except Exception as exc:
         # Fallback: if keras-facenet is unavailable, we create a stub
         # that generates random embeddings (useful for UI development).
-        import warnings
+        env = _current_env()
+        if env not in {"development", "dev", "local", "testing", "test"}:
+            raise RuntimeError(
+                f"CRITICAL: FaceNet model failed to load in {env or 'unknown'} environment: {exc}"
+            ) from exc
         warnings.warn(
             "keras-facenet not available — using RANDOM embeddings (dev mode only)."
         )
@@ -37,6 +65,7 @@ def _load_model():
                 return [np.random.randn(512).tolist() for _ in images]
 
         _model = StubModel()
+        _model_is_stub = True
 
     return _model
 
@@ -77,7 +106,10 @@ def prepare_profile_candidates(stored_profiles: list) -> list:
     for profile in stored_profiles:
         vectors = []
         for emb in profile.get("face_embeddings", []):
-            vectors.append(np.asarray(normalize_embedding(emb), dtype=np.float32))
+            decoded = decode_face_embedding(emb)
+            if decoded is None:
+                continue
+            vectors.append(np.asarray(normalize_embedding(decoded), dtype=np.float32))
 
         if not vectors:
             continue
@@ -146,7 +178,10 @@ def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6)
 
     for profile in stored_profiles:
         for stored_emb in profile.get("face_embeddings", []):
-            sim = compare_embeddings(normalized_query, stored_emb)
+            decoded = decode_face_embedding(stored_emb)
+            if decoded is None:
+                continue
+            sim = compare_embeddings(normalized_query, decoded)
             if sim > best_score:
                 best_score = sim
                 best_match = profile

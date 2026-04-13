@@ -86,7 +86,7 @@ frontend/tests/
     ├── .gitkeep       # Git tracking
     └── project-flows.spec.js  # 3 e2e scenarios, ~740 lines
 
-TESTING.md            # Main testing documentation (this root-level guide)
+/docs/testing/TESTING.md            # Main testing documentation (this root-level guide)
 ```
 
 ---
@@ -113,9 +113,9 @@ TESTING.md            # Main testing documentation (this root-level guide)
 
 | File | Purpose |
 |------|---------|
-| **TESTING.md** | Top-level guide, architecture, CI/CD setup, extending tests |
-| **backend/tests/README.md** | Backend-specific setup, fixtures, dependencies |
-| **frontend/tests/README.md** | Frontend-specific setup, selectors, Playwright config |
+| **/docs/testing/TESTING.md** | Top-level guide, architecture, CI/CD setup, extending tests |
+| **/docs/testing/BACKEND_TESTS_README.md** | Backend-specific setup, fixtures, dependencies |
+| **/docs/testing/FRONTEND_TESTS_README.md** | Frontend-specific setup, selectors, Playwright config |
 
 ---
 

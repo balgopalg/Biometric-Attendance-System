@@ -4,7 +4,7 @@ import { formatCourseName } from '../../utils/courseDisplay';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
   HiOutlinePlus,
@@ -20,6 +20,32 @@ const EMPTY_FORM = { name: '', email: '' };
 const PAGE_SIZE = 10;
 
 const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
+
+const buildTempPassword = (length = 14) => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%^&*';
+  const all = `${upper}${lower}${digits}${symbols}`;
+
+  const cryptoObj = globalThis.crypto;
+  const randomIndex = (max) => {
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint32Array(1);
+      cryptoObj.getRandomValues(bytes);
+      return bytes[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  };
+  const pick = (chars) => chars[randomIndex(chars.length)];
+  const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  while (chars.length < length) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomIndex(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+};
 
 export default function ManageLecturers() {
   const [lecturers, setLecturers] = useState([]);
@@ -103,14 +129,15 @@ export default function ManageLecturers() {
 
   const handleAdd = async () => {
     try {
-      const res = await api.post('/admin/lecturers', { ...form, role: 'lecturer' });
+      const initialPassword = buildTempPassword();
+      const res = await api.post('/admin/lecturers', { ...form, role: 'lecturer', initial_password: initialPassword });
       const data = res.data;
       setShowAdd(false);
       setForm(EMPTY_FORM);
       setCreatedCreds({
         name: data.name,
         email: data.email,
-        temp_password: data.temp_password,
+        temp_password: initialPassword,
       });
       setShowCreds(true);
       fetchLecturers(page);
@@ -134,9 +161,10 @@ export default function ManageLecturers() {
     if (!window.confirm(`Reset password for ${name}?`)) return;
     try {
       const res = await api.post(`/admin/lecturers/${id}/reset-password`);
+      const tempPassword = res.data?.temp_password || '';
       setCreatedCreds({
         name,
-        temp_password: res.data.temp_password,
+        temp_password: tempPassword,
         isReset: true,
       });
       setShowCreds(true);
@@ -191,7 +219,6 @@ export default function ManageLecturers() {
   if (!loadingLecturers && lecturersError) {
     return (
       <div className="admin-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <StatePanel variant="error" title="Unable to load lecturers" description={lecturersError} actionLabel="Retry" onAction={() => fetchLecturers(page)} compact />
       </div>
     );
@@ -199,7 +226,6 @@ export default function ManageLecturers() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>

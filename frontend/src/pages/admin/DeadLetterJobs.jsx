@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
 import StatePanel from '../../components/ui/StatePanel';
+import { formatDateTimeIndia, getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
 
 const PER_PAGE = 20;
 
@@ -27,7 +28,7 @@ export default function DeadLetterJobs() {
   const fetchJobs = (nextPage = page) => {
     setLoading(true);
     setJobsError('');
-    const params = { page: nextPage, per_page: PER_PAGE, tz_offset_minutes: new Date().getTimezoneOffset() };
+    const params = { page: nextPage, per_page: PER_PAGE, tz_offset_minutes: getIndiaTimezoneOffsetMinutes() };
     if (filters.q) params.q = filters.q;
     if (filters.job_type) params.job_type = filters.job_type;
     if (filters.from) params.from = filters.from;
@@ -128,7 +129,7 @@ export default function DeadLetterJobs() {
         to: filters.to,
         sort_by: filters.sort_by,
         sort_dir: filters.sort_dir,
-        tz_offset_minutes: new Date().getTimezoneOffset(),
+        tz_offset_minutes: getIndiaTimezoneOffsetMinutes(),
         limit: 500,
       };
       const res = await api.post('/admin/jobs/dead-letter/replay-filtered', payload);
@@ -149,7 +150,7 @@ export default function DeadLetterJobs() {
     setLoadingEstimatedReplayCount(true);
 
     try {
-      const params = { page: 1, per_page: 5, tz_offset_minutes: new Date().getTimezoneOffset() };
+      const params = { page: 1, per_page: 5, tz_offset_minutes: getIndiaTimezoneOffsetMinutes() };
       if (filters.q) params.q = filters.q;
       if (filters.job_type) params.job_type = filters.job_type;
       if (filters.from) params.from = filters.from;
@@ -193,7 +194,6 @@ export default function DeadLetterJobs() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
         <div>
@@ -296,8 +296,8 @@ export default function DeadLetterJobs() {
             {items.map((job) => (
               <tr key={job.job_id}>
                 <td><input type="checkbox" checked={selected.includes(job.job_id)} onChange={() => toggleSelect(job.job_id)} /></td>
-                <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{job.updated_at ? new Date(job.updated_at).toLocaleString() : '—'}</td>
-                <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{job.dead_lettered_at ? new Date(job.dead_lettered_at).toLocaleString() : '—'}</td>
+                <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{formatDateTimeIndia(job.updated_at, { dateStyle: 'short', timeStyle: 'medium' })}</td>
+                <td style={{ whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{formatDateTimeIndia(job.dead_lettered_at, { dateStyle: 'short', timeStyle: 'medium' })}</td>
                 <td style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{job.job_id}</td>
                 <td style={{ fontSize: '0.8rem' }}>{job.job_type || '—'}</td>
                 <td style={{ fontSize: '0.8rem' }}>{Number(job.attempts || 0)}/{Number(job.max_attempts || 0)}</td>
@@ -340,7 +340,7 @@ export default function DeadLetterJobs() {
                   <span style={{ fontFamily: 'monospace', fontSize: '0.74rem' }}>{item.job_id}</span>
                   <span style={{ fontSize: '0.74rem' }}>{item.job_type || 'unknown'}</span>
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    {item.updated_at ? new Date(item.updated_at).toLocaleString() : '—'}
+                    {formatDateTimeIndia(item.updated_at, { dateStyle: 'short', timeStyle: 'medium' })}
                   </span>
                 </div>
               ))}

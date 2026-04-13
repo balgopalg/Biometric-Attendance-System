@@ -294,9 +294,9 @@ backend/
 │   └── utils/
 │       └── validation.py            # Input validation functions
 ├── verify_security.py               # Verification script
-└── .env.example                     # Security config template
+└── backend/.env.example             # Security config template
 
-SECURITY_HARDENING.md               # Comprehensive guide (this file)
+/docs/security/SECURITY_HARDENING.md               # Comprehensive guide (this file)
 ```
 
 ---

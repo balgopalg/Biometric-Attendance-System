@@ -5,7 +5,7 @@ import logging
 import sys
 import traceback
 from datetime import datetime
-from flask import request, g
+from flask import request, g, has_request_context
 from pythonjsonlogger import jsonlogger
 
 
@@ -21,10 +21,10 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
         log_record['logger'] = record.name
         
         # Add request context if available
-        if hasattr(g, 'request_id'):
+        if has_request_context() and hasattr(g, 'request_id'):
             log_record['request_id'] = g.request_id
         
-        if request:
+        if has_request_context():
             log_record['http'] = {
                 'method': request.method,
                 'path': request.path,
@@ -92,16 +92,23 @@ class StructuredLogger:
         self._log('critical', message, **kwargs)
 
 
-def configure_logging(app, log_level='INFO'):
-    """Configure structured JSON logging for Flask app."""
+def configure_logging(app, log_level='INFO', log_format='text'):
+    """Configure app logging with selectable text/json output."""
     
     # Remove default handlers
     app.logger.handlers.clear()
     
-    # Console handler with JSON formatter
+    # Console handler with selectable formatter
     console_handler = logging.StreamHandler(sys.stdout)
-    json_formatter = CustomJsonFormatter()
-    console_handler.setFormatter(json_formatter)
+    selected_format = str(log_format or 'text').strip().lower()
+    if selected_format == 'json':
+        formatter = CustomJsonFormatter()
+    else:
+        formatter = logging.Formatter(
+            '%(asctime)s %(levelname)s [%(name)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S',
+        )
+    console_handler.setFormatter(formatter)
     
     # Add request ID logging middleware
     @app.before_request
@@ -114,8 +121,8 @@ def configure_logging(app, log_level='INFO'):
     app.logger.addHandler(console_handler)
     app.logger.setLevel(logging.getLevelName(log_level))
     
-    # Disable default Flask logging
-    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    # Keep request logs visible in terminal for local/dev readability.
+    logging.getLogger('werkzeug').setLevel(logging.INFO)
     
     # Add correlationId/request_id to logs
     @app.after_request

@@ -54,19 +54,20 @@ class BruteForceProtector:
         
         # Get recent failed attempts
         recent_cutoff = now - timedelta(minutes=cls.ATTEMPT_WINDOW_MINUTES)
-        failed_count = collection.count_documents({
+        recent_query = {
             "email": email.lower(),
             "attempted_at": {"$gte": recent_cutoff}
-        })
+        }
+        failed_count = collection.count_documents(recent_query)
         
         if failed_count >= cls.LOCKOUT_THRESHOLD:
-            # Check if lockout period has expired
-            oldest_attempt = collection.find_one(
-                {"email": email.lower()},
+            # Base the lockout window on the active failure window, not stale records.
+            oldest_recent_attempt = collection.find_one(
+                recent_query,
                 sort=[("attempted_at", 1)]
             )
-            if oldest_attempt:
-                lockout_expiry = oldest_attempt["attempted_at"] + timedelta(
+            if oldest_recent_attempt:
+                lockout_expiry = oldest_recent_attempt["attempted_at"] + timedelta(
                     minutes=cls.LOCKOUT_DURATION_MINUTES
                 )
                 if now < lockout_expiry:

@@ -696,6 +696,6 @@ from app.observability.health import (
 
 ## Related Documentation
 
-- [SECURITY_HARDENING.md](SECURITY_HARDENING.md) - Security implementation
-- [TESTING.md](TESTING.md) - Test suite
-- [.env.example](.env.example) - Configuration template
+- [/docs/security/SECURITY_HARDENING.md](/docs/security/SECURITY_HARDENING.md) - Security implementation
+- [/docs/testing/TESTING.md](/docs/testing/TESTING.md) - Test suite
+- [backend/.env.example](/backend/.env.example) - Configuration template

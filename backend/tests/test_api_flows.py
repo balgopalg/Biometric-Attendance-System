@@ -528,6 +528,21 @@ class LecturerFlowTests(BaseApiFlowTestCase):
 
 
 class AdminFlowTests(BaseApiFlowTestCase):
+    def test_admin_face_enrollment_rejects_invalid_image(self):
+        self.login("admin@system.com", "admin123")
+
+        response = self.client.post(
+            "/api/admin/students/enroll",
+            json={
+                "user_id": self.seed["student_id"],
+                "photo": "data:image/png;base64,not-a-valid-image",
+            },
+            headers=self._csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.get_data(as_text=True))
+        self.assertIn("Invalid image format", response.get_json()["error"])
+
     def test_admin_stats_enrollment_matrix_export_and_rollback(self):
         self.login("admin@system.com", "admin123")
 

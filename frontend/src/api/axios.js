@@ -7,6 +7,14 @@ const api = axios.create({
 
 let isRedirectingOnUnauthorized = false;
 
+function getUserStorage() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 function getCookie(name) {
   const cookies = document.cookie ? document.cookie.split('; ') : [];
   for (const cookie of cookies) {
@@ -49,7 +57,10 @@ api.interceptors.response.use(
         requestUrl.includes('/auth/logout');
       const alreadyOnLogin = window.location.pathname === '/login';
 
-      localStorage.removeItem('user');
+      const storage = getUserStorage();
+      if (storage) {
+        storage.removeItem('user');
+      }
 
       // Avoid reload loops: /auth/me can naturally return 401 before login.
       if (!isAuthBootstrapCall && !alreadyOnLogin && !isRedirectingOnUnauthorized) {

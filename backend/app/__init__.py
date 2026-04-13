@@ -11,7 +11,7 @@ from .config import Config
 from .extensions import mongo, jwt, cors, get_collection
 
 
-def create_app(config_class=Config, seed_default_admin=True):
+def create_app(config_class=Config, seed_default_admin=False):
     app = Flask(__name__)
     app.config.from_object(config_class)
     app.config["APP_STARTED_AT"] = datetime.utcnow()
@@ -28,6 +28,15 @@ def create_app(config_class=Config, seed_default_admin=True):
     # Initialise extensions
     mongo.init_app(app)
     jwt.init_app(app)
+
+    @jwt.token_in_blocklist_loader
+    def _is_token_revoked(_jwt_header, jwt_payload):
+        try:
+            revoked = get_collection("auth", "revoked_jwts")
+            return revoked.find_one({"jti": jwt_payload.get("jti")}) is not None
+        except Exception:
+            return False
+
     cors.init_app(
         app,
         resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
@@ -38,6 +47,8 @@ def create_app(config_class=Config, seed_default_admin=True):
     if app.config.get("RATELIMIT_ENABLED", True):
         try:
             from .security.rate_limiter import limiter
+            app.config["RATELIMIT_STORAGE_URI"] = app.config.get("RATELIMIT_STORAGE_URL", "memory://")
+            app.config["RATELIMIT_HEADERS_ENABLED"] = True
             limiter.init_app(app)
         except Exception as exc:
             app.logger.warning("Rate limiter disabled: %s", exc)
@@ -49,7 +60,11 @@ def create_app(config_class=Config, seed_default_admin=True):
         from .observability.metrics import register_metrics_middleware
         from .observability.health import health_bp
 
-        configure_logging(app, log_level=app.config.get("LOGGING_LEVEL", "INFO"))
+        configure_logging(
+            app,
+            log_level=app.config.get("LOGGING_LEVEL", "INFO"),
+            log_format=app.config.get("LOGGING_FORMAT", "text"),
+        )
         register_error_handlers(app)
         register_metrics_middleware(app)
         app.register_blueprint(health_bp, url_prefix="/api/health")
@@ -62,6 +77,20 @@ def create_app(config_class=Config, seed_default_admin=True):
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=()")
+
+        csp = app.config.get("CONTENT_SECURITY_POLICY")
+        if csp:
+            response.headers.setdefault("Content-Security-Policy", csp)
+
+        is_secure_request = request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        if app.config.get("HSTS_ENABLED", False) and is_secure_request:
+            hsts = f"max-age={int(app.config.get('HSTS_MAX_AGE_SECONDS', 31536000))}"
+            if app.config.get("HSTS_INCLUDE_SUBDOMAINS", True):
+                hsts += "; includeSubDomains"
+            if app.config.get("HSTS_PRELOAD", False):
+                hsts += "; preload"
+            response.headers.setdefault("Strict-Transport-Security", hsts)
+
         return response
 
     @app.before_request
@@ -103,7 +132,7 @@ def create_app(config_class=Config, seed_default_admin=True):
         _bootstrap_isolated_databases(mongo, app.config)
         _ensure_indexes(mongo, app.config)
         _run_startup_health_checks(app)
-        if seed_default_admin:
+        if seed_default_admin and app.config.get("ENABLE_DEFAULT_ADMIN_SEED", False):
             _seed_admin(mongo)
 
     return app
@@ -129,6 +158,11 @@ def _validate_security_config(app):
         raise RuntimeError(
             "JWT_SECRET_KEY is weak. Set a strong value for non-local environments "
             "or enable STRICT_JWT_SECRET=1 to enforce this everywhere."
+        )
+
+    if env not in local_envs and not str(app.config.get("FACE_EMBEDDING_ENCRYPTION_KEY") or "").strip():
+        raise RuntimeError(
+            "FACE_EMBEDDING_ENCRYPTION_KEY is required for non-local environments to protect biometric templates."
         )
 
 
@@ -207,19 +241,36 @@ def _ensure_indexes(mongo, config):
     _create_index_safe(audits, [("timestamp", DESCENDING)], name="ix_audit_timestamp")
     _create_index_safe(audits, [("action", ASCENDING)], name="ix_audit_action")
 
+    failed_login_attempts = client[config["MONGO_DB_AUTH"]]["failed_login_attempts"]
+    _create_index_safe(failed_login_attempts, [("ttl", ASCENDING)], name="ix_failed_logins_ttl", expireAfterSeconds=0)
+
+    ip_rate_limits = client[config["MONGO_DB_AUTH"]]["ip_rate_limits"]
+    _create_index_safe(ip_rate_limits, [("ttl", ASCENDING)], name="ix_ip_rate_limits_ttl", expireAfterSeconds=0)
+
+    pin_failures = client[config["MONGO_DB_ATTENDANCE"]]["pin_failures"]
+    _create_index_safe(pin_failures, [("ttl", ASCENDING)], name="ix_pin_failures_ttl", expireAfterSeconds=0)
+
+    revoked_jwts = client[config["MONGO_DB_AUTH"]]["revoked_jwts"]
+    _create_index_safe(revoked_jwts, [("expires_at", ASCENDING)], name="ix_revoked_jwts_expires_at", expireAfterSeconds=0)
+
 
 def _seed_admin(mongo):
-    """Create a default admin account if none exists."""
+    """Create a default admin account only when explicit seed credentials are provided."""
     import bcrypt
+
+    admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "").strip().lower()
+    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
+    if not admin_email or not admin_password:
+        return
 
     users = get_collection("auth", "users")
     if users.count_documents({"role": "admin"}) == 0:
         users.insert_one(
             {
                 "name": "System Admin",
-                "email": "admin@system.com",
+                "email": admin_email,
                 "password_hash": bcrypt.hashpw(
-                    "admin123".encode(), bcrypt.gensalt()
+                    admin_password.encode(), bcrypt.gensalt()
                 ).decode(),
                 "role": "admin",
                 "department": "Administration",
@@ -246,6 +297,10 @@ def _run_startup_health_checks(app):
         (app.config["MONGO_DB_ATTENDANCE"], "attendance_logs"): {"uq_attendance_session_paper_student", "ix_attendance_timestamp", "ix_attendance_paper_student"},
         (app.config["MONGO_DB_ATTENDANCE"], "attendance_sessions"): {"uq_sessions_id", "ix_sessions_lecturer_created", "ix_sessions_rollback_until"},
         (app.config["MONGO_DB_ATTENDANCE"], "exam_eligibility_overrides"): {"uq_overrides_student_paper"},
+        (app.config["MONGO_DB_AUTH"], "failed_login_attempts"): {"ix_failed_logins_ttl"},
+        (app.config["MONGO_DB_AUTH"], "ip_rate_limits"): {"ix_ip_rate_limits_ttl"},
+        (app.config["MONGO_DB_ATTENDANCE"], "pin_failures"): {"ix_pin_failures_ttl"},
+        (app.config["MONGO_DB_AUTH"], "revoked_jwts"): {"ix_revoked_jwts_expires_at"},
     }
 
     missing = []

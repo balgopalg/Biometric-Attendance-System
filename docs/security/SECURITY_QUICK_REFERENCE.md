@@ -42,9 +42,9 @@
 | `app/security/brute_force_protection.py` | Login lockout, PIN protection, IP tracking |
 | `app/security/access_control.py` | RBAC decorators (@role_required, @permission_required) |
 | `app/utils/validation.py` | Input validation (email, password, PIN, role, etc.) |
-| `SECURITY_HARDENING.md` | Comprehensive security guide |
-| `SECURITY_IMPLEMENTATION_SUMMARY.md` | Implementation details |
-| `.env.example` | Environment variable template |
+| `/docs/security/SECURITY_HARDENING.md` | Comprehensive security guide |
+| `/docs/security/SECURITY_IMPLEMENTATION_SUMMARY.md` | Implementation details |
+| `backend/.env.example` | Backend environment variable template |
 | `verify_security.py` | Verification script to test all features |
 
 ---
@@ -61,7 +61,7 @@ pip install -r requirements.txt
 ### 2. Configure Environment
 ```bash
 # Copy template
-cp .env.example .env
+cp backend/.env.example backend/.env
 
 # Edit with production values
 # Set JWT_SECRET_KEY to 64-char random string

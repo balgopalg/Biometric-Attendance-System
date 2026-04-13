@@ -1,0 +1,2 @@
+{"_id": {"$oid": "69da6f26cd4bb4ef527e972b"}, "name": "MCA", "code": "MCA", "department": "Computer Science", "course_duration": 2, "status": "active", "created_at": {"$date": "2026-04-11T15:56:22.854Z"}}
+{"_id": {"$oid": "69dc1d22d39867aaabf554d5"}, "name": "MSC", "code": "MSC", "department": "CS", "course_duration": 2, "status": "active", "created_at": {"$date": "2026-04-12T22:30:58.809Z"}}

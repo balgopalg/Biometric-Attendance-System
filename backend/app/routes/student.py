@@ -1,6 +1,6 @@
 """Student dashboard routes — attendance summary, predictions, exam eligibility."""
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from flask import Blueprint, jsonify
 from bson import ObjectId
@@ -14,6 +14,29 @@ from app.models.course import get_course_by_id
 from app.models.attendance import count_attendance
 
 student_bp = Blueprint("student", __name__)
+
+_INDIA_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def _format_datetime_india(value, with_time=True):
+    if not value:
+        return "N/A"
+
+    dt = value
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return str(value)
+
+    if not isinstance(dt, datetime):
+        return str(value)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    local_dt = dt.astimezone(_INDIA_TZ)
+    return local_dt.strftime("%d/%m/%Y, %H:%M:%S") if with_time else local_dt.strftime("%d/%m/%Y")
 
 
 def _to_int(value, default=0):
@@ -147,12 +170,8 @@ def attendance_summary(user):
             attended += 1 if present else 0
 
             raw_date = session_doc.get("committed_at") or session_doc.get("last_updated_at")
-            if isinstance(raw_date, datetime):
-                date_label = raw_date.strftime("%d/%m/%Y")
-                date_time_label = raw_date.strftime("%d/%m/%Y, %H:%M:%S")
-            else:
-                date_label = str(raw_date) if raw_date else "N/A"
-                date_time_label = date_label
+            date_label = _format_datetime_india(raw_date, with_time=False)
+            date_time_label = _format_datetime_india(raw_date, with_time=True)
 
             class_rows.append({
                 "session_id": session_doc.get("session_id"),

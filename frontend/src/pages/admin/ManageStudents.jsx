@@ -9,7 +9,7 @@ import TrainingProgressPanel from '../../components/admin/TrainingProgressPanel'
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import {
   HiOutlinePlus,
@@ -36,6 +36,32 @@ const EMPTY_FORM = {
 const PAGE_SIZE = 10;
 
 const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
+
+const buildTempPassword = (length = 14) => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%^&*';
+  const all = `${upper}${lower}${digits}${symbols}`;
+
+  const cryptoObj = globalThis.crypto;
+  const randomIndex = (max) => {
+    if (cryptoObj?.getRandomValues) {
+      const bytes = new Uint32Array(1);
+      cryptoObj.getRandomValues(bytes);
+      return bytes[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  };
+  const pick = (chars) => chars[randomIndex(chars.length)];
+  const chars = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  while (chars.length < length) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomIndex(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+};
 
 export default function ManageStudents() {
   const [students, setStudents] = useState([]);
@@ -230,7 +256,6 @@ export default function ManageStudents() {
   if (!loadingStudents && studentsError) {
     return (
       <div className="admin-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => fetchStudents(page)} compact />
       </div>
     );
@@ -358,14 +383,15 @@ export default function ManageStudents() {
     }
 
     try {
-      const res = await api.post('/admin/students', form);
+      const initialPassword = buildTempPassword();
+      const res = await api.post('/admin/students', { ...form, initial_password: initialPassword });
       const data = res.data;
 
       setShowAdd(false);
       setForm(EMPTY_FORM);
       setCreatedCreds({
         reg_number: data.profile?.reg_number || data.profile?.roll_number || 'N/A',
-        temp_password: data.temp_password,
+        temp_password: initialPassword,
         name: data.name,
       });
       setShowCreds(true);
@@ -437,9 +463,10 @@ export default function ManageStudents() {
     if (!window.confirm(`Reset password for ${student.name}?`)) return;
     try {
       const res = await api.post(`/admin/students/${sid}/reset-password`);
+      const tempPassword = res.data?.temp_password || '';
       setCreatedCreds({
         reg_number: student.reg_number || student.name,
-        temp_password: res.data.temp_password,
+        temp_password: tempPassword,
         name: student.name,
         isReset: true,
       });
@@ -741,7 +768,11 @@ export default function ManageStudents() {
 
   const copyCredentials = () => {
     if (!createdCreds) return;
-    const text = `${createdCreds.isReset ? 'Name' : 'Reg No'}: ${createdCreds.reg_number}\nTemp Password: ${createdCreds.temp_password}`;
+    const identityLabel = createdCreds.isReset ? 'Name' : 'Reg No';
+    const identityValue = createdCreds.isReset
+      ? (createdCreds.name || createdCreds.reg_number || 'N/A')
+      : (createdCreds.reg_number || createdCreds.name || 'N/A');
+    const text = `${identityLabel}: ${identityValue}\nTemp Password: ${createdCreds.temp_password}`;
     navigator.clipboard.writeText(text);
     toast.success('Credentials copied');
   };
@@ -806,7 +837,6 @@ export default function ManageStudents() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
       <TrainingProgressPanel
         job={trainingJob}
         onCancel={handleCancelTrainingJob}

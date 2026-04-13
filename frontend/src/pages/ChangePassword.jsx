@@ -3,38 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../api/axios';
 import { motion } from 'framer-motion';
-import { HiOutlineLockClosed, HiOutlineCheckCircle } from 'react-icons/hi';
+import { HiOutlineLockClosed, HiOutlineCheckCircle, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 
-export default function ChangePassword() {
-  const { clearMustChangePassword, user } = useAuth();
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const hasMinLength = form.new_password.length >= 8;
-  const hasNumber = /\d/.test(form.new_password);
-  const passwordsMatch = form.new_password && form.new_password === form.confirm_password;
-  const allValid = hasMinLength && hasNumber && passwordsMatch && form.current_password;
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!allValid) return;
-    setSubmitting(true);
-    setError('');
-    try {
-      await api.post('/auth/change-password', form);
-      clearMustChangePassword();
-      const dest = user?.role === 'admin' ? '/admin' : user?.role === 'lecturer' ? '/lecturer' : '/student';
-      navigate(dest, { replace: true });
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to change password');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const Check = ({ ok, text }) => (
+function CheckItem({ ok, text }) {
+  return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: ok ? 'var(--accent-emerald)' : 'var(--text-muted)' }}>
       <div style={{
         width: 16, height: 16, borderRadius: '50%',
@@ -47,6 +19,89 @@ export default function ChangePassword() {
       {text}
     </div>
   );
+}
+
+function PasswordField({ label, value, field, placeholder, autoFocus = false, onChange, visiblePasswords, onToggleVisibility }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-purple)', display: 'block', marginBottom: 8 }}>{label}</label>
+      <div style={{ position: 'relative' }}>
+        <input
+          className="input-field"
+          type={visiblePasswords[field] ? 'text' : 'password'}
+          placeholder={placeholder}
+          value={value}
+          onChange={onChange}
+          autoFocus={autoFocus}
+          style={{ paddingRight: 44 }}
+        />
+        <button
+          type="button"
+          onClick={() => onToggleVisibility(field)}
+          aria-label={visiblePasswords[field] ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          {visiblePasswords[field] ? <HiOutlineEyeOff size={18} /> : <HiOutlineEye size={18} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function ChangePassword() {
+  const { clearMustChangePassword, user } = useAuth();
+  const navigate = useNavigate();
+  const [form, setForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
+  const [visiblePasswords, setVisiblePasswords] = useState({ current: false, next: false, confirm: false });
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const hasMinLength = form.new_password.length >= 12;
+  const hasUppercase = /[A-Z]/.test(form.new_password);
+  const hasLowercase = /[a-z]/.test(form.new_password);
+  const hasNumber = /\d/.test(form.new_password);
+  const hasSpecial = /[!@#$%^&*()_+\-=[\]{};:'",.<>?/\\|`~]/.test(form.new_password);
+  const passwordsMatch = form.new_password && form.new_password === form.confirm_password;
+  const allValid = hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecial && passwordsMatch && form.current_password;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!allValid) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await api.post('/auth/change-password', form);
+      clearMustChangePassword();
+      const dest = user?.role === 'admin' ? '/admin' : user?.role === 'lecturer' ? '/lecturer' : '/student';
+      navigate(dest, {
+        replace: true,
+        state: { showWelcome: true, welcomeToken: `${Date.now()}-${Math.random().toString(36).slice(2)}` },
+      });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to change password');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const togglePasswordVisibility = (field) => {
+    setVisiblePasswords((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
 
   return (
     <div style={{
@@ -91,45 +146,47 @@ export default function ChangePassword() {
         )}
 
         <form onSubmit={handleSubmit} style={{ marginTop: 24 }}>
-          <div style={{ marginBottom: 18 }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-purple)', display: 'block', marginBottom: 8 }}>Current Password</label>
-            <input
-              className="input-field"
-              type="password"
-              placeholder="Enter temporary password"
-              value={form.current_password}
-              onChange={(e) => setForm({ ...form, current_password: e.target.value })}
-              autoFocus
-            />
-          </div>
+          <PasswordField
+            label="Current Password"
+            value={form.current_password}
+            field="current"
+            placeholder="Enter temporary password"
+            autoFocus
+            onChange={(e) => setForm({ ...form, current_password: e.target.value })}
+            visiblePasswords={visiblePasswords}
+            onToggleVisibility={togglePasswordVisibility}
+          />
 
-          <div style={{ marginBottom: 18 }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-purple)', display: 'block', marginBottom: 8 }}>New Password</label>
-            <input
-              className="input-field"
-              type="password"
-              placeholder="At least 8 characters"
-              value={form.new_password}
-              onChange={(e) => setForm({ ...form, new_password: e.target.value })}
-            />
-          </div>
+          <PasswordField
+            label="New Password"
+            value={form.new_password}
+            field="next"
+            placeholder="At least 8 characters"
+            onChange={(e) => setForm({ ...form, new_password: e.target.value })}
+            visiblePasswords={visiblePasswords}
+            onToggleVisibility={togglePasswordVisibility}
+          />
 
           <div style={{ marginBottom: 20 }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent-purple)', display: 'block', marginBottom: 8 }}>Confirm New Password</label>
-            <input
-              className="input-field"
-              type="password"
-              placeholder="Re-enter new password"
+            <PasswordField
+              label="Confirm New Password"
               value={form.confirm_password}
+              field="confirm"
+              placeholder="Re-enter new password"
               onChange={(e) => setForm({ ...form, confirm_password: e.target.value })}
+              visiblePasswords={visiblePasswords}
+              onToggleVisibility={togglePasswordVisibility}
             />
           </div>
 
           {/* Validation Checklist */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-            <Check ok={hasMinLength} text="At least 8 characters" />
-            <Check ok={hasNumber} text="Contains a number" />
-            <Check ok={passwordsMatch} text="Passwords match" />
+            <CheckItem ok={hasMinLength} text="At least 12 characters" />
+            <CheckItem ok={hasUppercase} text="Contains an uppercase letter" />
+            <CheckItem ok={hasLowercase} text="Contains a lowercase letter" />
+            <CheckItem ok={hasNumber} text="Contains a number" />
+            <CheckItem ok={hasSpecial} text="Contains a special character" />
+            <CheckItem ok={passwordsMatch} text="Passwords match" />
           </div>
 
           <button
