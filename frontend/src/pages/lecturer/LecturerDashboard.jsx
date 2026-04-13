@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../../api/axios';
 import StatsCard from '../../components/ui/StatsCard';
 import Modal from '../../components/ui/Modal';
 import StatePanel from '../../components/ui/StatePanel';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineBookOpen, HiOutlineCamera, HiOutlineKey } from 'react-icons/hi';
 import { formatCourseName } from '../../utils/courseDisplay';
@@ -13,7 +13,7 @@ import { useAuth } from '../../hooks/useAuth';
 
 export default function LecturerDashboard() {
   const { user } = useAuth();
-  const welcomeShownRef = useRef(false);
+  const location = useLocation();
   const [papers, setPapers] = useState([]);
   const [pinStatus, setPinStatus] = useState({ has_pin: false });
   const [showPinModal, setShowPinModal] = useState(false);
@@ -44,11 +44,21 @@ export default function LecturerDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!welcomeShownRef.current && user?.name) {
-      toast.success(`Welcome, ${user.name}!`);
-      welcomeShownRef.current = true;
+    if (!location.state?.showWelcome || !user?.name) return;
+
+    const token = String(location.state?.welcomeToken || '');
+    const userIdentity = user?._id || user?.email || user?.name || 'lecturer';
+    const key = `welcome-toast:${userIdentity}`;
+    const alreadyShownToken = window.sessionStorage.getItem(key);
+    if (token && alreadyShownToken === token) return;
+
+    toast.success(`Welcome, ${user.name}!`);
+    if (token) {
+      window.sessionStorage.setItem(key, token);
     }
-  }, [user?.name]);
+
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate, user?._id, user?.email, user?.name]);
 
   const handleGeneratePin = async () => {
     try {
@@ -81,7 +91,6 @@ export default function LecturerDashboard() {
   if (loadingDashboard) {
     return (
       <div className="lecturer-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <div style={{ marginBottom: 28 }}>
           <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome, <span className="gradient-text">Lecturer</span></h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Set your 4-digit PIN, then select a paper to start attendance.</p>
@@ -94,7 +103,6 @@ export default function LecturerDashboard() {
   if (dashboardError) {
     return (
       <div className="lecturer-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <div style={{ marginBottom: 28 }}>
           <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome, <span className="gradient-text">Lecturer</span></h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Set your 4-digit PIN, then select a paper to start attendance.</p>
@@ -106,8 +114,6 @@ export default function LecturerDashboard() {
 
   return (
     <div className="lecturer-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
-
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome, <span className="gradient-text">Lecturer</span></h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Set your 4-digit PIN, then select a paper to start attendance.</p>

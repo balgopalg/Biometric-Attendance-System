@@ -1,6 +1,6 @@
 """Lecturer routes — paper list, attendance session, PIN commit and rollback."""
 
-import random
+import secrets
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -18,7 +18,7 @@ from app.models.attendance import log_attendance
 from app.models.course import get_course_by_id
 from app.models.enrollment import get_profiles_for_paper, count_profiles_for_paper
 from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
-from app.models.user import find_user_by_id, update_user
+from app.models.user import find_user_by_id, update_user, set_user_pin, verify_user_pin
 from app.services.face_detection import get_detector
 from app.services.face_recognition import (
     generate_embedding,
@@ -26,6 +26,9 @@ from app.services.face_recognition import (
     prepare_profile_candidates,
 )
 from app.services.capture_upload import save_classroom_upload_bundle
+from app.security.brute_force_protection import BruteForceProtector
+from app.security.rate_limiter import limiter
+from app.observability.logging import attendance_logger
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, decode_base64_image
 
@@ -35,6 +38,11 @@ ROLLBACK_MINUTES = 30
 _SESSIONS_NORMALIZED = False
 _SESSIONS_NORMALIZE_LOCK = Lock()
 _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES = 180
+_ALLOWED_UPLOAD_MIME_TYPES = {"image/jpeg", "image/png", "image/bmp", "image/webp"}
+_ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_SESSION_CANDIDATES_CACHE = {}
+_SESSION_CANDIDATES_LOCK = Lock()
 
 
 def _normalize_attendance_sessions_once():
@@ -192,6 +200,7 @@ def _get_active_session(session_id):
     expires_at = session.get("expires_at")
     if isinstance(expires_at, datetime) and expires_at <= datetime.utcnow():
         _active_sessions_collection().delete_one({"session_id": str(session_id)})
+        _clear_cached_session_candidates(session_id)
         return None
 
     return session
@@ -225,6 +234,7 @@ def _save_recognized_students(session_id, recognized_ids):
 
 def _delete_active_session(session_id):
     _active_sessions_collection().delete_one({"session_id": str(session_id)})
+    _clear_cached_session_candidates(session_id)
 
 
 def _within_rollback(session_doc):
@@ -309,6 +319,33 @@ def _load_session_candidates(session: dict):
     return prepare_profile_candidates(profiles)
 
 
+def _get_cached_session_candidates(session: dict):
+    """Return pre-normalized candidates cached for the active session."""
+    session_id = str(session.get("session_id") or "")
+    if not session_id:
+        return _load_session_candidates(session)
+
+    with _SESSION_CANDIDATES_LOCK:
+        cached = _SESSION_CANDIDATES_CACHE.get(session_id)
+        if cached is not None:
+            return cached
+
+    prepared = _load_session_candidates(session)
+
+    with _SESSION_CANDIDATES_LOCK:
+        _SESSION_CANDIDATES_CACHE[session_id] = prepared
+
+    return prepared
+
+
+def _clear_cached_session_candidates(session_id):
+    sid = str(session_id or "")
+    if not sid:
+        return
+    with _SESSION_CANDIDATES_LOCK:
+        _SESSION_CANDIDATES_CACHE.pop(sid, None)
+
+
 def _extract_classroom_faces(img_rgb, img_bgr=None):
     """Extract classroom face crops using MediaPipe first, then Haar cascade fallback."""
     detector = get_detector()
@@ -391,7 +428,8 @@ def my_papers(user):
 @lecturer_bp.route("/pin", methods=["GET"])
 @role_required("lecturer")
 def get_pin_status(user):
-    return jsonify({"has_pin": bool(str(user.get("pin", ""))), "pin_last_set": user.get("pin_last_set")})
+    has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
+    return jsonify({"has_pin": has_pin, "pin_last_set": user.get("pin_last_set")})
 
 
 @lecturer_bp.route("/pin", methods=["PUT"])
@@ -402,7 +440,7 @@ def set_pin(user):
     if not pin.isdigit() or len(pin) != 4:
         return jsonify({"error": "PIN must be exactly 4 digits"}), 400
 
-    update_user(str(user["_id"]), {"pin": pin, "pin_last_set": datetime.utcnow()})
+    set_user_pin(str(user["_id"]), pin)
     log_action("LECTURER_SET_PIN", str(user["_id"]), details="Lecturer updated personal PIN")
     return jsonify({"message": "PIN updated successfully"}), 200
 
@@ -410,8 +448,8 @@ def set_pin(user):
 @lecturer_bp.route("/pin/generate", methods=["POST"])
 @role_required("lecturer")
 def generate_pin(user):
-    pin = f"{random.randint(0, 9999):04d}"
-    update_user(str(user["_id"]), {"pin": pin, "pin_last_set": datetime.utcnow()})
+    pin = f"{secrets.randbelow(10000):04d}"
+    set_user_pin(str(user["_id"]), pin)
     log_action("LECTURER_GENERATE_PIN", str(user["_id"]), details="Lecturer generated a new PIN")
     return jsonify({"pin": pin, "message": "New PIN generated"}), 200
 
@@ -449,6 +487,7 @@ def start_session(user):
 
 @lecturer_bp.route("/session/recognize", methods=["POST"])
 @role_required("lecturer")
+@limiter.limit("30 per minute")
 def recognize_frame(user):
     """Accept a webcam frame, run detection + recognition, return new matches."""
     d = request.get_json(silent=True) or {}
@@ -475,7 +514,7 @@ def recognize_frame(user):
     if not faces:
         return jsonify({"new_matches": [], "faces_detected": 0, "candidates_count": 0, "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60), "best_similarity_seen": None})
 
-    candidates = _load_session_candidates(session)
+    candidates = _get_cached_session_candidates(session)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
 
     new_matches = []
@@ -494,9 +533,20 @@ def recognize_frame(user):
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
-            print(f"[RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
+            attendance_logger.info(
+                "recognition_match",
+                session_id=session_id,
+                user_id=match["user_id"],
+                similarity=match.get("similarity"),
+                threshold=threshold,
+            )
         elif not match and face_best_similarity >= 0:
-            print(f"[RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
+            attendance_logger.debug(
+                "recognition_below_threshold",
+                session_id=session_id,
+                best_similarity=round(face_best_similarity, 4),
+                threshold=threshold,
+            )
 
     _save_recognized_students(session_id, session.get("recognized") or [])
     _touch_active_session(session_id)
@@ -513,6 +563,7 @@ def recognize_frame(user):
 
 @lecturer_bp.route("/session/recognize-image", methods=["POST"])
 @role_required("lecturer")
+@limiter.limit("20 per minute")
 def recognize_image(user):
     """Accept an uploaded classroom image, run detection + recognition, return new matches."""
     session_id = request.form.get("session_id")
@@ -526,6 +577,14 @@ def recognize_image(user):
     file = request.files["image"]
     if not file or file.filename == "":
         return jsonify({"error": "No image file selected"}), 400
+
+    content_type = str(getattr(file, "content_type", "") or "").strip().lower()
+    filename = str(file.filename or "").strip()
+    extension = os.path.splitext(filename)[1].lower()
+    if content_type not in _ALLOWED_UPLOAD_MIME_TYPES:
+        return jsonify({"error": "Unsupported image type"}), 400
+    if extension not in _ALLOWED_UPLOAD_EXTENSIONS:
+        return jsonify({"error": "Unsupported image extension"}), 400
     
     session = _get_active_session(session_id)
     if not session:
@@ -541,6 +600,15 @@ def recognize_image(user):
         file_bytes = file.read()
         if not file_bytes:
             return jsonify({"error": "Uploaded image is empty"}), 400
+        if len(file_bytes) > _MAX_UPLOAD_BYTES:
+            return jsonify({"error": "Image too large"}), 413
+
+        is_jpeg = file_bytes.startswith(b"\xff\xd8\xff")
+        is_png = file_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+        is_bmp = file_bytes.startswith(b"BM")
+        is_webp = len(file_bytes) >= 12 and file_bytes[:4] == b"RIFF" and file_bytes[8:12] == b"WEBP"
+        if not (is_jpeg or is_png or is_bmp or is_webp):
+            return jsonify({"error": "Invalid image signature"}), 400
 
         arr = np.frombuffer(file_bytes, dtype=np.uint8)
         img_raw = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
@@ -559,7 +627,11 @@ def recognize_image(user):
         else:
             return jsonify({"error": f"Invalid image format: unexpected shape {img_raw.shape}"}), 400
     except Exception as e:
-        print(f"[ERROR] Image processing failed: {str(e)}")
+        attendance_logger.error(
+            "recognize_image_processing_failed",
+            session_id=session_id,
+            error=str(e),
+        )
         return jsonify({"error": f"Failed to process image: {str(e)}"}), 400
     
     detector = get_detector()
@@ -575,7 +647,13 @@ def recognize_image(user):
         uploads_dir=uploads_dir,
     )
 
-    print(f"[DEBUG] Image shape: {img.shape}, dtype: {img.dtype}, saved_folder: {saved_bundle['folder_path']}")
+    attendance_logger.debug(
+        "recognize_image_processed",
+        session_id=session_id,
+        image_shape=str(tuple(img.shape)),
+        image_dtype=str(img.dtype),
+        saved_folder=saved_bundle.get("folder_path"),
+    )
     
     if not faces:
         return jsonify({
@@ -589,7 +667,7 @@ def recognize_image(user):
             "face_paths": saved_bundle["face_paths"],
         })
     
-    candidates = _load_session_candidates(session)
+    candidates = _get_cached_session_candidates(session)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
 
     new_matches = []
@@ -608,9 +686,20 @@ def recognize_image(user):
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
-            print(f"[IMAGE_RECOGNITION] Matched: {match['name']} (ID: {match['user_id']}) | Similarity: {match['similarity']} | Threshold: {threshold}")
+            attendance_logger.info(
+                "image_recognition_match",
+                session_id=session_id,
+                user_id=match["user_id"],
+                similarity=match.get("similarity"),
+                threshold=threshold,
+            )
         elif not match and face_best_similarity >= 0:
-            print(f"[IMAGE_RECOGNITION] Below threshold - Best match similarity: {face_best_similarity:.4f} (threshold: {threshold})")
+            attendance_logger.debug(
+                "image_recognition_below_threshold",
+                session_id=session_id,
+                best_similarity=round(face_best_similarity, 4),
+                threshold=threshold,
+            )
 
     _save_recognized_students(session_id, session.get("recognized") or [])
     _touch_active_session(session_id)
@@ -690,17 +779,32 @@ def commit_session(user):
     if not session_id:
         return jsonify({"error": "Invalid session"}), 400
 
-    stored_pin = str(user.get("pin", "")).strip()
-    if not stored_pin:
-        return jsonify({"error": "PIN not set. Generate or set your 4-digit PIN first."}), 400
-    if pin != stored_pin:
-        return jsonify({"error": "Invalid PIN"}), 403
-
     session = _get_active_session(session_id)
     if not session:
         return jsonify({"error": "Invalid session"}), 400
     if str(session.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "Unauthorized"}), 403
+
+    has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
+    if not has_pin:
+        return jsonify({"error": "PIN not set. Generate or set your 4-digit PIN first."}), 400
+
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+        blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
+        if blocked:
+            return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+
+    if not verify_user_pin(user, pin):
+        if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+            attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
+            max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+            if attempts >= max_attempts:
+                return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+        return jsonify({"error": "Invalid PIN"}), 403
+
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        BruteForceProtector.clear_pin_failures(session_id)
 
     paper_id = session["paper_id"]
     lecturer_id = session["lecturer_id"]
@@ -788,9 +892,22 @@ def adjust_committed_session(user, session_id):
     pin = str(d.get("pin", "")).strip()
     student_ids = d.get("student_ids") or []
 
-    stored_pin = str(user.get("pin", "")).strip()
-    if not stored_pin or pin != stored_pin:
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+        blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
+        if blocked:
+            return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+
+    if not verify_user_pin(user, pin):
+        if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+            attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
+            max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+            if attempts >= max_attempts:
+                return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
         return jsonify({"error": "Invalid PIN"}), 403
+
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        BruteForceProtector.clear_pin_failures(session_id)
 
     _replace_session_attendance(
         session_id=session_id,

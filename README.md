@@ -13,17 +13,18 @@ This system provides:
 
 ## Documentation Bundle
 
+- Documentation hub (single entrypoint): [docs/README.md](docs/README.md)
 - API contract (OpenAPI): [docs/openapi.yaml](docs/openapi.yaml)
 - Full API contract (all endpoints): [docs/openapi.full.yaml](docs/openapi.full.yaml)
-- Operations manual (what/when/why/how): [docs/SYSTEM_OPERATIONS_MANUAL.md](docs/SYSTEM_OPERATIONS_MANUAL.md)
-- Workflow payloads and validation examples: [docs/API_WORKFLOW_GUIDE.md](docs/API_WORKFLOW_GUIDE.md)
-- CLI command runbook: [docs/CLI_COMMAND_RUNBOOK.md](docs/CLI_COMMAND_RUNBOOK.md)
-- Incident response and recovery policy: [docs/INCIDENT_RESPONSE_AND_RECOVERY.md](docs/INCIDENT_RESPONSE_AND_RECOVERY.md)
-- Biometric privacy and compliance policy: [docs/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md](docs/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md)
-- Release management policy: [docs/RELEASE_MANAGEMENT_POLICY.md](docs/RELEASE_MANAGEMENT_POLICY.md)
-- API lifecycle policy: [docs/API_LIFECYCLE_POLICY.md](docs/API_LIFECYCLE_POLICY.md)
-- Deployment guide (Docker baseline): [docs/DEPLOYMENT_PRODUCTION.md](docs/DEPLOYMENT_PRODUCTION.md)
-- Docker step-by-step run guide: [docs/DOCKER_RUN_STEP_BY_STEP.md](docs/DOCKER_RUN_STEP_BY_STEP.md)
+- Operations manual (what/when/why/how): [/docs/operations/SYSTEM_OPERATIONS_MANUAL.md](/docs/operations/SYSTEM_OPERATIONS_MANUAL.md)
+- Workflow payloads and validation examples: [/docs/governance/API_WORKFLOW_GUIDE.md](/docs/governance/API_WORKFLOW_GUIDE.md)
+- CLI command runbook: [/docs/operations/CLI_COMMAND_RUNBOOK.md](/docs/operations/CLI_COMMAND_RUNBOOK.md)
+- Incident response and recovery policy: [/docs/operations/INCIDENT_RESPONSE_AND_RECOVERY.md](/docs/operations/INCIDENT_RESPONSE_AND_RECOVERY.md)
+- Biometric privacy and compliance policy: [/docs/governance/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md](/docs/governance/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md)
+- Release management policy: [/docs/governance/RELEASE_MANAGEMENT_POLICY.md](/docs/governance/RELEASE_MANAGEMENT_POLICY.md)
+- API lifecycle policy: [/docs/governance/API_LIFECYCLE_POLICY.md](/docs/governance/API_LIFECYCLE_POLICY.md)
+- Deployment guide (Docker baseline): [/docs/operations/DEPLOYMENT_PRODUCTION.md](/docs/operations/DEPLOYMENT_PRODUCTION.md)
+- Docker step-by-step run guide: [/docs/operations/DOCKER_RUN_STEP_BY_STEP.md](/docs/operations/DOCKER_RUN_STEP_BY_STEP.md)
 
 ## Deployment Assets
 

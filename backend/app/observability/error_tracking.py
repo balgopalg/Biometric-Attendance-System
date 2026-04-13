@@ -1,10 +1,10 @@
 """Centralized error tracking and reporting."""
 
-import sys
+import logging
 import json
 import traceback
 from datetime import datetime
-from flask import request, g, current_app
+from flask import request, g, current_app, has_app_context
 from pymongo.errors import PyMongoError
 
 
@@ -46,8 +46,8 @@ class ErrorTracker:
             errors_collection = get_collection("audit", cls.COLLECTION_NAME)
             errors_collection.insert_one(error_doc)
         except Exception as e:
-            # If we can't save to DB, at least log it
-            print(f"Failed to track error to database: {e}", file=sys.stderr)
+            logger = current_app.logger if has_app_context() else logging.getLogger(__name__)
+            logger.error("Failed to track error to database: %s", e, exc_info=True)
         
         return error_id
     

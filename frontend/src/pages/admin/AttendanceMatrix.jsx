@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { HiOutlineDocumentDownload } from 'react-icons/hi';
 import api from '../../api/axios';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
 
 const STICKY_ROLL_LEFT = 0;
 const STICKY_NAME_LEFT = 148;
@@ -18,7 +19,7 @@ const TOTAL_ATTENDED_RIGHT = TOTAL_PERCENT_WIDTH + TOTAL_HELD_WIDTH;
 function buildQueryParams(filters) {
   const params = {
     ...filters,
-    tz_offset_minutes: new Date().getTimezoneOffset(),
+    tz_offset_minutes: getIndiaTimezoneOffsetMinutes(),
   };
   Object.keys(params).forEach((key) => {
     if (params[key] === '' || params[key] === null || params[key] === undefined) {
@@ -224,7 +225,6 @@ export default function AttendanceMatrix() {
   if (!loading && matrixError) {
     return (
       <div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }}>
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <StatePanel variant="error" title="Unable to load attendance matrix" description={matrixError} actionLabel="Retry" onAction={() => fetchMatrix()} compact />
       </div>
     );
@@ -232,7 +232,6 @@ export default function AttendanceMatrix() {
 
   return (
     <div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }}>
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>

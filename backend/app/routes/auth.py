@@ -1,16 +1,19 @@
 """Authentication routes."""
 
+from datetime import datetime
+
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token,
     jwt_required,
     get_jwt_identity,
+    get_jwt,
     set_access_cookies,
     unset_jwt_cookies,
 )
 
-from app.models.user import find_user_by_email, verify_password, change_user_password
-from app.extensions import mongo
+from app.models.user import find_user_by_email, verify_password, change_user_password, normalize_email
+from app.extensions import mongo, get_collection
 from app.security.rate_limiter import limiter
 from app.security.brute_force_protection import BruteForceProtector, IPRateLimiter
 from app.utils.validation import validate_email, validate_password_strength, ValidationError, RequestValidator
@@ -71,7 +74,7 @@ def login():
     ip_address = request.remote_addr
     
     data = request.get_json(silent=True) or {}
-    email = data.get("email", "").strip()
+    email = normalize_email(data.get("email", ""))
     password = data.get("password", "")
 
     # Input validation
@@ -81,26 +84,42 @@ def login():
     if not validate_email(email):
         return jsonify({"error": "Invalid email format"}), 400
     
-    # Check IP-based rate limiting
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        is_ip_blocked = IPRateLimiter.is_ip_blocked(
-            ip_address, 
-            "auth.login",
-            threshold=current_app.config.get("IP_RATELIMIT_THRESHOLD", 100),
-            window_minutes=current_app.config.get("IP_RATELIMIT_WINDOW_MINUTES", 10)
-        )
-        if is_ip_blocked:
+    # Verify credentials
+    user = find_user_by_email(email)
+    password_ok = bool(user and verify_password(user["password_hash"], password))
+
+    if password_ok:
+        # Successful login should always be allowed, even if stale lockout records exist.
+        if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+            BruteForceProtector.clear_failed_attempts(email)
+            IPRateLimiter.record_request(ip_address, "auth.login", weight=0)  # Don't count successful logins
+
             log_action(
-                user_id=None,
-                action="login_ip_blocked",
+                user_id=str(user.get("_id")),
+                action="login_success",
                 resource_type="auth",
-                description=f"Login attempt from blocked IP: {ip_address}",
+                description=f"Successful login for user {email}",
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
-            return jsonify({"error": "Too many login attempts from your IP. Try again later."}), 429
-    
-    # Check account lockout
+
+        token = create_access_token(identity=user["email"])
+        response = jsonify(
+            {
+                "user": {
+                    "_id": str(user["_id"]),
+                    "name": user["name"],
+                    "email": user["email"],
+                    "role": user["role"],
+                    "department": user.get("department", ""),
+                    "must_change_password": user.get("must_change_password", False),
+                },
+            }
+        )
+        set_access_cookies(response, token)
+        return response
+
+    # Check account lockout only for invalid credentials.
     if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
         is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
         if is_locked:
@@ -117,8 +136,23 @@ def login():
                 "lockout_until": lockout_expiry.isoformat()
             }), 429
 
-    # Verify credentials
-    user = find_user_by_email(email)
+        is_ip_blocked = IPRateLimiter.is_ip_blocked(
+            ip_address,
+            "auth.login",
+            threshold=current_app.config.get("IP_RATELIMIT_THRESHOLD", 100),
+            window_minutes=current_app.config.get("IP_RATELIMIT_WINDOW_MINUTES", 10),
+        )
+        if is_ip_blocked:
+            log_action(
+                user_id=None,
+                action="login_ip_blocked",
+                resource_type="auth",
+                description=f"Login attempt from blocked IP: {ip_address}",
+                ip_address=ip_address,
+                user_agent=request.headers.get("User-Agent", ""),
+            )
+            return jsonify({"error": "Too many login attempts from your IP. Try again later."}), 429
+
     if not user or not verify_password(user["password_hash"], password):
         # Record failed attempt
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
@@ -141,40 +175,32 @@ def login():
         
         return jsonify({"error": "Invalid email or password"}), 401
 
-    # Successful login - clear failed attempts
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        BruteForceProtector.clear_failed_attempts(email)
-        IPRateLimiter.record_request(ip_address, "auth.login", weight=0)  # Don't count successful logins
-        
-        log_action(
-            user_id=str(user.get("_id")),
-            action="login_success",
-            resource_type="auth",
-            description=f"Successful login for user {email}",
-            ip_address=ip_address,
-            user_agent=request.headers.get("User-Agent", ""),
-        )
-
-    token = create_access_token(identity=email)
-    response = jsonify(
-        {
-            "user": {
-                "_id": str(user["_id"]),
-                "name": user["name"],
-                "email": user["email"],
-                "role": user["role"],
-                "department": user.get("department", ""),
-                "must_change_password": user.get("must_change_password", False),
-            },
-        }
-    )
-    set_access_cookies(response, token)
-    return response
-
 
 @auth_bp.route("/logout", methods=["POST"])
+@jwt_required(optional=True)
 def logout():
     """Clear auth cookies."""
+    try:
+        jwt_payload = get_jwt() or {}
+    except Exception:
+        jwt_payload = {}
+
+    jti = jwt_payload.get("jti")
+    expires_at = jwt_payload.get("exp")
+    if jti and expires_at:
+        revoked = get_collection("auth", "revoked_jwts")
+        revoked.update_one(
+            {"jti": jti},
+            {
+                "$setOnInsert": {
+                    "jti": jti,
+                    "expires_at": datetime.utcfromtimestamp(int(expires_at)),
+                    "revoked_at": datetime.utcnow(),
+                }
+            },
+            upsert=True,
+        )
+
     response = jsonify({"message": "Logged out"})
     unset_jwt_cookies(response)
     return response

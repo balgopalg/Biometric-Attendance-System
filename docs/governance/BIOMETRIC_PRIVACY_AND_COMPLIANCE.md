@@ -43,5 +43,5 @@ Operational requirement:
 
 ## Required Documentation
 - API contract references for biometric endpoints: docs/openapi.full.yaml
-- Operational procedures: docs/SYSTEM_OPERATIONS_MANUAL.md
-- Retention baseline: backend/DATA_LIFECYCLE.md
+- Operational procedures: /docs/operations/SYSTEM_OPERATIONS_MANUAL.md
+- Retention baseline: /docs/backend/DATA_LIFECYCLE.md

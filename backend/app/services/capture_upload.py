@@ -1,9 +1,14 @@
 """Utilities for face capture and image uploads."""
 
+import logging
 import os
-from datetime import datetime
 
 import cv2
+
+from app.utils.timezone import india_timestamp_token
+
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_name(raw_value):
@@ -55,7 +60,9 @@ def capture_faces_for_user(user_name, dataset_root="dataset", total_images=50, d
     if not cap.isOpened():
         raise RuntimeError("Unable to access webcam")
 
-    print("Pro tip: Ask the admin to slowly move their head in a U-shape or circle during capture for better side-profile coverage.")
+    logger.info(
+        "Face capture tip: ask the admin to slowly move their head in a U-shape or circle during capture for better side-profile coverage."
+    )
 
     saved_paths = []
     delay_ms = max(1, int(delay_seconds * 1000))
@@ -98,7 +105,7 @@ def save_student_upload(student_name, image, uploads_dir="uploads"):
     _ensure_directory(uploads_dir)
 
     safe_student_name = _safe_name(student_name)
-    date_token = datetime.now().strftime("%Y%m%d")
+    date_token = india_timestamp_token().split("_")[0]
     file_name = f"{safe_student_name}_{date_token}.jpg"
     file_path = os.path.join(uploads_dir, file_name)
 
@@ -117,7 +124,7 @@ def save_classroom_upload(image, uploads_dir="uploads"):
 
     _ensure_directory(uploads_dir)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = india_timestamp_token()
     file_name = f"classroom_{timestamp}.jpg"
     file_path = os.path.join(uploads_dir, file_name)
 
@@ -167,7 +174,7 @@ def save_classroom_upload_bundle(subject_label, image, face_crops, uploads_dir="
     _ensure_directory(uploads_dir)
 
     safe_subject = _safe_name(subject_label)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = india_timestamp_token()
     folder_name = f"{safe_subject}_{timestamp}"
     folder_path = os.path.join(uploads_dir, folder_name)
     _ensure_directory(folder_path)

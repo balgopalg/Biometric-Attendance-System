@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import { formatCourseName } from '../../utils/courseDisplay';
 import StatsCard from '../../components/ui/StatsCard';
@@ -59,7 +60,8 @@ function parseSemesterFromPaper(paper) {
 
 export default function StudentDashboard() {
   const { user } = useAuth();
-  const welcomeShownRef = useRef(false);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [attendance, setAttendance] = useState([]);
   const [predictions, setPredictions] = useState([]);
   const [profile, setProfile] = useState(null);
@@ -79,11 +81,21 @@ export default function StudentDashboard() {
   );
 
   useEffect(() => {
-    if (!welcomeShownRef.current && user?.name) {
-      toast.success(`Welcome, ${user.name}!`);
-      welcomeShownRef.current = true;
+    if (!location.state?.showWelcome || !user?.name) return;
+
+    const token = String(location.state?.welcomeToken || '');
+    const userIdentity = user?._id || user?.email || user?.name || 'student';
+    const key = `welcome-toast:${userIdentity}`;
+    const alreadyShownToken = window.sessionStorage.getItem(key);
+    if (token && alreadyShownToken === token) return;
+
+    toast.success(`Welcome, ${user.name}!`);
+    if (token) {
+      window.sessionStorage.setItem(key, token);
     }
-  }, [user?.name]);
+
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate, user?._id, user?.email, user?.name]);
 
   useEffect(() => {
     setLoadingDashboard(true);

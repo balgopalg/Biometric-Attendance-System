@@ -1,7 +1,9 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+BACKEND_ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(dotenv_path=BACKEND_ENV_PATH)
 
 
 def _env_bool(name, default=False):
@@ -52,7 +54,12 @@ class Config:
     JWT_COOKIE_CSRF_PROTECT = _env_bool("JWT_COOKIE_CSRF_PROTECT", True)
     JWT_ACCESS_COOKIE_PATH = "/api/"
     JWT_COOKIE_DOMAIN = os.getenv("JWT_COOKIE_DOMAIN") or None
-    JWT_ACCESS_TOKEN_EXPIRES = 86400  # 24 hours in seconds
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_SECONDS", "3600"))
+
+    ENABLE_DEFAULT_ADMIN_SEED = _env_bool("ENABLE_DEFAULT_ADMIN_SEED", False)
+    DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "")
+    DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
+    FACE_EMBEDDING_ENCRYPTION_KEY = os.getenv("FACE_EMBEDDING_ENCRYPTION_KEY", "")
 
     # ============ SECURITY HARDENING SETTINGS ============
     
@@ -83,6 +90,16 @@ class Config:
     # Session Security
     SECURE_SESSION_TIMEOUT_MINUTES = int(os.getenv("SECURE_SESSION_TIMEOUT_MINUTES", "30"))
     REQUIRE_CSRF_ON_MUTATION = _env_bool("REQUIRE_CSRF_ON_MUTATION", True)
+    CONTENT_SECURITY_POLICY = os.getenv(
+        "CONTENT_SECURITY_POLICY",
+        "default-src 'self'; img-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; connect-src 'self' http: https: ws: wss:; "
+        "font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    )
+    HSTS_ENABLED = _env_bool("HSTS_ENABLED", ENV in {"production", "prod", "staging"})
+    HSTS_MAX_AGE_SECONDS = int(os.getenv("HSTS_MAX_AGE_SECONDS", "31536000"))
+    HSTS_INCLUDE_SUBDOMAINS = _env_bool("HSTS_INCLUDE_SUBDOMAINS", True)
+    HSTS_PRELOAD = _env_bool("HSTS_PRELOAD", False)
     
     # Audit Logging
     AUDIT_LOGGING_ENABLED = _env_bool("AUDIT_LOGGING_ENABLED", True)
@@ -93,7 +110,7 @@ class Config:
 
     # Structured Logging
     LOGGING_LEVEL = os.getenv("LOGGING_LEVEL", "INFO")
-    LOGGING_FORMAT = os.getenv("LOGGING_FORMAT", "json")  # json or text
+    LOGGING_FORMAT = os.getenv("LOGGING_FORMAT", "text")  # json or text
 
     # Error Tracking
     ERROR_TRACKING_ENABLED = _env_bool("ERROR_TRACKING_ENABLED", ENV in {"production", "prod", "staging"})
@@ -115,6 +132,7 @@ class Config:
     FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.60"))
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
     SLOW_REQUEST_THRESHOLD_MS = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "500"))
+    QUERY_CACHE_MAX_ENTRIES = int(os.getenv("QUERY_CACHE_MAX_ENTRIES", "500"))
     TASK_QUEUE_ENABLED = _env_bool("TASK_QUEUE_ENABLED", False)
     TASK_QUEUE_REDIS_URL = os.getenv("TASK_QUEUE_REDIS_URL", "redis://localhost:6379/0")
     TASK_QUEUE_NAME = os.getenv("TASK_QUEUE_NAME", "biometric:jobs")

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../../api/axios';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
@@ -243,7 +243,6 @@ export default function StudentEnrollment() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: '#1e293b' } }, error: { style: { background: '#1e293b' } } }} />
 
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Face Enrollment</h2>

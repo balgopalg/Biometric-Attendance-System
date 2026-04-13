@@ -743,5 +743,5 @@ from app.observability.health import (
 
 - [OBSERVABILITY.md](OBSERVABILITY.md) - Complete guide
 - [OBSERVABILITY_QUICKSTART.md](OBSERVABILITY_QUICKSTART.md) - Quick reference
-- [SECURITY_HARDENING.md](SECURITY_HARDENING.md) - Security implementation
-- [TESTING.md](TESTING.md) - Test suite
+- [/docs/security/SECURITY_HARDENING.md](/docs/security/SECURITY_HARDENING.md) - Security implementation
+- [/docs/testing/TESTING.md](/docs/testing/TESTING.md) - Test suite

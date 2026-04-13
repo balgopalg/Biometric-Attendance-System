@@ -15,6 +15,7 @@ import {
   HiOutlineShieldCheck,
   HiOutlineClock,
 } from 'react-icons/hi';
+import { formatDateTimeIndia } from '../../utils/dateTime';
 const MonthlyAttendanceTrend = lazy(() => import('../../components/admin/dashboard/MonthlyAttendanceTrend'));
 const DashboardInsightsPanel = lazy(() => import('../../components/admin/dashboard/DashboardInsightsPanel'));
 
@@ -395,7 +396,7 @@ export default function AdminDashboard() {
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queued Retries</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.queued_retries ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem' }}>{queueMetrics?.jobs?.next_retry_job?.next_attempt_at ? new Date(queueMetrics.jobs.next_retry_job.next_attempt_at).toLocaleString() : 'None'}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem' }}>{formatDateTimeIndia(queueMetrics?.jobs?.next_retry_job?.next_attempt_at, { dateStyle: 'short', timeStyle: 'medium' })}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
             </div>

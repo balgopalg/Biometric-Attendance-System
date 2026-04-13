@@ -49,7 +49,7 @@ docker compose logs worker --tail=200
 
 ## 5. Backup/Restore Operations
 Use runbook commands in:
-- `docs/CLI_COMMAND_RUNBOOK.md`
+- `/docs/operations/CLI_COMMAND_RUNBOOK.md`
 
 ## 6. Rollback Strategy
 - Deploy by version tags

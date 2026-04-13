@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
+const WEBCAM_DEBUG = false;
+
 export function useWebcam() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -43,17 +45,20 @@ export function useWebcam() {
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
     ctx.drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
 
-    // Debug trace: what the webcam frame capture pipeline is producing.
-    console.debug('[Webcam] Captured frame', {
-      timestamp: new Date().toISOString(),
-      width: canvas.width,
-      height: canvas.height,
-      dataUrlPrefix: dataUrl.slice(0, 40),
-      approxBytes: Math.round((dataUrl.length * 3) / 4),
-    });
+    if (WEBCAM_DEBUG) {
+      // Debug trace: what the webcam frame capture pipeline is producing.
+      console.debug('[Webcam] Captured frame', {
+        timestamp: new Date().toISOString(),
+        width: canvas.width,
+        height: canvas.height,
+        dataUrlPrefix: dataUrl.slice(0, 40),
+        approxBytes: Math.round((dataUrl.length * 3) / 4),
+      });
+    }
 
     return dataUrl;
   }, []);

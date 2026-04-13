@@ -39,8 +39,8 @@ You now have a **production-ready, comprehensive test application** with two ind
 
 ### Root Documentation
 ```
-TESTING.md                 # Main testing guide (comprehensive)
-TESTING_QUICKSTART.md      # Quick reference guide
+/docs/testing/TESTING.md                 # Main testing guide (comprehensive)
+/docs/testing/TESTING_QUICKSTART.md      # Quick reference guide
 ```
 
 ### Backend
@@ -187,17 +187,17 @@ Result: 4/4 PASSING
 
 | Level | File | Audience | Content |
 |-------|------|----------|---------|
-| **⭐ Start Here** | TESTING_QUICKSTART.md | Everyone | 5-min overview, commands, file structure |
-| **Main Guide** | TESTING.md | All developers | Architecture, setup, extending, CI/CD, troubleshooting |
-| **Backend** | backend/tests/README.md | Backend developers | Fake Mongo client, test structure, fixtures |
-| **Frontend** | frontend/tests/README.md | Frontend developers | Playwright config, selectors, mocking strategy |
+| **⭐ Start Here** | /docs/testing/TESTING_QUICKSTART.md | Everyone | 5-min overview, commands, file structure |
+| **Main Guide** | /docs/testing/TESTING.md | All developers | Architecture, setup, extending, CI/CD, troubleshooting |
+| **Backend** | /docs/testing/BACKEND_TESTS_README.md | Backend developers | Fake Mongo client, test structure, fixtures |
+| **Frontend** | /docs/testing/FRONTEND_TESTS_README.md | Frontend developers | Playwright config, selectors, mocking strategy |
 
 ---
 
 ## 🎓 Learning Resources in Docs
 
 - **How to extend tests:** Guides in all README files
-- **CI/CD setup:** GitHub Actions examples in TESTING.md
+- **CI/CD setup:** GitHub Actions examples in /docs/testing/TESTING.md
 - **Debugging tips:** Troubleshooting sections in all docs
 - **Architecture decisions:** Why mocks instead of real dependencies
 - **Best practices:** Selector strategy, fixture patterns, test organization
@@ -282,9 +282,9 @@ npm run test:e2e
 ```
 
 **Step 4: Read documentation**
-- Start: `TESTING_QUICKSTART.md`
-- Deep dive: `TESTING.md`
-- Specific: `backend/tests/README.md` or `frontend/tests/README.md`
+- Start: `/docs/testing/TESTING_QUICKSTART.md`
+- Deep dive: `/docs/testing/TESTING.md`
+- Specific: `/docs/testing/BACKEND_TESTS_README.md` or `/docs/testing/FRONTEND_TESTS_README.md`
 
 ---
 

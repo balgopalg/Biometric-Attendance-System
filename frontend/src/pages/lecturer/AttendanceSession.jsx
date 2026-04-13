@@ -6,19 +6,19 @@ import WebcamFeed from '../../components/recognition/WebcamFeed';
 import RecognizedList from '../../components/recognition/RecognizedList';
 import UploadClassroomImage from '../../components/recognition/UploadClassroomImage';
 import PinCommitModal from './PinCommitModal';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlay, HiOutlinePause, HiOutlineStop, HiOutlineCheckCircle, HiOutlinePhotograph } from 'react-icons/hi';
 import { formatCourseName } from '../../utils/courseDisplay';
 import StatePanel from '../../components/ui/StatePanel';
+import { formatDateTimeIndia } from '../../utils/dateTime';
 
 function fmt(dt) {
-  if (!dt) return 'N/A';
-  try {
-    return new Date(dt).toLocaleString();
-  } catch {
-    return 'N/A';
-  }
+  return formatDateTimeIndia(dt, { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function safeMatches(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 export default function AttendanceSession() {
@@ -53,6 +53,7 @@ export default function AttendanceSession() {
 
   const intervalRef = useRef(null);
   const scanInFlightRef = useRef(false);
+  const lastRecognitionToastAtRef = useRef(0);
 
   const selectedPaper = useMemo(
     () => papers.find((p) => p._id === selectedPaperId) || null,
@@ -223,6 +224,28 @@ export default function AttendanceSession() {
     clearSessionLocally();
   };
 
+  const notifyRecognitionBatch = useCallback((matches, source = 'live') => {
+    const safe = Array.isArray(matches) ? matches : [];
+    if (safe.length === 0) return;
+
+    const now = Date.now();
+    if (now - lastRecognitionToastAtRef.current < 1200) return;
+    lastRecognitionToastAtRef.current = now;
+
+    if (safe.length === 1) {
+      toast.success(`Recognized: ${String(safe[0]?.name || 'Unknown')}`);
+      return;
+    }
+
+    const previewNames = safe
+      .slice(0, 3)
+      .map((m) => String(m?.name || 'Unknown'))
+      .join(', ');
+    const extra = safe.length > 3 ? ` +${safe.length - 3} more` : '';
+    const prefix = source === 'upload' ? 'Image recognition' : 'Live recognition';
+    toast.success(`${prefix}: ${safe.length} student(s) (${previewNames}${extra})`);
+  }, []);
+
   const scanFrame = useCallback(async () => {
     if (!sessionId) return;
     if (scanInFlightRef.current) return;
@@ -260,9 +283,10 @@ export default function AttendanceSession() {
         });
       }
 
-      if (res.data.new_matches?.length > 0) {
-        setRecognized((prev) => [...prev, ...res.data.new_matches]);
-        res.data.new_matches.forEach((m) => toast.success(`Recognized: ${m.name}`));
+      const newMatches = safeMatches(res.data?.new_matches);
+      if (newMatches.length > 0) {
+        setRecognized((prev) => [...prev, ...newMatches]);
+        notifyRecognitionBatch(newMatches, 'live');
       }
       setDiag({
         faces_detected: res.data.faces_detected || 0,
@@ -284,7 +308,7 @@ export default function AttendanceSession() {
     } finally {
       scanInFlightRef.current = false;
     }
-  }, [sessionId, selectedPaperId, captureFrame, RECOGNITION_DEBUG]);
+  }, [sessionId, selectedPaperId, captureFrame, RECOGNITION_DEBUG, notifyRecognitionBatch]);
 
   const handleUploadImage = async (imageBlob) => {
     if (!selectedPaperId) {
@@ -303,30 +327,35 @@ export default function AttendanceSession() {
       formData.append('session_id', sessionId);
       formData.append('image', imageBlob);
 
-      console.debug('[Image Upload] FormData ready', {
-        sessionId,
-        fileName: imageBlob.name,
-        fileSize: imageBlob.size,
-        fileType: imageBlob.type,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.debug('[Image Upload] FormData ready', {
+          sessionId,
+          fileName: imageBlob.name,
+          fileSize: imageBlob.size,
+          fileType: imageBlob.type,
+        });
+      }
 
       const res = await api.post('/lecturer/session/recognize-image', formData);
       
-      console.debug('[Image Upload] Response received', {
-        facesDetected: res.data.faces_detected,
-        newMatches: res.data.new_matches?.length,
-        savedFolder: res.data.saved_folder,
-        facePaths: res.data.face_paths?.length,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.debug('[Image Upload] Response received', {
+          facesDetected: res.data.faces_detected,
+          newMatches: res.data.new_matches?.length,
+          savedFolder: res.data.saved_folder,
+          facePaths: res.data.face_paths?.length,
+        });
+      }
 
       if (res.data.saved_folder) {
         toast.success(`Saved classroom bundle: ${res.data.saved_folder}`);
       }
 
-      if (res.data.new_matches?.length > 0) {
-        setRecognized((prev) => [...prev, ...res.data.new_matches]);
-        res.data.new_matches.forEach((m) => toast.success(`Recognized: ${m.name}`));
-        toast.success(`Successfully recognized ${res.data.new_matches.length} student(s)`);
+      const newMatches = safeMatches(res.data?.new_matches);
+      if (newMatches.length > 0) {
+        setRecognized((prev) => [...prev, ...newMatches]);
+        notifyRecognitionBatch(newMatches, 'upload');
+        toast.success(`Successfully recognized ${newMatches.length} student(s)`);
       } else {
         toast.success('No new students recognized in this image');
       }
@@ -340,11 +369,13 @@ export default function AttendanceSession() {
 
       setShowUploadModal(false);
     } catch (err) {
-      console.error('[Image Recognition] Failed', {
-        status: err.response?.status,
-        error: err.response?.data?.error,
-        message: err.message,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.error('[Image Recognition] Failed', {
+          status: err.response?.status,
+          error: err.response?.data?.error,
+          message: err.message,
+        });
+      }
       toast.error(err.response?.data?.error || err.message || 'Image recognition failed');
     } finally {
       setUploadLoading(false);
@@ -408,7 +439,6 @@ export default function AttendanceSession() {
 
   return (
     <div>
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: '#1e293b' } }, error: { style: { background: '#1e293b' } } }} />
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>

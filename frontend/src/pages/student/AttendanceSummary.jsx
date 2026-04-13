@@ -3,23 +3,11 @@ import api from '../../api/axios';
 import StatePanel from '../../components/ui/StatePanel';
 import { motion } from 'framer-motion';
 import { HiOutlineChevronDown, HiOutlineChevronUp } from 'react-icons/hi';
+import { formatDateTimeIndia } from '../../utils/dateTime';
 
 function formatSessionDateTime(session) {
   const value = session?.timestamp || session?.date_time || session?.date;
-  if (!value) return 'N/A';
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return String(value);
-
-  return parsed.toLocaleString('en-IN', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  });
+  return formatDateTimeIndia(value, { dateStyle: 'short', timeStyle: 'medium' });
 }
 
 export default function AttendanceSummary() {

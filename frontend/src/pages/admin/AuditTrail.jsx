@@ -1,11 +1,33 @@
 import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import StatePanel from '../../components/ui/StatePanel';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck, HiOutlineRefresh } from 'react-icons/hi';
+import { formatDateTimeIndia, getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
 
 const PER_PAGE = 20;
+
+function asDisplayText(value, fallback = '—') {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'string') return value.trim() || fallback;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => asDisplayText(item, ''))
+      .filter(Boolean);
+    return parts.length ? parts.join(', ') : fallback;
+  }
+  if (typeof value === 'object') {
+    try {
+      const text = JSON.stringify(value);
+      return text && text !== '{}' ? text : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
 
 export default function AuditTrail() {
   const [logs, setLogs] = useState([]);
@@ -36,7 +58,7 @@ export default function AuditTrail() {
     ];
 
     const fromLogs = logs
-      .map((log) => String(log?.action || '').trim())
+      .map((log) => asDisplayText(log?.action, '').trim())
       .filter(Boolean);
 
     return Array.from(new Set([...commonActions, ...fromLogs])).sort();
@@ -50,7 +72,7 @@ export default function AuditTrail() {
   const fetchLogs = (p = page) => {
     setLoadingLogs(true);
     setLogsError('');
-    const params = { page: p, per_page: PER_PAGE, tz_offset_minutes: new Date().getTimezoneOffset() };
+    const params = { page: p, per_page: PER_PAGE, tz_offset_minutes: getIndiaTimezoneOffsetMinutes() };
     if (keyword) params.action = keyword;
     if (dateFrom) params.from = dateFrom;
     if (dateTo) params.to = dateTo;
@@ -112,7 +134,9 @@ export default function AuditTrail() {
     return 'badge-purple';
   };
 
-  const resolveLogIp = (log) => log?.ip || log?.ip_address || '—';
+  const resolveLogIp = (log) => asDisplayText(log?.ip || log?.ip_address || log?.remote_addr || null, '—');
+  const resolveLogAction = (log) => asDisplayText(log?.action, '—');
+  const resolveLogTarget = (log) => asDisplayText(log?.target_type ?? log?.details, '—');
 
   const isFallbackRollbackCandidate = (log) => {
     const action = String(log?.action || '').toUpperCase();
@@ -144,7 +168,6 @@ export default function AuditTrail() {
   if (!loadingLogs && logsError) {
     return (
       <div className="admin-page">
-        <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
         <StatePanel variant="error" title="Unable to load audit logs" description={logsError} actionLabel="Retry" onAction={() => fetchLogs(page)} compact />
       </div>
     );
@@ -152,7 +175,6 @@ export default function AuditTrail() {
 
   return (
     <div className="admin-page">
-      <Toaster position="top-right" reverseOrder={false} toastOptions={{ duration: 3000, style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)', animation: 'slideIn 0.2s ease-out, slideOut 0.2s ease-in' }, success: { style: { background: 'var(--bg-card)' } }, error: { style: { background: 'var(--bg-card)' } } }} />
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -215,15 +237,17 @@ export default function AuditTrail() {
 
       {/* Table */}
       <div className="glass-card table-desktop" style={{ overflowX: 'auto', overflowY: 'hidden' }}>
-        {loadingLogs ? (
-          <StatePanel variant="loading" title="Loading audit logs" description="Retrieving activity history and rollback status." compact />
+        {loadingLogs && logs.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
+            <p>Loading audit logs...</p>
+          </div>
         ) : null}
 
         {!loadingLogs && logsError ? (
           <StatePanel variant="error" title="Unable to load audit logs" description={logsError} actionLabel="Retry" onAction={() => fetchLogs(page)} compact />
         ) : null}
 
-        {!loadingLogs && !logsError && logs.length === 0 ? (
+        {!loadingLogs && !logsError && logs.length === 0 && !loadingLogs ? (
           <StatePanel variant="empty" title="No audit logs yet" description="New actions will appear here for traceability and rollback." compact />
         ) : null}
 
@@ -244,10 +268,7 @@ export default function AuditTrail() {
             {logs.map((log, i) => (
               <tr key={log._id || i}>
                 <td style={{ fontSize: '0.78rem', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
-                  {log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', {
-                    day: '2-digit', month: 'short', year: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit',
-                  }) : '—'}
+                  {formatDateTimeIndia(log.timestamp)}
                 </td>
                 <td>
                   <div>
@@ -259,11 +280,11 @@ export default function AuditTrail() {
                   <span className="badge badge-info" style={{ textTransform: 'capitalize' }}>{log.role || '—'}</span>
                 </td>
                 <td>
-                  <span className={`badge ${getActionColor(log.action)}`} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {log.action || '—'}
+                  <span className={`badge ${getActionColor(resolveLogAction(log))}`} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {resolveLogAction(log)}
                   </span>
                 </td>
-                <td style={{ fontSize: '0.82rem' }}>{log.target_type || '—'}</td>
+                <td style={{ fontSize: '0.82rem' }}>{resolveLogTarget(log)}</td>
                 <td style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{resolveLogIp(log)}</td>
                 <td style={{ textAlign: 'right', minWidth: 140 }}>
                   {log.rolled_back ? (
@@ -300,10 +321,7 @@ export default function AuditTrail() {
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Timestamp</span>
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  {log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN', {
-                    day: '2-digit', month: 'short', year: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit',
-                  }) : '—'}
+                  {formatDateTimeIndia(log.timestamp)}
                 </span>
               </div>
               <div className="mobile-card-row">
@@ -319,13 +337,13 @@ export default function AuditTrail() {
               </div>
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Action</span>
-                <span className={`badge ${getActionColor(log.action)}`} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {log.action || '—'}
+                <span className={`badge ${getActionColor(resolveLogAction(log))}`} style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {resolveLogAction(log)}
                 </span>
               </div>
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Target</span>
-                <span style={{ fontSize: '0.8rem' }}>{log.target_type || '—'}</span>
+                <span style={{ fontSize: '0.8rem' }}>{resolveLogTarget(log)}</span>
               </div>
               <div className="mobile-card-row">
                 <span className="mobile-card-label">IP</span>

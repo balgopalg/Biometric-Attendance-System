@@ -2,6 +2,7 @@
 
 import re
 import random
+import secrets
 import os
 import time
 import csv
@@ -12,7 +13,7 @@ import numpy as np
 from threading import Lock, Thread
 from uuid import uuid4
 
-from flask import Blueprint, request, jsonify, current_app, send_file
+from flask import Blueprint, request, jsonify, current_app, send_file, has_app_context
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
@@ -61,8 +62,8 @@ from app.models.user import (
     delete_user,
     find_user_by_id,
     find_user_by_email,
-    generate_temp_password,
     reset_user_password,
+    set_user_pin,
 )
 from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, normalize_embedding
@@ -70,12 +71,15 @@ from app.services.capture_upload import capture_faces_for_user, save_student_upl
 from utilities.train_model import train_and_save_face_model
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
+from app.utils.timezone import india_timestamp_token
+from app.utils.validation import validate_password_strength
 
 admin_bp = Blueprint("admin", __name__)
 
 _QUERY_CACHE = {}
 _QUERY_CACHE_LOCK = Lock()
 _QUERY_CACHE_TTL_SECONDS = 30
+_QUERY_CACHE_MAX_ENTRIES_DEFAULT = 500
 _ELIGIBILITY_CACHE_TTL_SECONDS = 20
 _QUEUE_CLIENT = None
 _QUEUE_CLIENT_LOCK = Lock()
@@ -101,10 +105,26 @@ def _cache_get(key):
 
 
 def _cache_set(key, value, ttl_seconds):
+    ttl = max(1, int(ttl_seconds or _QUERY_CACHE_TTL_SECONDS))
+    max_entries = _QUERY_CACHE_MAX_ENTRIES_DEFAULT
+    if has_app_context():
+        try:
+            max_entries = max(50, int(current_app.config.get("QUERY_CACHE_MAX_ENTRIES", _QUERY_CACHE_MAX_ENTRIES_DEFAULT)))
+        except Exception:
+            max_entries = _QUERY_CACHE_MAX_ENTRIES_DEFAULT
+
     with _QUERY_CACHE_LOCK:
+        # Evict the oldest cache entries first to keep memory bounded.
+        while len(_QUERY_CACHE) >= max_entries:
+            oldest_key = min(
+                _QUERY_CACHE,
+                key=lambda cache_key: _QUERY_CACHE.get(cache_key, {}).get("expires_at", float("inf")),
+            )
+            _QUERY_CACHE.pop(oldest_key, None)
+
         _QUERY_CACHE[key] = {
             "value": value,
-            "expires_at": time.monotonic() + ttl_seconds,
+            "expires_at": time.monotonic() + ttl,
         }
 
 
@@ -1511,8 +1531,15 @@ def list_lecturers(user):
 @role_required("admin")
 def add_lecturer(user):
     d = request.get_json(silent=True) or {}
-    temp_pw = generate_temp_password()
-    lec = create_user(d["name"], d["email"], temp_pw,
+    initial_password = str(d.get("initial_password", "")).strip()
+    if not initial_password:
+        return jsonify({"error": "initial_password is required and must be delivered out-of-band."}), 400
+
+    is_strong, msg = validate_password_strength(initial_password)
+    if not is_strong:
+        return jsonify({"error": msg}), 400
+
+    lec = create_user(d["name"], d["email"], initial_password,
                       "lecturer", d.get("department", ""),
                       must_change_password=True)
     log_action(
@@ -1523,7 +1550,10 @@ def add_lecturer(user):
     )
     _clear_query_cache()
     lec_clean = sanitise_mongo_doc(lec)
-    return jsonify({**lec_clean, "temp_password": temp_pw}), 201
+    return jsonify({
+        **lec_clean,
+        "message": "Lecturer created. Deliver the initial password via a secure out-of-band channel.",
+    }), 201
 
 
 @admin_bp.route("/lecturers/<lid>", methods=["PUT"])
@@ -1560,17 +1590,18 @@ def remove_lecturer(user, lid):
 @admin_bp.route("/lecturers/<lid>/reset-password", methods=["POST"])
 @role_required("admin")
 def reset_lecturer_password(user, lid):
-    temp_pw = reset_user_password(lid)
+    d = request.get_json(silent=True) or {}
+    temp_password = reset_user_password(lid, temp_password=str(d.get("temp_password", "")).strip() or None)
     log_action("RESET_PASSWORD", str(user["_id"]), target_user=lid,
                details="Lecturer password reset")
-    return jsonify({"temp_password": temp_pw})
+    return jsonify({"message": "Lecturer password reset.", "temp_password": temp_password})
 
 
 @admin_bp.route("/lecturers/<lid>/reset-pin", methods=["POST"])
 @role_required("admin")
 def reset_lecturer_pin(user, lid):
-    new_pin = f"{random.randint(0, 9999):04d}"
-    update_user(lid, {"pin": new_pin, "pin_last_set": datetime.utcnow()})
+    new_pin = f"{secrets.randbelow(10000):04d}"
+    set_user_pin(lid, new_pin)
     log_action("RESET_LECTURER_PIN", str(user["_id"]), target_user=lid,
                details="Admin reset lecturer PIN")
     return jsonify({"pin": new_pin, "message": "Lecturer PIN reset"})
@@ -1811,11 +1842,18 @@ def add_student(user):
     academic_session = _derive_academic_session(enrollment_year, course_duration)
 
     try:
-        temp_pw = generate_temp_password()
+        initial_password = str(d.get("initial_password", "")).strip()
+        if not initial_password:
+            return jsonify({"error": "initial_password is required and must be delivered out-of-band."}), 400
+
+        is_strong, msg = validate_password_strength(initial_password)
+        if not is_strong:
+            return jsonify({"error": msg}), 400
+
         stu = create_user(
             d["name"],
             d["email"],
-            temp_pw,
+            initial_password,
             "student",
             d.get("department", (course or {}).get("department", "")),
             must_change_password=True,
@@ -1865,7 +1903,7 @@ def add_student(user):
     except Exception as exc:
         current_app.logger.exception("Failed to update student profile")
         delete_user(str(stu["_id"]))
-        delete_profile(str(stu["_id"]))
+        delete_profile(str(stu["_id"]), user=stu)
         return jsonify({"error": f"Failed to update profile: {str(exc)}"}), 500
 
     profile = get_profile_by_user(str(stu["_id"]))
@@ -1888,7 +1926,11 @@ def add_student(user):
     stu_clean = sanitise_mongo_doc(stu)
     profile_clean = sanitise_mongo_doc(profile) if profile else None
     
-    return jsonify({**stu_clean, "profile": profile_clean, "temp_password": temp_pw}), 201
+    return jsonify({
+        **stu_clean,
+        "profile": profile_clean,
+        "message": "Student created. Deliver the initial password via a secure out-of-band channel.",
+    }), 201
 
 
 @admin_bp.route("/students/<sid>", methods=["PUT"])
@@ -2004,7 +2046,7 @@ def remove_student(user, sid):
     prev_profile = get_profile_by_user(user_id)
 
     delete_user(user_id)
-    delete_profile(user_id)
+    delete_profile(user_id, user=prev_user)
     rollback_ops = []
     if prev_user:
         rollback_ops.append(_rb_restore("auth", "users", prev_user))
@@ -2106,10 +2148,11 @@ def reset_student_password(user, sid):
     if not user_id:
         return jsonify({"error": "Student not found"}), 404
 
-    temp_pw = reset_user_password(user_id)
+    d = request.get_json(silent=True) or {}
+    temp_password = reset_user_password(user_id, temp_password=str(d.get("temp_password", "")).strip() or None)
     log_action("RESET_PASSWORD", str(user["_id"]), target_user=user_id,
                details="Student password reset")
-    return jsonify({"temp_password": temp_pw})
+    return jsonify({"message": "Student password reset.", "temp_password": temp_password})
 
 
 # ─── Student Enrollment (Photo → Embedding) ────────────────────────────────
@@ -2130,7 +2173,12 @@ def enroll_student_face(user):
     if not resolved_user_id:
         return jsonify({"error": "Student not found"}), 404
 
-    img = decode_base64_image(photo_b64)
+    try:
+        img = decode_base64_image(photo_b64)
+    except Exception:
+        current_app.logger.exception("Invalid enrollment image payload")
+        return jsonify({"error": "Invalid image format. Please upload a valid PNG or JPEG photo."}), 400
+
     try:
         detector = get_detector()
         faces = detector.detect_faces(img)
@@ -2145,10 +2193,10 @@ def enroll_student_face(user):
     face_crop = faces[0]["crop"]
     try:
         embedding = normalize_embedding(generate_embedding(face_crop))
+        add_face_embedding(resolved_user_id, embedding)
     except Exception as exc:
-        current_app.logger.exception("Embedding generation failed")
-        return jsonify({"error": f"Embedding generation failed: {exc}"}), 500
-    add_face_embedding(resolved_user_id, embedding)
+        current_app.logger.exception("Embedding persistence failed")
+        return jsonify({"error": f"Failed to store face embedding: {exc}"}), 500
 
     dataset_saved_count = 0
     dataset_warning = None
@@ -3181,9 +3229,15 @@ def list_audit_logs(user):
 
     logs, total = get_audit_logs(page, per_page, filters)
     audit_user_ids = [
-        item.get("performed_by") for item in logs if item.get("performed_by")
+        item.get("performed_by") or item.get("actor_user_id")
+        for item in logs
+        if item.get("performed_by") or item.get("actor_user_id")
     ] + [
-        item.get("target_user") for item in logs if item.get("target_user")
+        item.get("target_user")
+        or ((item.get("details") or {}).get("user_id") if isinstance(item.get("details"), dict) else None)
+        for item in logs
+        if item.get("target_user")
+        or (isinstance(item.get("details"), dict) and (item.get("details") or {}).get("user_id"))
     ]
     user_map = get_users_by_ids(audit_user_ids)
 
@@ -3191,10 +3245,14 @@ def list_audit_logs(user):
     for raw in logs:
         item = sanitise_mongo_doc(raw)
 
-        actor = user_map.get(_as_text(item.get("performed_by"))) if item.get("performed_by") else None
-        target_user = user_map.get(_as_text(item.get("target_user"))) if item.get("target_user") else None
+        actor_id = item.get("performed_by") or item.get("actor_user_id")
+        details_user_id = (item.get("details") or {}).get("user_id") if isinstance(item.get("details"), dict) else None
+        target_user_id = item.get("target_user") or details_user_id
 
-        item["actor_name"] = (actor or {}).get("name") or "Unknown User"
+        actor = user_map.get(_as_text(actor_id)) if actor_id else None
+        target_user = user_map.get(_as_text(target_user_id)) if target_user_id else None
+
+        item["actor_name"] = (actor or {}).get("name") or ("System" if str(actor_id).lower() == "system" else "Unknown User")
         item["actor_email"] = (actor or {}).get("email") or ""
         item["role"] = (actor or {}).get("role") or item.get("role") or "unknown"
 
@@ -3203,8 +3261,8 @@ def list_audit_logs(user):
             item["target_user_name"] = target_user.get("name")
             item["target_user_email"] = target_user.get("email")
             item["target_user_role"] = target_user.get("role")
-        elif item.get("target_user"):
-            item["target_type"] = f"User {item.get('target_user')}"
+        elif target_user_id:
+            item["target_type"] = f"User {target_user_id}"
         else:
             item["target_type"] = item.get("details") or "System"
 
@@ -4177,8 +4235,7 @@ def attendance_matrix_export(user):
     wb.save(stream)
     stream.seek(0)
 
-    local_now = datetime.utcnow() - timedelta(minutes=tz_offset_minutes)
-    filename = f"attendance_matrix_{local_now.strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"attendance_matrix_{india_timestamp_token()}.xlsx"
     return send_file(
         stream,
         as_attachment=True,
@@ -4225,8 +4282,7 @@ def attendance_matrix_export_csv(user):
     csv_bytes = output.getvalue().encode("utf-8-sig")
     stream = BytesIO(csv_bytes)
     stream.seek(0)
-    local_now = datetime.utcnow() - timedelta(minutes=tz_offset_minutes)
-    filename = f"attendance_matrix_{local_now.strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"attendance_matrix_{india_timestamp_token()}.csv"
 
     return send_file(
         stream,

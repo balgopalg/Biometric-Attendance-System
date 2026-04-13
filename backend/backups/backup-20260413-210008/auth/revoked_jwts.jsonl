@@ -1,0 +1,1 @@
+{"_id": {"$oid": "69dd57da33f27b29cf95bdcf"}, "jti": "f50c144d-18dc-4c22-b4d6-1d47f188c38b", "expires_at": {"$date": "2026-04-13T21:53:16Z"}, "revoked_at": {"$date": "2026-04-13T20:53:46.336Z"}}
