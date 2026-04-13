@@ -21,6 +21,11 @@ _EMBEDDING_CIPHER = None
 _EMBEDDING_CIPHER_KEY = None
 _LOCAL_ENVS = {"development", "dev", "local", "testing", "test"}
 _NOISY_PAPER_PROFILE_ACTIONS = {"paper_profile_read", "paper_profile_count"}
+_DEDUPED_BIOMETRIC_ACTIONS = {
+    "student_profile_read",
+    "student_profile_read_by_id",
+    "student_profiles_bulk_read",
+}
 
 
 def _append_noisy_profile_log(payload):
@@ -85,6 +90,21 @@ def _log_biometric_read(action, user_id=None, details=None):
             _append_noisy_profile_log(payload)
             return
 
+        dedupe_key = ""
+        dedupe_seconds = 0
+        if action in _DEDUPED_BIOMETRIC_ACTIONS:
+            dedupe_key = "|".join(
+                [
+                    str(action or ""),
+                    str(actor_user_id or "system"),
+                    str(target_user_id or ""),
+                    str(request.remote_addr or ""),
+                    str(request.path or ""),
+                    str(request.method or ""),
+                ]
+            )
+            dedupe_seconds = 3
+
         log_action(
             action=action,
             performed_by=actor_user_id or "system",
@@ -93,6 +113,8 @@ def _log_biometric_read(action, user_id=None, details=None):
             resource_type="biometric_profile",
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent", ""),
+            dedupe_key=dedupe_key,
+            dedupe_seconds=dedupe_seconds,
         )
     except Exception:
         current_app.logger.debug("biometric read audit logging skipped", exc_info=True)

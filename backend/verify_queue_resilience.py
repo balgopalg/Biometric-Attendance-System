@@ -20,6 +20,10 @@ from app.config import Config
 from app.extensions import mongo
 from app.extensions import get_collection
 from app.routes import admin as admin_routes
+from app.utils import TerminalMessenger
+
+
+MESSENGER = TerminalMessenger()
 
 
 def _create_stale_running_job():
@@ -71,7 +75,11 @@ def _validate_stale_recovery():
     row = jobs.find_one({"job_id": job_id}) or {}
 
     ok = bool(recovered >= 1 and str(row.get("status", "")).lower() == "queued")
-    print(f"- stale running recovery: {'OK' if ok else 'FAILED'} (job_id={job_id}, recovered={recovered}, status={row.get('status')})")
+    MESSENGER.check(
+        "Stale running recovery",
+        ok,
+        details=f"job_id={job_id} recovered={recovered} status={row.get('status')}",
+    )
 
     jobs.delete_one({"job_id": job_id})
     return ok
@@ -80,7 +88,7 @@ def _validate_stale_recovery():
 def _validate_delayed_promotion():
     client = admin_routes._get_task_queue_client()
     if client is None:
-        print("- delayed promotion: SKIPPED (Redis queue not configured/reachable)")
+        MESSENGER.warning("Delayed promotion skipped: Redis queue not configured/reachable")
         return True
 
     queue_name, delayed_queue_name = admin_routes._get_queue_names()
@@ -97,10 +105,13 @@ def _validate_delayed_promotion():
     still_delayed = bool(client.zscore(delayed_queue_name, job_id) is not None)
     ok = bool(moved >= 1 and in_queue and not still_delayed)
 
-    print(
-        "- delayed promotion: "
-        f"{'OK' if ok else 'FAILED'} "
-        f"(job_id={job_id}, moved={moved}, queue_depth={queue_depth}, still_delayed={still_delayed})"
+    MESSENGER.check(
+        "Delayed promotion",
+        ok,
+        details=(
+            f"job_id={job_id} moved={moved} queue_depth={queue_depth} "
+            f"still_delayed={still_delayed}"
+        ),
     )
 
     client.lrem(queue_name, 0, job_id)
@@ -114,12 +125,22 @@ def main() -> int:
     mongo.cx = MongoClient(app.config["MONGO_URI"])
 
     with app.app_context():
-        print("Queue resilience diagnostics:")
+        MESSENGER.banner("Queue Resilience Diagnostics")
+        MESSENGER.section("Validation")
         stale_ok = _validate_stale_recovery()
         delayed_ok = _validate_delayed_promotion()
 
         all_ok = stale_ok and delayed_ok
-        print("\nResult:", "PASS" if all_ok else "FAIL")
+        MESSENGER.summary(
+            "Queue resilience diagnostics",
+            passed=int(stale_ok) + int(delayed_ok),
+            failed=(0 if stale_ok else 1) + (0 if delayed_ok else 1),
+        )
+        MESSENGER.final_status(
+            all_ok,
+            success_message="Queue resilience diagnostics passed.",
+            failure_message="Queue resilience diagnostics failed.",
+        )
         return 0 if all_ok else 1
 
 
