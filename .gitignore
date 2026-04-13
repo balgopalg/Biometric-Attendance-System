@@ -53,6 +53,7 @@ backend/dataset/
 backend/trainer/*.keras
 backend/trainer/*.h5
 !backend/trainer/.gitkeep
+security_verification_results.json
 
 # Local environment files
 .env
