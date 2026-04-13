@@ -84,7 +84,13 @@ _ELIGIBILITY_CACHE_TTL_SECONDS = 20
 _QUEUE_CLIENT = None
 _QUEUE_CLIENT_LOCK = Lock()
 _QUEUE_UNAVAILABLE_LOGGED = False
-_AUDIT_EXCLUDED_ACTIONS = ["paper_profile_read", "paper_profile_count"]
+_AUDIT_EXCLUDED_ACTIONS = [
+    "paper_profile_read",
+    "paper_profile_count",
+    "student_profile_read",
+    "student_profile_read_by_id",
+    "student_profiles_bulk_read",
+]
 
 
 class _JobCancelledError(Exception):

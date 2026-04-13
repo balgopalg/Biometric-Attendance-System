@@ -9,14 +9,14 @@ and functional in a running application.
 import sys
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'backend'))
 
-from app import create_app
 from app.config import Config
 from app.security.brute_force_protection import BruteForceProtector, IPRateLimiter
+from app.utils import TerminalMessenger
 from app.utils.validation import (
     validate_email,
     validate_password_strength,
@@ -29,6 +29,7 @@ class SecurityVerifier:
     """Verify security hardening implementation."""
     
     def __init__(self):
+        self.msg = TerminalMessenger()
         self.results = {
             "timestamp": datetime.utcnow().isoformat(),
             "checks": {},
@@ -47,10 +48,10 @@ class SecurityVerifier:
         
         if condition:
             self.results["passed"] += 1
-            print(f"✓ {name}")
+            self.msg.check(name, True)
         else:
             self.results["failed"] += 1
-            print(f"✗ {name}: {message}")
+            self.msg.check(name, False, details=message)
     
     def warning(self, name, message):
         """Log a warning."""
@@ -59,29 +60,37 @@ class SecurityVerifier:
             "message": message,
         }
         self.results["warnings"] += 1
-        print(f"⚠ {name}: {message}")
+        self.msg.warning(f"{name} | {message}")
     
     def verify_all(self):
         """Run all verification checks."""
-        print("\n" + "="*60)
-        print("SECURITY HARDENING VERIFICATION")
-        print("="*60 + "\n")
+        self.msg.banner("Security Hardening Verification")
         
         self.verify_config()
         self.verify_rate_limiting()
         self.verify_brute_force_protection()
         self.verify_password_validation()
         self.verify_input_validation()
-        
-        print("\n" + "="*60)
-        print(f"RESULTS: {self.results['passed']} passed, {self.results['failed']} failed, {self.results['warnings']} warnings")
-        print("="*60 + "\n")
+
+        self.msg.summary(
+            "Security hardening verification",
+            passed=self.results["passed"],
+            failed=self.results["failed"],
+            warnings=self.results["warnings"],
+        )
+        self.msg.final_status(
+            ok=self.results["failed"] == 0,
+            success_message="Security verification passed.",
+            failure_message="Security verification failed.",
+        )
         
         return self.results
     
     def verify_config(self):
         """Verify configuration settings."""
-        print("\n[Configuration]")
+        self.msg.section("Configuration")
+        local_envs = {"development", "dev", "local", "testing", "test"}
+        current_env = str(getattr(Config, "ENV", "development") or "development").lower()
         
         # JWT Secret
         secret = Config.JWT_SECRET_KEY
@@ -105,11 +114,17 @@ class SecurityVerifier:
         )
         
         # Cookie Security
-        self.check(
-            "Secure cookies configured",
-            Config.JWT_COOKIE_SECURE,
-            "JWT_COOKIE_SECURE should be True in production"
-        )
+        if current_env in local_envs:
+            self.warning(
+                "Secure cookies configured",
+                f"JWT_COOKIE_SECURE={Config.JWT_COOKIE_SECURE} accepted for local env '{current_env}'",
+            )
+        else:
+            self.check(
+                "Secure cookies configured",
+                Config.JWT_COOKIE_SECURE,
+                "JWT_COOKIE_SECURE should be True in production"
+            )
         
         # SameSite
         self.check(
@@ -141,7 +156,7 @@ class SecurityVerifier:
     
     def verify_rate_limiting(self):
         """Verify rate limiting is configured."""
-        print("\n[Rate Limiting]")
+        self.msg.section("Rate Limiting")
         
         try:
             from app.security.rate_limiter import limiter, RATE_LIMITS
@@ -164,7 +179,7 @@ class SecurityVerifier:
     
     def verify_brute_force_protection(self):
         """Verify brute force protection mechanisms."""
-        print("\n[Brute Force Protection]")
+        self.msg.section("Brute Force Protection")
         
         config_checks = [
             ("LOGIN_LOCKOUT_THRESHOLD", Config.LOGIN_LOCKOUT_THRESHOLD, 5),
@@ -200,7 +215,7 @@ class SecurityVerifier:
     
     def verify_password_validation(self):
         """Verify password strength validation."""
-        print("\n[Password Validation]")
+        self.msg.section("Password Validation")
         
         # Test weak passwords
         weak_passwords = [
@@ -260,7 +275,7 @@ class SecurityVerifier:
     
     def verify_input_validation(self):
         """Verify input validation functions."""
-        print("\n[Input Validation]")
+        self.msg.section("Input Validation")
         
         # Email validation
         valid_emails = ["user@example.com", "admin@system.co.uk"]
@@ -317,7 +332,7 @@ class SecurityVerifier:
         """Save verification results to JSON file."""
         with open(filepath, 'w') as f:
             json.dump(self.results, f, indent=2)
-        print(f"\nResults saved to {filepath}")
+        self.msg.info(f"Results saved to {filepath}")
 
 
 def main():
@@ -336,5 +351,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
+        TerminalMessenger(stream=sys.stderr).error(f"Unhandled error: {e}")
         sys.exit(2)

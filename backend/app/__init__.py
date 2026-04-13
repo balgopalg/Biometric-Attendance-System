@@ -240,6 +240,18 @@ def _ensure_indexes(mongo, config):
     audits = client[config["MONGO_DB_AUDIT"]]["audit_logs"]
     _create_index_safe(audits, [("timestamp", DESCENDING)], name="ix_audit_timestamp")
     _create_index_safe(audits, [("action", ASCENDING)], name="ix_audit_action")
+    _create_index_safe(
+        audits,
+        [
+            ("action", ASCENDING),
+            ("performed_by", ASCENDING),
+            ("dedupe_key", ASCENDING),
+            ("dedupe_bucket", ASCENDING),
+        ],
+        unique=True,
+        name="uq_audit_dedupe_bucket",
+        partialFilterExpression={"dedupe_key": {"$exists": True}, "dedupe_bucket": {"$exists": True}},
+    )
 
     failed_login_attempts = client[config["MONGO_DB_AUTH"]]["failed_login_attempts"]
     _create_index_safe(failed_login_attempts, [("ttl", ASCENDING)], name="ix_failed_logins_ttl", expireAfterSeconds=0)

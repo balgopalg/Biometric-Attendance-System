@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from bson import ObjectId
+from pymongo import ReturnDocument
 from app.extensions import get_collection
 
 
@@ -26,6 +27,12 @@ def log_action(
     target_user = target_user if target_user is not None else kwargs.get("target_user")
     details = details or kwargs.get("details") or kwargs.get("description", "")
 
+    dedupe_seconds = int(kwargs.get("dedupe_seconds") or 0)
+    dedupe_key = str(kwargs.get("dedupe_key") or "").strip()
+    dedupe_bucket = None
+    if dedupe_seconds > 0 and dedupe_key:
+        dedupe_bucket = int(ts.timestamp()) // dedupe_seconds
+
     doc = {
         "action": action,
         "performed_by": performed_by,
@@ -39,10 +46,30 @@ def log_action(
         doc["ip_address"] = kwargs.get("ip_address")
     if kwargs.get("user_agent"):
         doc["user_agent"] = kwargs.get("user_agent")
+    if dedupe_key:
+        doc["dedupe_key"] = dedupe_key
+    if dedupe_bucket is not None:
+        doc["dedupe_bucket"] = dedupe_bucket
     if rollback:
         doc["rollback"] = rollback
         doc["rollback_until"] = rollback_until or (ts + timedelta(hours=ROLLBACK_WINDOW_HOURS))
         doc["rolled_back"] = False
+
+    if dedupe_bucket is not None:
+        existing = logs.find_one_and_update(
+            {
+                "action": action,
+                "performed_by": performed_by,
+                "dedupe_key": dedupe_key,
+                "dedupe_bucket": dedupe_bucket,
+            },
+            {"$setOnInsert": doc},
+            upsert=True,
+            return_document=ReturnDocument.BEFORE,
+        )
+        if existing is not None:
+            return existing
+        return doc
 
     logs.insert_one(doc)
     return doc
