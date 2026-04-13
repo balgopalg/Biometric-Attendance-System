@@ -20,6 +20,23 @@ _EMBEDDING_PREFIX = "enc:"
 _EMBEDDING_CIPHER = None
 _EMBEDDING_CIPHER_KEY = None
 _LOCAL_ENVS = {"development", "dev", "local", "testing", "test"}
+_NOISY_PAPER_PROFILE_ACTIONS = {"paper_profile_read", "paper_profile_count"}
+
+
+def _append_noisy_profile_log(payload):
+    """Persist high-volume profile access telemetry to backend/logs/logs.txt."""
+    try:
+        backend_dir = os.path.dirname(current_app.root_path)
+        logs_dir = os.path.join(backend_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        logs_file = os.path.join(logs_dir, "logs.txt")
+
+        stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{stamp}] {json.dumps(payload, default=str, separators=(',', ':'))}"
+        with open(logs_file, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except Exception:
+        current_app.logger.debug("noisy profile file logging skipped", exc_info=True)
 
 
 def _current_env():
@@ -63,6 +80,11 @@ def _log_biometric_read(action, user_id=None, details=None):
             target_user_id,
             request.path,
         )
+
+        if action in _NOISY_PAPER_PROFILE_ACTIONS:
+            _append_noisy_profile_log(payload)
+            return
+
         log_action(
             action=action,
             performed_by=actor_user_id or "system",

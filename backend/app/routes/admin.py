@@ -84,6 +84,9 @@ _ELIGIBILITY_CACHE_TTL_SECONDS = 20
 _QUEUE_CLIENT = None
 _QUEUE_CLIENT_LOCK = Lock()
 _QUEUE_UNAVAILABLE_LOGGED = False
+_AUDIT_EXCLUDED_ACTIONS = ["paper_profile_read", "paper_profile_count"]
+
+
 class _JobCancelledError(Exception):
     """Raised when a background job cancellation request is detected."""
 
@@ -3226,6 +3229,16 @@ def list_audit_logs(user):
 
     if ts_filter:
         filters["timestamp"] = ts_filter
+
+    if filters:
+        filters = {
+            "$and": [
+                filters,
+                {"action": {"$nin": _AUDIT_EXCLUDED_ACTIONS}},
+            ]
+        }
+    else:
+        filters = {"action": {"$nin": _AUDIT_EXCLUDED_ACTIONS}}
 
     logs, total = get_audit_logs(page, per_page, filters)
     audit_user_ids = [

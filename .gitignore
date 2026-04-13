@@ -12,6 +12,7 @@ Thumbs.db
 *.seed
 *.out
 *.err
+backend/logs/
 
 # --- Python backend ---
 __pycache__/
