@@ -4,7 +4,7 @@
 
 ### 1️⃣ Rate Limiting
 **What:** Limit requests to prevent abuse  
-**Where:** Login (5/min), Password change (10/min), Enrollments (20/min)  
+**Where:** Login (20/min), Password change (10/min), Enrollments (20/min)  
 **Files:** `app/security/rate_limiter.py`  
 **Config:** `RATELIMIT_ENABLED=true`
 
@@ -79,13 +79,13 @@ python ../verify_security.py
 
 ### 4. Test Features
 ```bash
-# Try login rate limiting (5 per minute)
-for i in {1..6}; do
+# Try login rate limiting (20 per minute)
+for i in {1..21}; do
   curl -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"test@test.com","password":"test"}'
 done
-# 6th request should return 429
+# 21st request should return 429
 
 # Try brute force (5 fails = lockout for 15 min)
 for i in {1..5}; do
@@ -132,7 +132,7 @@ STRICT_JWT_SECRET=true
 ## 🛡️ Security Features By Endpoint
 
 ### `/api/auth/login`
-- ✅ Rate limited: 5 per minute per IP
+- ✅ Rate limited: 20 per minute per IP
 - ✅ Brute force protected: Lockout after 5 failures
 - ✅ IP rate limited: Block after 100 requests in 10 min
 - ✅ Email validated

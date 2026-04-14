@@ -12,7 +12,7 @@ This document outlines the comprehensive security hardening implemented for the 
 
 | Endpoint | Limit | Description |
 |----------|-------|-------------|
-| `POST /api/auth/login` | 5 per minute per IP | Login attempts |
+| `POST /api/auth/login` | 20 per minute per IP | Login attempts |
 | `POST /api/auth/change-password` | 10 per minute per user | Password changes |
 | `POST /api/lecturer/session/commit` | 30 per minute per lecturer | Session commits (PIN entry) |
 | `POST /api/admin/students/enroll` | 20 per minute | Student enrollments |

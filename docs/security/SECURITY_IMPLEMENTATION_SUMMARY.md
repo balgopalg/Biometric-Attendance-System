@@ -5,7 +5,7 @@
 ### 1. Rate Limiting (✓ Implemented)
 - **Framework:** Flask-Limiter with configurable backends
 - **Protected Endpoints:**
-  - Login: 5 attempts per minute per IP
+  - Login: 20 attempts per minute per IP
   - Password change: 10 per minute per user
   - Session commits (PIN): 30 per minute
   - Enrollment: 20 per minute
@@ -182,7 +182,7 @@ if STRICT_JWT_SECRET and len(JWT_SECRET_KEY) < 32:
 └──────────────────┬──────────────────┘
                    │
         ┌──────────▼──────────┐
-        │  Rate Limiter       │ ←─ Flask-Limiter (5/min per IP)
+        │  Rate Limiter       │ ←─ Flask-Limiter (20/min per IP)
         │  (Endpoint check)   │
         └──────────┬──────────┘
                    │
@@ -263,7 +263,7 @@ if app.config.get("RATELIMIT_ENABLED", True):
 ### `app/routes/auth.py`
 ```python
 @auth_bp.route("/login", methods=["POST"])
-@limiter.limit("5 per minute")
+@limiter.limit("20 per minute")
 def login():
     # Added brute-force protection
     # Added IP rate limiting
@@ -324,14 +324,14 @@ RESULTS: 25 passed, 0 failed, 0 warnings
 
 ### Test Rate Limiting
 ```bash
-# Login 5 times within 1 minute from same IP
-for i in {1..6}; do
+# Login 20 times within 1 minute from same IP
+for i in {1..21}; do
   curl -X POST http://localhost:5000/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"user@test.com","password":"test"}'
 done
 
-# 6th request should return 429 Too Many Requests
+# 21st request should return 429 Too Many Requests
 ```
 
 ### Test Brute Force Protection
