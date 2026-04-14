@@ -1,361 +1,286 @@
 # Biometric Face Attendance Management System
 
-Final-year full stack project for smart classroom attendance using face recognition, role-based dashboards, and audit-driven administration.
+Production-ready full stack attendance platform for classroom operations using face recognition, role-based workflows, audit logging, and operational tooling.
 
-## Overview
+## What This Repository Contains
 
-This system provides:
-
-- Admin management for courses, papers, lecturers, and students
-- Biometric attendance capture for lecturers
-- Attendance analytics and eligibility views for students
-- Audit trail with rollback support for eligible admin actions
-
-## Documentation Bundle
-
-- Documentation hub (single entrypoint): [docs/README.md](docs/README.md)
-- API contract (OpenAPI): [docs/openapi.yaml](docs/openapi.yaml)
-- Full API contract (all endpoints): [docs/openapi.full.yaml](docs/openapi.full.yaml)
-- Operations manual (what/when/why/how): [/docs/operations/SYSTEM_OPERATIONS_MANUAL.md](/docs/operations/SYSTEM_OPERATIONS_MANUAL.md)
-- Workflow payloads and validation examples: [/docs/governance/API_WORKFLOW_GUIDE.md](/docs/governance/API_WORKFLOW_GUIDE.md)
-- CLI command runbook: [/docs/operations/CLI_COMMAND_RUNBOOK.md](/docs/operations/CLI_COMMAND_RUNBOOK.md)
-- Incident response and recovery policy: [/docs/operations/INCIDENT_RESPONSE_AND_RECOVERY.md](/docs/operations/INCIDENT_RESPONSE_AND_RECOVERY.md)
-- Biometric privacy and compliance policy: [/docs/governance/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md](/docs/governance/BIOMETRIC_PRIVACY_AND_COMPLIANCE.md)
-- Release management policy: [/docs/governance/RELEASE_MANAGEMENT_POLICY.md](/docs/governance/RELEASE_MANAGEMENT_POLICY.md)
-- API lifecycle policy: [/docs/governance/API_LIFECYCLE_POLICY.md](/docs/governance/API_LIFECYCLE_POLICY.md)
-- Deployment guide (Docker baseline): [/docs/operations/DEPLOYMENT_PRODUCTION.md](/docs/operations/DEPLOYMENT_PRODUCTION.md)
-- Docker step-by-step run guide: [/docs/operations/DOCKER_RUN_STEP_BY_STEP.md](/docs/operations/DOCKER_RUN_STEP_BY_STEP.md)
-
-## Deployment Assets
-
-- Compose stack: [docker-compose.yml](docker-compose.yml)
-- Backend container: [backend/Dockerfile](backend/Dockerfile)
-- Frontend container: [frontend/Dockerfile](frontend/Dockerfile)
-- Backend staging env template: [backend/.env.staging.example](backend/.env.staging.example)
-- Backend production env template: [backend/.env.production.example](backend/.env.production.example)
+- Backend API and background worker (Flask + MongoDB + Redis queue mode)
+- Frontend web app (React + Vite)
+- Face processing pipeline (MediaPipe + TensorFlow/Keras-based embedding flow)
+- Security hardening checks, observability checks, and queue resilience diagnostics
+- Backup/restore, migration, and maintenance scripts
+- Docker Compose stack for local/production-like runs
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|------------|
-| Frontend | React, Vite, Tailwind CSS, Framer Motion |
-| Backend | Python, Flask, Flask-JWT-Extended |
-| Database | MongoDB |
-| Face Pipeline | MediaPipe (face detection), FaceNet-style embeddings |
-| UX Libraries | React Hot Toast, React Icons |
+|---|---|
+| Frontend | React 19, Vite 8, Tailwind CSS 4, React Router, Framer Motion |
+| Backend | Python 3.12, Flask 3.1, Flask-JWT-Extended, Flask-Limiter |
+| Data | MongoDB 7 (multi-database split: auth, academic, attendance, audit) |
+| Queue | Redis 7 + worker process (`backend/worker.py`) |
+| Face | MediaPipe, TensorFlow, Keras, keras-facenet |
+| Export/Utility | openpyxl, Pillow |
+| Observability | Prometheus client, Sentry SDK, structured logging |
 
-## Core Features
+## Key Features
 
 ### Admin
 
-- CRUD: Courses, Papers, Lecturers, Students
-- Smart student workflows:
-	- Auto semester assignment at registration (Semester 1)
-	- Bulk semester promotion with course-duration max-semester guard
-	- Auto removal of old-semester paper mappings on promotion
-- Student paper bulk assignment
-- Lecturer-paper assignment management
-- Face enrollment (upload photo -> detect face -> store embedding)
-- Attendance Matrix module:
-	- Filtered by Course + Academic Session + Semester
-	- Date-grouped attendance table with per-day subject sub-columns
-	- Student-wise sequential attendance numbering (absent = `X`)
-	- Sticky left identity columns and right summary columns (`TCA`, `TCH`, `%`)
-	- CSV/Excel export with date-wise grouped headers and totals
-- Audit Trail with 1-day rollback for eligible create/update/delete operations
+- Manage courses, papers, lecturers, students, and mappings
+- Enrollment workflows and semester progression utilities
+- Attendance matrix and exports
+- Audit trail with rollback support for eligible operations
 
 ### Lecturer
 
-- Attendance session lifecycle:
-	- Start
-	- Pause/Resume
-	- Stop
-- Live face recognition and recognized list updates
-- PIN-protected commit and rollback window for corrections
+- Attendance session lifecycle: start, pause, resume, stop
+- Live recognition-assisted attendance
+- PIN-protected sensitive actions and correction windows
 
 ### Student
 
-- Course details and assigned papers
-- Attendance summary by paper
-- Prediction metrics:
-	- Classes needed for 75%
-	- Safe bunks remaining
-- Exam eligibility view
+- Attendance summary by assigned papers
+- Eligibility and projection views
+- Course and paper visibility
 
-## Project Structure
+## Repository Layout
 
 ```text
 .
-├── .github/
-│   └── workflows/
-│       └── quality.yml   # CI checks (frontend lint/build + backend compile)
 ├── backend/
-│   ├── .env.example      # Environment template
 │   ├── app/
-│   │   ├── models/        # Data access helpers
-│   │   ├── routes/        # Auth/Admin/Lecturer/Student APIs
-│   │   ├── services/      # Face detection/recognition logic
-│   │   ├── utils/         # Helpers and decorators
-│   │   ├── config.py
-│   │   ├── extensions.py
-│   │   └── __init__.py
-│   ├── delete.py          # Full reset utility (DB + runtime folders)
-│   ├── requirements.txt
-│   ├── seedAdmin.py
-│   └── run.py
+│   │   ├── models/
+│   │   ├── observability/
+│   │   ├── routes/
+│   │   ├── security/
+│   │   ├── services/
+│   │   └── utils/
+│   ├── migrations/
+│   ├── scripts/
+│   ├── tests/
+│   ├── run.py
+│   ├── worker.py
+│   ├── migrate.py
+│   ├── backup.py
+│   ├── restore.py
+│   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── api/
-│   │   ├── components/
-│   │   ├── context/
-│   │   ├── hooks/
-│   │   └── pages/
+│   ├── tests/
 │   ├── package.json
 │   └── vite.config.js
-├── .gitignore
+├── docs/
+├── docker-compose.yml
+├── verify_security.py
 └── README.md
 ```
 
+## Documentation
+
+- Documentation hub: `docs/README.md`
+- API contracts: `docs/openapi.yaml`, `docs/openapi.full.yaml`
+- Operations runbooks: `docs/operations/`
+- Security documents: `docs/security/` and `docs/governance/`
+
 ## Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- MongoDB running locally (default `mongodb://localhost:27017`)
+- Python 3.12 recommended
+- Node.js 20 recommended
+- MongoDB running (local mode) or Docker Compose
+- Redis (only required when queue mode is enabled)
 
-## Local Setup
+## Local Development Setup
 
-### 1. Backend
+### 1) Backend
 
-```bash
+```powershell
 cd backend
-# You can use either backend/.venv or the workspace-level .venv
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python seedAdmin.py
+Copy-Item .env.example .env
+```
+
+Update `backend/.env` for your environment.
+
+Start the API:
+
+```powershell
+cd backend
 python run.py
 ```
 
-Create `backend/.env` from `backend/.env.example`:
+Backend base URL: `http://localhost:5000`
 
-```bash
-cd backend
-copy .env.example .env
-```
+### 2) Frontend
 
-Then set values in `backend/.env`:
-
-```dotenv
-MONGO_URI=mongodb://localhost:27017/biometric_attendance
-MONGO_DB_AUTH=biometric_auth
-MONGO_DB_ACADEMIC=biometric_academic
-MONGO_DB_ATTENDANCE=biometric_attendance_ops
-MONGO_DB_AUDIT=biometric_audit
-JWT_SECRET_KEY=replace-with-a-strong-random-secret
-STRICT_JWT_SECRET=0
-FACENET_THRESHOLD=0.60
-CORS_ORIGINS=http://localhost:5173
-UPLOAD_FOLDER=uploads
-SLOW_REQUEST_THRESHOLD_MS=500
-
-# Optional async job queue (recommended for production)
-TASK_QUEUE_ENABLED=0
-TASK_QUEUE_REDIS_URL=redis://localhost:6379/0
-TASK_QUEUE_NAME=biometric:jobs
-TASK_QUEUE_MAX_RETRIES=3
-TASK_QUEUE_BASE_BACKOFF_SECONDS=10
-TASK_QUEUE_MAX_BACKOFF_SECONDS=300
-TASK_QUEUE_BACKOFF_JITTER_RATIO=0.25
-TASK_QUEUE_RUNNING_TIMEOUT_SECONDS=900
-```
-
-Use your own strong JWT secret. Do not reuse sample values in production.
-
-Backend runs on `http://localhost:5000`.
-
-### 2. Frontend
-
-```bash
+```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`.
+Frontend URL: `http://localhost:5173`
 
-### Optional Worker (Production Queue Mode)
+The Vite dev server proxies `/api/*` to backend (default `http://localhost:5000`).
 
-If `TASK_QUEUE_ENABLED=1`, start a separate worker process:
+### 3) Seed First Admin (Interactive)
 
-```bash
+```powershell
+cd backend
+python seedAdmin.py
+```
+
+Notes:
+
+- Seeding is interactive and cancels if an admin already exists.
+- Auto-seeding can also be controlled via env (`ENABLE_DEFAULT_ADMIN_SEED`).
+
+## Queue/Worker Mode (Optional but Recommended)
+
+Enable queue mode in `backend/.env`:
+
+```dotenv
+TASK_QUEUE_ENABLED=1
+TASK_QUEUE_REDIS_URL=redis://localhost:6379/0
+TASK_QUEUE_NAME=biometric:jobs
+```
+
+Run worker in a second terminal:
+
+```powershell
 cd backend
 python worker.py
 ```
 
-Queue behavior in this mode:
+If queue mode is disabled (`TASK_QUEUE_ENABLED=0`), the app can run without worker/Redis queue processing.
 
-- Jobs are persisted in MongoDB (`attendance.background_jobs`)
-- Failed jobs retry with exponential backoff and jitter
-- After max retries, jobs move to dead-letter status (`dead_letter`)
-- Stale running jobs are automatically recovered and re-queued by workers
-- Metrics endpoint for admins: `GET /api/admin/jobs/metrics`
-- List dead-letter jobs: `GET /api/admin/jobs/dead-letter` (supports `q`, `job_type`, `from`, `to`, `sort_by`, `sort_dir`, pagination)
-- Replay dead-letter jobs: `POST /api/admin/jobs/<job_id>/replay`
-- Bulk replay dead-letter jobs: `POST /api/admin/jobs/dead-letter/replay-bulk`
-- Replay all currently filtered dead-letter jobs: `POST /api/admin/jobs/dead-letter/replay-filtered`
+## Docker Compose
 
-When Redis is unavailable or disabled:
+The stack in `docker-compose.yml` runs:
 
-- App falls back to local in-process background execution mode.
-- Set `TASK_QUEUE_ENABLED=0` to disable Redis queue mode explicitly in local/dev.
+- `mongo`
+- `redis`
+- `backend`
+- `worker`
+- `frontend`
 
-Vite proxy forwards `/api/*` to backend port `5000`.
-Optional override:
+Commands:
 
-```dotenv
-VITE_API_PROXY_URL=http://localhost:5000
+```powershell
+docker-compose build
+docker-compose up -d
+docker-compose logs -f backend
+docker-compose down
 ```
 
-## Admin Seeding
+Default published ports:
 
-Create the first admin from console:
+- Frontend: `8080`
+- Backend (inside stack): `5000`
+- MongoDB: `27017`
+- Redis: `6379`
 
-```bash
+## Migrations
+
+```powershell
 cd backend
-python seedAdmin.py
+python migrate.py status
+python migrate.py up
+python migrate.py up --target m20260413_001_normalize_attendance_sessions
 ```
 
-The script will ask for:
+## Operations Utilities
 
-- Admin email
-- Admin password
-- Password confirmation
+### Backup
 
-Notes:
+```powershell
+cd backend
+python backup.py --output-dir backups
+python backup.py --dry-run
+```
 
-- It only creates an admin if no admin exists.
-- It stops if the email is already used.
-- If you skip this step, backend startup can still auto-seed a default admin (`admin@system.com` / `admin123`) when no admin exists.
+### Restore
 
-## Maintenance Utilities
+```powershell
+cd backend
+python restore.py --input-dir backups\backup-YYYYMMDD-HHMMSS --dry-run
+python restore.py --input-dir backups\backup-YYYYMMDD-HHMMSS --drop-existing --yes
+```
 
-### Full Reset Utility (`delete.py`)
+### Full Reset (Destructive)
 
-Use this script when you want a clean project state for fresh testing.
-
-From `backend/`:
-
-```bash
+```powershell
+cd backend
+python delete.py --dry-run
 python delete.py --yes
-```
-
-What it does:
-
-- Drops all project MongoDB databases configured via app config.
-- Clears generated runtime folders:
-	- `uploads/` and `dataset/` at project root (if present)
-	- `backend/uploads/`, `backend/dataset/`, `backend/instance/`
-- Recreates the cleared directories so the app can start cleanly.
-
-Safer mode (database only, keep files):
-
-```bash
 python delete.py --yes --mongo-only
 ```
 
-Preview mode (no deletion):
+### Diagnostics
 
-```bash
-python delete.py --dry-run
-```
-
-After reset:
-
-```bash
-python seedAdmin.py
-python run.py
-```
-
-### Database Diagnostics
-
-Check counts and required indexes:
-
-```bash
+```powershell
 cd backend
 python db_diagnostics.py
+python verify_observability.py
+python verify_queue_resilience.py
+cd ..
+python verify_security.py
 ```
 
-## Authentication Transport
+## Security and Auth Model
 
-- JWT is transported using secure HttpOnly cookies (not localStorage bearer tokens).
-- Frontend sends `withCredentials` requests to backend APIs.
-- CSRF protection is enabled with double-submit cookie by default.
+- JWT stored in cookies (`HttpOnly`; `Secure` based on environment)
+- CSRF cookie protection enabled by default
+- Configurable rate limiting and brute-force protection
+- Password policy controls in `backend/.env`
+- Strong JWT secret required for production/staging (`STRICT_JWT_SECRET`)
 
-Optional cookie-related env vars:
+## Testing and Quality
 
-```dotenv
-JWT_COOKIE_SAMESITE=Lax
-JWT_COOKIE_CSRF_PROTECT=1
-JWT_COOKIE_DOMAIN=
+### Backend
+
+```powershell
+python -m compileall backend
+python -m unittest discover -s backend/tests -p "test_*.py"
 ```
 
-## JWT Secret Enforcement
+### Frontend
 
-- Startup fails when `JWT_SECRET_KEY` is weak in non-local environments.
-- To enforce this even in local/dev, set:
-
-```dotenv
-STRICT_JWT_SECRET=1
+```powershell
+cd frontend
+npm run lint
+npm run build
+npm run test:e2e
 ```
 
-## Important Notes
+### CI Workflow
 
-- If backend routes are changed, restart backend (`python run.py`) to load updates.
-- Some rollback controls appear only for eligible audit entries within 1 day.
-- Uploaded/enrolled data can include local runtime artifacts; `.gitignore` excludes them.
+GitHub Actions workflow in `.github/workflows/quality.yml` runs on pushes/PRs to:
 
-## CI Quality Checks
+- `main`
+- `develop`
+- `ProductionReady`
+- `testing`
 
-GitHub Actions runs checks on pushes and PRs to `main` and `develop`:
+Pipeline includes:
 
-- Frontend lint (`npm run lint`)
-- Frontend production build (`npm run build`)
-- Backend syntax compile check (`python -m compileall backend`)
+- Frontend lint/build
+- Frontend E2E tests
+- Backend compile and API tests
+- Dependency vulnerability scan
+- Secrets scan
+- SBOM/provenance attestations
+- Container artifact build/provenance
 
-## SPA Rewrite Rules (Production)
+## Production Notes
 
-Because frontend uses `BrowserRouter`, server must rewrite unknown routes to `index.html`.
-
-### Nginx
-
-```nginx
-location / {
-	try_files $uri $uri/ /index.html;
-}
-```
-
-### Apache (.htaccess)
-
-```apache
-RewriteEngine On
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^ index.html [L]
-```
-
-### Caddy
-
-```caddy
-try_files {path} /index.html
-file_server
-```
-
-## Recognition Flow
-
-```text
-Frame -> Face Detection -> Face Crop -> Embedding Generation -> Similarity Match -> Attendance Mark
-```
+- Use `backend/.env.production.example` as baseline for hardened production config.
+- Set a strong `JWT_SECRET_KEY` and restrict `CORS_ORIGINS`.
+- Set `FACE_EMBEDDING_ENCRYPTION_KEY` before handling biometric data at scale.
+- Keep `backend/.env` out of source control.
 
 ## License
 
-Academic project.
+Academic project. See `LICENSE`.
