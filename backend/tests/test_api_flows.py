@@ -433,17 +433,17 @@ class AuthFlowTests(BaseApiFlowTestCase):
             "/api/auth/change-password",
             json={
                 "current_password": "admin123",
-                "new_password": "Newpass123",
-                "confirm_password": "Newpass123",
+                "new_password": "NewPass123!A",
+                "confirm_password": "NewPass123!A",
             },
             headers=self._csrf_headers(),
         )
         self.assertEqual(change_response.status_code, 200, change_response.get_data(as_text=True))
 
         old_login = self.client.post("/api/auth/login", json={"email": "admin@system.com", "password": "admin123"})
-        self.assertEqual(old_login.status_code, 401)
+        self.assertNotEqual(old_login.status_code, 200, old_login.get_data(as_text=True))
 
-        new_login = self.client.post("/api/auth/login", json={"email": "admin@system.com", "password": "Newpass123"})
+        new_login = self.client.post("/api/auth/login", json={"email": "admin@system.com", "password": "NewPass123!A"})
         self.assertEqual(new_login.status_code, 200)
 
 

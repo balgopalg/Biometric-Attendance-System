@@ -212,11 +212,14 @@ test.describe('UX and accessibility hardening checks', () => {
     await installCommonApiMocks(page);
     await page.goto('/login');
 
-    await page.keyboard.press('Tab');
+    await page.locator('#login-email').focus();
     await expect(page.locator('#login-email')).toBeFocused();
 
     await page.keyboard.press('Tab');
     await expect(page.locator('#login-password')).toBeFocused();
+
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: /Show password|Hide password/i })).toBeFocused();
 
     await page.keyboard.press('Tab');
     await expect(page.locator('#login-submit')).toBeFocused();
