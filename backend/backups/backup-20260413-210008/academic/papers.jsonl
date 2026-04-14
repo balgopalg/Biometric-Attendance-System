@@ -1,2 +1,0 @@
-{"_id": {"$oid": "69da7292cd4bb4ef527e9735"}, "name": "Data Structure", "code": "MCA1.1", "course_id": "69da6f26cd4bb4ef527e972b", "lecturer_id": "69da7167cd4bb4ef527e9730", "semester": 1, "total_classes": 11, "created_at": {"$date": "2026-04-11T16:10:58.584Z"}}
-{"_id": {"$oid": "69dab1eb5fe25309e3c21ae9"}, "name": "Data science", "code": "MCA1.2", "course_id": "69da6f26cd4bb4ef527e972b", "lecturer_id": "69da7167cd4bb4ef527e9730", "semester": 1, "total_classes": 7, "created_at": {"$date": "2026-04-11T20:41:15.451Z"}}
