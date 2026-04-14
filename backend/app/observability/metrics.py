@@ -1,7 +1,7 @@
 """Metrics collection and monitoring for observability."""
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import request, g
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY
 
@@ -236,7 +236,7 @@ class MetricsSnapshot:
             error_stats = ErrorTracker.get_error_stats(hours=24)
             
             return {
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 'database': {
                     'status': db_status,
                     'latency_ms': db_latency_ms,
@@ -248,6 +248,6 @@ class MetricsSnapshot:
             }
         except Exception as e:
             return {
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 'error': str(e),
             }

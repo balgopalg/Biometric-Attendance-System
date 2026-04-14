@@ -3,7 +3,7 @@
 import base64
 import io
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 from PIL import Image
@@ -28,7 +28,7 @@ def encode_image_base64(img_array: np.ndarray) -> str:
 
 def utcnow():
     """Return the current UTC datetime."""
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def sanitise_mongo_doc(doc: dict) -> dict:

@@ -3,7 +3,7 @@
 import json
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from flask import current_app, has_app_context, has_request_context, request, g
 from app.extensions import get_collection
@@ -36,7 +36,7 @@ def _append_noisy_profile_log(payload):
         os.makedirs(logs_dir, exist_ok=True)
         logs_file = os.path.join(logs_dir, "logs.txt")
 
-        stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        stamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{stamp}] {json.dumps(payload, default=str, separators=(',', ':'))}"
         with open(logs_file, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
@@ -202,7 +202,7 @@ def create_student_profile(user_id, roll_number, course_id, academic_year=None):
         "face_embeddings": [],
         "photo_urls": [],
         "enrolled_papers": [],
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     result = profiles.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
@@ -238,9 +238,11 @@ def get_all_profiles(fields=None):
 
 def add_face_embedding(user_id, embedding, photo_url=None):
     """Append a new face embedding vector (list of floats) to the student profile."""
-    update = {"$push": {"face_embeddings": encode_face_embedding(embedding)}}
+    push_fields = {"face_embeddings": encode_face_embedding(embedding)}
     if photo_url:
-        update["$push"]["photo_urls"] = photo_url
+        push_fields["photo_urls"] = photo_url
+
+    update = {"$push": push_fields}
     profiles = get_collection("academic", "student_profiles")
     profiles.update_one({"user_id": user_id}, update)
 

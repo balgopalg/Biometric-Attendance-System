@@ -8,7 +8,7 @@ INDIA_TZ = timezone(timedelta(hours=5, minutes=30))
 
 def to_india_time(value=None):
     """Convert a datetime-like value to IST, defaulting to current UTC time."""
-    dt = value or datetime.utcnow()
+    dt = value or datetime.now(timezone.utc).replace(tzinfo=None)
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
     if dt.tzinfo is None:

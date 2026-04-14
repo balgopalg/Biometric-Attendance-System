@@ -1,6 +1,6 @@
 """Audit trail logger."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from bson import ObjectId
 from pymongo import ReturnDocument
 from app.extensions import get_collection
@@ -19,7 +19,7 @@ def log_action(
     **kwargs,
 ):
     logs = get_collection("audit", "audit_logs")
-    ts = datetime.utcnow()
+    ts = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Backward-compatible mapping for newer keyword call style used by some routes.
     action = action or kwargs.get("action")
@@ -110,7 +110,7 @@ def mark_audit_log_rolled_back(log_id, rolled_back_by):
         {
             "$set": {
                 "rolled_back": True,
-                "rolled_back_at": datetime.utcnow(),
+                "rolled_back_at": datetime.now(timezone.utc).replace(tzinfo=None),
                 "rolled_back_by": rolled_back_by,
             }
         },

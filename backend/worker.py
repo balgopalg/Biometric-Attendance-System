@@ -4,12 +4,24 @@ Run with:
     python worker.py
 """
 
+import signal
+from threading import Event
+
 from app import create_app
 from app.routes import admin as admin_routes
 
 
 def main() -> int:
     app = create_app(seed_default_admin=False)
+    stop_requested = Event()
+
+    def _request_shutdown(signum, _frame):
+        if not stop_requested.is_set():
+            app.logger.info("Received signal %s. Worker will stop after the current job.", signum)
+        stop_requested.set()
+
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    signal.signal(signal.SIGINT, _request_shutdown)
 
     with app.app_context():
         client = admin_routes._get_task_queue_client()
@@ -20,7 +32,7 @@ def main() -> int:
 
     app.logger.info("Worker listening on queue: %s", queue_name)
 
-    while True:
+    while not stop_requested.is_set():
         with app.app_context():
             admin_routes.recover_stuck_background_jobs(max_items=100)
             admin_routes.promote_due_delayed_jobs(max_items=200)
@@ -29,6 +41,9 @@ def main() -> int:
         if not item:
             continue
 
+        if stop_requested.is_set():
+            break
+
         _, job_id = item
         job_id = str(job_id or "").strip()
         if not job_id:
@@ -36,6 +51,9 @@ def main() -> int:
 
         with app.app_context():
             admin_routes.process_background_job(job_id)
+
+    app.logger.info("Worker shutdown complete")
+    return 0
 
 
 if __name__ == "__main__":

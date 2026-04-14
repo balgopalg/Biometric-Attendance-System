@@ -1,9 +1,9 @@
 """Flask application factory."""
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
-from datetime import timedelta
+from datetime import timedelta, timezone
 from flask import Flask, g, request
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
@@ -14,7 +14,7 @@ from .extensions import mongo, jwt, cors, get_collection
 def create_app(config_class=Config, seed_default_admin=False):
     app = Flask(__name__)
     app.config.from_object(config_class)
-    app.config["APP_STARTED_AT"] = datetime.utcnow()
+    app.config["APP_STARTED_AT"] = datetime.now(timezone.utc).replace(tzinfo=None)
     _validate_security_config(app)
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
         seconds=config_class.JWT_ACCESS_TOKEN_EXPIRES
@@ -286,7 +286,7 @@ def _seed_admin(mongo):
                 ).decode(),
                 "role": "admin",
                 "department": "Administration",
-                "created_at": __import__("datetime").datetime.utcnow(),
+                "created_at": __import__("datetime").datetime.now(timezone.utc).replace(tzinfo=None),
             }
         )
 

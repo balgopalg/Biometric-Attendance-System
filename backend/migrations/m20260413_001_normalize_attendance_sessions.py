@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.extensions import get_collection
 
@@ -38,7 +38,7 @@ def upgrade():
             "student_ids": normalized_students,
             "academic_session": str(academic_session) if academic_session else "",
             "academic_year": str(academic_session) if academic_session else "",
-            "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.utcnow(),
+            "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc).replace(tzinfo=None),
         }
         if committed_at:
             patch["committed_at"] = committed_at

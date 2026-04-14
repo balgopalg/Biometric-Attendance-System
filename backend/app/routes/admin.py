@@ -7,7 +7,7 @@ import os
 import time
 import csv
 from io import BytesIO, StringIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import cv2
 import numpy as np
 from threading import Lock, Thread
@@ -98,7 +98,7 @@ class _JobCancelledError(Exception):
 
 
 def _utcnow():
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _cache_get(key):
@@ -699,7 +699,7 @@ def _execute_rollback_operation(operation):
 
 def _derive_academic_session(enrollment_year, course_duration):
     """Build session label like 2024-26 from start year and duration."""
-    start_year = _to_int(enrollment_year, datetime.utcnow().year)
+    start_year = _to_int(enrollment_year, datetime.now(timezone.utc).replace(tzinfo=None).year)
     duration_years = max(1, _to_int(course_duration, 1))
     end_year_short = str(start_year + duration_years)[-2:]
     return f"{start_year}-{end_year_short}"
@@ -1107,7 +1107,7 @@ def list_course_sessions(user, cid):
 
     # Ensure at least current derived session appears when course has active profiles but no stored session field.
     if not sessions and profiles.count_documents({"course_id": cid}) > 0:
-        now_year = datetime.utcnow().year
+        now_year = datetime.now(timezone.utc).replace(tzinfo=None).year
         sessions.add(_derive_academic_session(now_year, course_duration))
 
     return jsonify(sorted(sessions))
@@ -1627,25 +1627,14 @@ def update_lecturer_pin(user, lid):
 @admin_bp.route("/students", methods=["GET"])
 @role_required("admin")
 def list_students(user):
-    profiles = get_all_profiles([
-        "user_id",
-        "course_id",
-        "enrolled_papers",
-        "reg_number",
-        "roll_number",
-        "academic_session",
-        "academic_year",
-        "year",
-        "enrollment_year",
-        "current_semester",
-        "face_embeddings",
-        "created_at",
-    ])
+    page = max(1, _to_int(request.args.get("page", 1), 1))
+    per_page = max(1, min(_to_int(request.args.get("per_page", 20), 20), 100))
+    skip = (page - 1) * per_page
+
     courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
     papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id"]))
-    course_map = {c["_id"]: c for c in courses}
-    paper_map = {p["_id"]: p for p in papers}
-    user_map = get_users_by_ids(p.get("user_id") for p in profiles)
+    course_map = {c.get("_id"): c for c in courses}
+    paper_map = {p.get("_id"): p for p in papers}
 
     q = _as_text(request.args.get("q", "")).lower()
     course_id = _as_text(request.args.get("course_id", ""))
@@ -1653,6 +1642,78 @@ def list_students(user):
     academic_session = _as_text(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
     semester = _as_text(request.args.get("semester", ""))
     include_inactive = _to_bool(request.args.get("include_inactive", False))
+
+    student_profiles = get_collection("academic", "student_profiles")
+    users_col = get_collection("auth", "users")
+
+    filters = []
+    if course_id:
+        filters.append({"course_id": course_id})
+    if paper_id:
+        filters.append({"enrolled_papers": paper_id})
+    if academic_session:
+        filters.append(
+            {
+                "$or": [
+                    {"academic_session": academic_session},
+                    {"academic_year": academic_session},
+                    {"year": academic_session},
+                ]
+            }
+        )
+
+    if semester:
+        semester_int = _to_int(semester, 0)
+        if semester_int > 0:
+            semester_paper_ids = [p.get("_id") for p in papers if _to_int(p.get("semester"), 0) == semester_int]
+            semester_or = [{"current_semester": semester_int}]
+            if semester_paper_ids:
+                semester_or.append({"enrolled_papers": {"$in": semester_paper_ids}})
+            filters.append({"$or": semester_or})
+
+    if not include_inactive:
+        active_course_ids = {
+            _as_text(c.get("_id"))
+            for c in courses
+            if _as_text(c.get("status") or "active").lower() == "active"
+        }
+        filters.append({"course_id": {"$in": list(active_course_ids)}})
+
+    if q:
+        regex = {"$regex": re.escape(q), "$options": "i"}
+        matching_user_ids = {
+            _as_text(row.get("_id"))
+            for row in users_col.find({"$or": [{"name": regex}, {"email": regex}]}, {"_id": 1})
+        }
+        q_filters = [{"reg_number": regex}, {"roll_number": regex}]
+        if matching_user_ids:
+            q_filters.append({"user_id": {"$in": list(matching_user_ids)}})
+        filters.append({"$or": q_filters})
+
+    query = {"$and": filters} if filters else {}
+    projection = {
+        "user_id": 1,
+        "course_id": 1,
+        "enrolled_papers": 1,
+        "reg_number": 1,
+        "roll_number": 1,
+        "academic_session": 1,
+        "academic_year": 1,
+        "year": 1,
+        "enrollment_year": 1,
+        "current_semester": 1,
+        "face_embeddings": 1,
+        "created_at": 1,
+    }
+
+    total = student_profiles.count_documents(query)
+    profiles = list(
+        student_profiles.find(query, projection)
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(per_page)
+    )
+    user_map = get_users_by_ids(p.get("user_id") for p in profiles)
 
     result = []
     for p in profiles:
@@ -1666,7 +1727,7 @@ def list_students(user):
             item["email"] = u["email"]
 
         item["reg_number"] = item.get("reg_number") or item.get("roll_number")
-        enrollment_year = item.get("enrollment_year") or (item.get("created_at") or datetime.utcnow()).year
+        enrollment_year = item.get("enrollment_year") or (item.get("created_at") or datetime.now(timezone.utc).replace(tzinfo=None)).year
         duration_years = _to_int((course or {}).get("course_duration"), 1)
         item["academic_session"] = (
             _as_text(item.get("academic_session"))
@@ -1724,7 +1785,14 @@ def list_students(user):
         item.pop("face_embeddings", None)
         result.append(item)
 
-    return _paginate_items(sanitise_many(result))
+    return jsonify(
+        {
+            "items": sanitise_many(result),
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        }
+    )
 
 
 @admin_bp.route("/students/options", methods=["GET"])
@@ -1789,13 +1857,13 @@ def student_options(user):
         is_course_inactive = _as_text((course or {}).get("status") or "active").lower() != "active"
         if is_course_inactive and not include_inactive:
             continue
-        enrollment_year = _to_int((profile.get("created_at") or datetime.utcnow()).year if hasattr(profile.get("created_at"), "year") else None, 0)
+        enrollment_year = _to_int((profile.get("created_at") or datetime.now(timezone.utc).replace(tzinfo=None)).year if hasattr(profile.get("created_at"), "year") else None, 0)
         duration_years = _to_int((course or {}).get("course_duration"), 1)
         resolved_session = (
             _as_text(profile.get("academic_session"))
             or _as_text(profile.get("academic_year"))
             or _as_text(profile.get("year"))
-            or _derive_academic_session(enrollment_year or datetime.utcnow().year, duration_years)
+            or _derive_academic_session(enrollment_year or datetime.now(timezone.utc).replace(tzinfo=None).year, duration_years)
         )
         current_semester = _to_int(profile.get("current_semester"), 0)
 
@@ -1846,7 +1914,7 @@ def add_student(user):
     if _course_is_inactive(course):
         return jsonify({"error": "Cannot create student under inactive course"}), 409
     
-    enrollment_year = _to_int(d.get("enrollment_year"), datetime.utcnow().year)
+    enrollment_year = _to_int(d.get("enrollment_year"), datetime.now(timezone.utc).replace(tzinfo=None).year)
     course_duration = _to_int((course or {}).get("course_duration"), 1)
     academic_session = _derive_academic_session(enrollment_year, course_duration)
 
@@ -1986,7 +2054,7 @@ def edit_student(user, sid):
 
     current_course_id = (profile or {}).get("course_id")
     next_course_id = profile_fields.get("course_id", current_course_id)
-    current_enrollment_year = _to_int((profile or {}).get("enrollment_year"), (profile or {}).get("created_at", datetime.utcnow()).year)
+    current_enrollment_year = _to_int((profile or {}).get("enrollment_year"), (profile or {}).get("created_at", datetime.now(timezone.utc).replace(tzinfo=None)).year)
     next_enrollment_year = _to_int(profile_fields.get("enrollment_year"), current_enrollment_year)
     next_course = _safe_get_course(next_course_id) if next_course_id else None
     if next_course_id and _course_is_inactive(next_course):
@@ -2053,6 +2121,9 @@ def remove_student(user, sid):
 
     prev_user = find_user_by_id(user_id)
     prev_profile = get_profile_by_user(user_id)
+
+    attendance_logs = get_collection("attendance", "attendance_logs")
+    attendance_logs.delete_many({"student_id": {"$in": _id_variants(user_id)}})
 
     delete_user(user_id)
     delete_profile(user_id, user=prev_user)
@@ -3295,7 +3366,7 @@ def list_audit_logs(user):
             item["rollback_until"] = rollback_until
 
         rolled_back = bool(item.get("rolled_back"))
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         eligible = bool(rollback_payload) and not rolled_back and bool(rollback_until) and now <= rollback_until
         item["rollback_available"] = eligible
         item["rolled_back"] = rolled_back
@@ -3330,9 +3401,9 @@ def rollback_audit_action(user, log_id):
 
     rollback_until = audit_log.get("rollback_until")
     if not rollback_until:
-        rollback_until = (audit_log.get("timestamp") or datetime.utcnow()) + timedelta(days=1)
+        rollback_until = (audit_log.get("timestamp") or datetime.now(timezone.utc).replace(tzinfo=None)) + timedelta(days=1)
 
-    if datetime.utcnow() > rollback_until:
+    if datetime.now(timezone.utc).replace(tzinfo=None) > rollback_until:
         return jsonify({"error": "Rollback window expired (1 day)"}), 403
 
     try:
@@ -3704,7 +3775,7 @@ def set_exam_eligibility_override(user):
                 "override_status": override_status,
                 "reason": reason,
                 "updated_by": str(user["_id"]),
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
             }
         },
         upsert=True,
@@ -3757,7 +3828,7 @@ def set_exam_eligibility_override_bulk(user):
         return jsonify({"error": "No valid override items found"}), 400
 
     overrides_col = get_collection("attendance", "exam_eligibility_overrides")
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     admin_id = str(user["_id"])
     unique_pairs = set()
 
@@ -4322,7 +4393,7 @@ def dashboard_stats(user):
         return jsonify(cached_payload)
 
     started_at = current_app.config.get("APP_STARTED_AT")
-    uptime_seconds = int((datetime.utcnow() - started_at).total_seconds()) if started_at else 0
+    uptime_seconds = int((datetime.now(timezone.utc).replace(tzinfo=None) - started_at).total_seconds()) if started_at else 0
     uptime_days, remainder = divmod(max(uptime_seconds, 0), 86400)
     uptime_hours, remainder = divmod(remainder, 3600)
     uptime_minutes, uptime_seconds = divmod(remainder, 60)
@@ -4344,7 +4415,7 @@ def dashboard_stats(user):
         return datetime(year, month, 1)
 
     def _monthly_attendance(attendance_col, months=6):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         current_month = _month_start(now)
         start_month = _shift_month(current_month, -(months - 1))
 
@@ -4466,7 +4537,7 @@ def dashboard_stats(user):
         "total_attendance": attendance_col.count_documents({}),
         "total_audit_logs": audit_col.count_documents({}),
         "app_started_at": app_started_at,
-        "system_uptime_seconds": max(int((datetime.utcnow() - started_at).total_seconds()), 0) if started_at else 0,
+        "system_uptime_seconds": max(int((datetime.now(timezone.utc).replace(tzinfo=None) - started_at).total_seconds()), 0) if started_at else 0,
         "system_uptime": system_uptime,
         "students_by_course": by_course,
         "students_by_year": by_year,

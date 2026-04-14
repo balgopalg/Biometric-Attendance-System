@@ -1,5 +1,7 @@
 """Face detection service using MediaPipe."""
 
+import threading
+
 import cv2
 import numpy as np
 import mediapipe as mp
@@ -155,10 +157,13 @@ class FaceDetector:
 
 # Module-level singleton
 _detector = None
+_detector_lock = threading.Lock()
 
 
 def get_detector() -> FaceDetector:
     global _detector
     if _detector is None:
-        _detector = FaceDetector()
+        with _detector_lock:
+            if _detector is None:
+                _detector = FaceDetector()
     return _detector

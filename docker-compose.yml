@@ -40,7 +40,9 @@ services:
       MONGO_URI: mongodb://mongo:27017/biometric_attendance
       TASK_QUEUE_ENABLED: "1"
       TASK_QUEUE_REDIS_URL: redis://redis:6379/0
-      CORS_ORIGINS: http://localhost:8080
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    ports:
+      - "5000:5000"
     depends_on:
       mongo:
         condition: service_healthy

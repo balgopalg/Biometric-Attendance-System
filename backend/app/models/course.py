@@ -1,6 +1,6 @@
 """Course model helpers."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from app.extensions import get_collection
 
@@ -13,7 +13,7 @@ def create_course(name, code, department, course_duration):
         "department": department,
         "course_duration": course_duration,
         "status": "active",
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     result = courses.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

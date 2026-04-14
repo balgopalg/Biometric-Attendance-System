@@ -4,7 +4,7 @@ import base64
 import copy
 import unittest
 from contextlib import ExitStack
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest.mock import patch
 
@@ -249,7 +249,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
         return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     def _build_seeded_client(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         admin_id = ObjectId()
         lecturer_id = ObjectId()
         student_id = ObjectId()
@@ -617,9 +617,9 @@ class AdminFlowTests(BaseApiFlowTestCase):
         with patch("app.routes.admin.get_audit_log_by_id", return_value={
             "_id": ObjectId(self.seed["audit_id"]),
             "action": "CREATE_STUDENT",
-            "timestamp": datetime.utcnow() - timedelta(hours=1),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1),
             "rollback": {"kind": "noop"},
-            "rollback_until": datetime.utcnow() + timedelta(hours=1),
+            "rollback_until": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
             "rolled_back": False,
         }), patch("app.routes.admin._execute_rollback_operation", side_effect=lambda payload: None), patch("app.routes.admin.log_action", side_effect=lambda *args, **kwargs: None):
             rollback = self.client.post(f"/api/admin/audit-logs/{self.seed['audit_id']}/rollback")

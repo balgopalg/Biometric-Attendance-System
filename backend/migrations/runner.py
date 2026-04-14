@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.extensions import get_collection
 from migrations import MIGRATIONS
@@ -58,7 +58,7 @@ def apply_pending(target_migration_id=None):
             {
                 "migration_id": migration.migration_id,
                 "name": migration.name,
-                "applied_at": datetime.utcnow(),
+                "applied_at": datetime.now(timezone.utc).replace(tzinfo=None),
                 "duration_ms": duration_ms,
                 "result": result,
             }

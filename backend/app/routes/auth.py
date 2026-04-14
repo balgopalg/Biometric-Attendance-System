@@ -205,8 +205,8 @@ def logout():
             {
                 "$setOnInsert": {
                     "jti": jti,
-                    "expires_at": datetime.utcfromtimestamp(int(expires_at)),
-                    "revoked_at": datetime.utcnow(),
+                    "expires_at": datetime.fromtimestamp(int(expires_at), timezone.utc).replace(tzinfo=None),
+                    "revoked_at": datetime.now(timezone.utc).replace(tzinfo=None),
                 }
             },
             upsert=True,
@@ -235,6 +235,32 @@ def me():
             "must_change_password": user.get("must_change_password", False),
         }
     )
+
+
+@auth_bp.route("/refresh", methods=["POST"])
+@jwt_required()
+@limiter.limit("60 per minute")
+def refresh_token():
+    """Issue a new access token for the current authenticated session."""
+    email = get_jwt_identity()
+    user = find_user_by_email(email)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    token = create_access_token(identity=user["email"])
+    response = jsonify({
+        "message": "Token refreshed",
+        "user": {
+            "_id": str(user["_id"]),
+            "name": user["name"],
+            "email": user["email"],
+            "role": user["role"],
+            "department": user.get("department", ""),
+            "must_change_password": user.get("must_change_password", False),
+        },
+    })
+    set_access_cookies(response, token)
+    return response
 
 
 @auth_bp.route("/change-password", methods=["POST"])
@@ -294,5 +320,22 @@ def change_password():
         ip_address=request.remote_addr,
         user_agent=request.headers.get("User-Agent", ""),
     )
+
+    jwt_payload = get_jwt() or {}
+    jti = jwt_payload.get("jti")
+    expires_at = jwt_payload.get("exp")
+    if jti and expires_at:
+        revoked = get_collection("auth", "revoked_jwts")
+        revoked.update_one(
+            {"jti": jti},
+            {
+                "$setOnInsert": {
+                    "jti": jti,
+                    "expires_at": datetime.fromtimestamp(int(expires_at), timezone.utc).replace(tzinfo=None),
+                    "revoked_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                }
+            },
+            upsert=True,
+        )
 
     return jsonify({"message": "Password changed successfully"})
