@@ -71,7 +71,7 @@ export default function ChangePassword() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const hasMinLength = form.new_password.length >= 12;
+  const hasMinLength = form.new_password.length >= 8;
   const hasUppercase = /[A-Z]/.test(form.new_password);
   const hasLowercase = /[a-z]/.test(form.new_password);
   const hasNumber = /\d/.test(form.new_password);
@@ -181,7 +181,7 @@ export default function ChangePassword() {
 
           {/* Validation Checklist */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-            <CheckItem ok={hasMinLength} text="At least 12 characters" />
+            <CheckItem ok={hasMinLength} text="At least 8 characters" />
             <CheckItem ok={hasUppercase} text="Contains an uppercase letter" />
             <CheckItem ok={hasLowercase} text="Contains a lowercase letter" />
             <CheckItem ok={hasNumber} text="Contains a number" />

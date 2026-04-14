@@ -15,14 +15,14 @@ def validate_password_strength(password):
     Validate password meets minimum strength requirements.
     
     Requirements:
-    - At least 12 characters
+    - At least 8 characters
     - At least one uppercase letter
     - At least one lowercase letter
     - At least one digit
     - At least one special character
     """
-    if len(password) < 12:
-        return False, "Password must be at least 12 characters"
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters"
     
     if not re.search(r'[A-Z]', password):
         return False, "Password must contain at least one uppercase letter"
