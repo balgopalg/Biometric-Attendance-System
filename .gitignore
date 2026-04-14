@@ -50,6 +50,8 @@ backend/uploads/
 uploads/
 instance/
 backend/dataset/
+backend/perf/results/*
+!backend/perf/results/.gitkeep
 backend/backups/*
 !backend/backups/.gitkeep
 backend/trainer/*.keras
@@ -61,6 +63,10 @@ security_verification_results.json
 .env
 .env.*
 !.env.example
+!backend/.env.example
+!backend/.env.staging.example
+!backend/.env.production.example
+!frontend/.env.example
 
 # --- Node / frontend ---
 node_modules/
