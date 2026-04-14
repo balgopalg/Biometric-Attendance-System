@@ -199,11 +199,6 @@ export default function AttendanceMatrix() {
     }
   };
 
-  const totalCols = useMemo(() => {
-    const subjectCols = visibleDates.reduce((sum, d) => sum + ((Array.isArray(d.subjects) ? d.subjects : []).length), 0);
-    return 2 + subjectCols;
-  }, [visibleDates]);
-
   const getRowTotals = (row) => {
     let totalHeld = 0;
     let totalAttended = 0;

@@ -1,12 +1,10 @@
-import { Suspense, lazy, useState, useEffect, useMemo, useRef } from 'react';
+import { Suspense, lazy, useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import StatsCard from '../../components/ui/StatsCard';
 import { motion } from 'framer-motion';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { formatCourseName } from '../../utils/courseDisplay';
 import StatePanel from '../../components/ui/StatePanel';
-import toast from 'react-hot-toast';
-import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlineUsers,
   HiOutlineAcademicCap,
@@ -41,7 +39,6 @@ function parseUtcTimestamp(value) {
 }
 
 export default function AdminDashboard() {
-  const { user } = useAuth();
   const [stats, setStats] = useState({});
   const [loadingStats, setLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState('');
@@ -54,7 +51,6 @@ export default function AdminDashboard() {
   const [loadingEligibility, setLoadingEligibility] = useState(false);
   const [filters, setFilters] = useState({ academic_session: '', course_id: '', semester: '' });
   const debouncedFilters = useDebouncedValue(filters, 300);
-  const [welcomeShown, setWelcomeShown] = useState(false);
 
   const fetchStats = () => {
     setLoadingStats(true);
