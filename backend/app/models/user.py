@@ -18,7 +18,7 @@ def normalize_email(email):
     return str(email or "").strip().lower()
 
 
-def generate_temp_password(length=12):
+def generate_temp_password(length=8):
     """Generate a temporary password that satisfies the password policy."""
     upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     lower = "abcdefghijkmnopqrstuvwxyz"
@@ -30,7 +30,7 @@ def generate_temp_password(length=12):
         return secrets.choice(chars)
 
     password_chars = [pick(upper), pick(lower), pick(digits), pick(symbols)]
-    while len(password_chars) < max(12, int(length or 12)):
+    while len(password_chars) < max(8, int(length or 8)):
         password_chars.append(pick(all_chars))
 
     secrets.SystemRandom().shuffle(password_chars)
