@@ -1,6 +1,6 @@
 """Enhanced health checks for API, database, and queue subsystems."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import jsonify, Blueprint
 
 health_bp = Blueprint('health', __name__)
@@ -109,8 +109,8 @@ class HealthChecker:
             # Get recent failures (last 24 hours)
             recent_failures = r.zcount(
                 f'{queue_name}:failed',
-                min=datetime.utcnow().timestamp() - 86400,
-                max=datetime.utcnow().timestamp()
+                min=datetime.now(timezone.utc).replace(tzinfo=None).timestamp() - 86400,
+                max=datetime.now(timezone.utc).replace(tzinfo=None).timestamp()
             )
             
             return {
@@ -190,7 +190,7 @@ class HealthChecker:
         
         return {
             'status': overall_status,
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
             'checks': checks,
         }
 

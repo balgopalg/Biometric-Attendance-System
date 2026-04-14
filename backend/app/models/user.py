@@ -2,7 +2,7 @@
 
 import secrets
 import hmac
-from datetime import datetime
+from datetime import datetime, timezone
 
 import bcrypt
 from bson import ObjectId
@@ -67,7 +67,7 @@ def set_user_pin(user_id, pin):
         {
             "$set": {
                 "pin_hash": hash_pin(pin),
-                "pin_last_set": datetime.utcnow(),
+                "pin_last_set": datetime.now(timezone.utc).replace(tzinfo=None),
                 "pin": "",
             }
         },
@@ -85,11 +85,11 @@ def create_user(name, email, password, role, department="", pin=None, must_chang
         "role": role,
         "department": department,
         "must_change_password": must_change_password,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     if role == "lecturer" and pin:
         doc["pin_hash"] = hash_pin(pin)
-        doc["pin_last_set"] = datetime.utcnow()
+        doc["pin_last_set"] = datetime.now(timezone.utc).replace(tzinfo=None)
         doc["pin"] = ""
     users = get_collection("auth", "users")
     result = users.insert_one(doc)

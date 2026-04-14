@@ -3,7 +3,7 @@
 import logging
 import json
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import request, g, current_app, has_app_context
 from pymongo.errors import PyMongoError
 
@@ -35,7 +35,7 @@ class ErrorTracker:
             "exception_type": type(error).__name__,
             "message": str(error),
             "traceback": traceback.format_exc(),
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
             "user_id": user_id,
             "http": cls._extract_request_context(),
             "context": context or {},
@@ -63,7 +63,7 @@ class ErrorTracker:
             "message": message,
             "field": field,
             "value": str(value)[:100] if value else None,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
             "user_id": user_id,
             "http": cls._extract_request_context(),
         }
@@ -88,7 +88,7 @@ class ErrorTracker:
             "exception_type": "AuthenticationError",
             "message": message,
             "email": email,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
             "http": cls._extract_request_context(),
         }
         
@@ -139,7 +139,7 @@ class ErrorTracker:
             from app.extensions import get_collection
             
             errors_collection = get_collection("audit", cls.COLLECTION_NAME)
-            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
             
             return list(errors_collection.find(
                 {"timestamp": {"$gte": cutoff}}
@@ -155,7 +155,7 @@ class ErrorTracker:
             from app.extensions import get_collection
             
             errors_collection = get_collection("audit", cls.COLLECTION_NAME)
-            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
             
             stats = list(errors_collection.aggregate([
                 {"$match": {"timestamp": {"$gte": cutoff}}},
@@ -181,7 +181,7 @@ class ErrorHandler:
         return {
             "error": str(error),
             "error_id": error_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
         }, status_code
     
     @staticmethod

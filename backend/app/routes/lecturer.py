@@ -2,8 +2,8 @@
 
 import secrets
 import uuid
-from collections import defaultdict
-from datetime import datetime, timedelta
+from collections import defaultdict, OrderedDict
+from datetime import datetime, timedelta, timezone
 import os
 from threading import Lock
 
@@ -41,7 +41,8 @@ _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES = 180
 _ALLOWED_UPLOAD_MIME_TYPES = {"image/jpeg", "image/png", "image/bmp", "image/webp"}
 _ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-_SESSION_CANDIDATES_CACHE = {}
+_SESSION_CANDIDATES_CACHE_MAX_ENTRIES_DEFAULT = 500
+_SESSION_CANDIDATES_CACHE = OrderedDict()
 _SESSION_CANDIDATES_LOCK = Lock()
 
 
@@ -93,7 +94,7 @@ def _normalize_attendance_sessions_once():
                 "student_ids": normalized_students,
                 "academic_session": str(academic_session) if academic_session else "",
                 "academic_year": str(academic_session) if academic_session else "",
-                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.utcnow(),
+                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc).replace(tzinfo=None),
             }
             if committed_at:
                 updates["committed_at"] = committed_at
@@ -169,7 +170,7 @@ def _active_session_timeout_minutes():
 
 
 def _create_active_session(session_id, *, paper_id, lecturer_id):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     timeout_minutes = _active_session_timeout_minutes()
     expires_at = now + timedelta(minutes=timeout_minutes)
     _active_sessions_collection().update_one(
@@ -198,7 +199,7 @@ def _get_active_session(session_id):
         return None
 
     expires_at = session.get("expires_at")
-    if isinstance(expires_at, datetime) and expires_at <= datetime.utcnow():
+    if isinstance(expires_at, datetime) and expires_at <= datetime.now(timezone.utc).replace(tzinfo=None):
         _active_sessions_collection().delete_one({"session_id": str(session_id)})
         _clear_cached_session_candidates(session_id)
         return None
@@ -207,7 +208,7 @@ def _get_active_session(session_id):
 
 
 def _touch_active_session(session_id):
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     timeout_minutes = _active_session_timeout_minutes()
     _active_sessions_collection().update_one(
         {"session_id": str(session_id)},
@@ -226,7 +227,7 @@ def _save_recognized_students(session_id, recognized_ids):
         {
             "$set": {
                 "recognized": list(recognized_ids),
-                "updated_at": datetime.utcnow(),
+                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
             }
         },
     )
@@ -241,7 +242,7 @@ def _within_rollback(session_doc):
     rollback_until = session_doc.get("rollback_until")
     if not rollback_until:
         return False
-    return datetime.utcnow() <= rollback_until
+    return datetime.now(timezone.utc).replace(tzinfo=None) <= rollback_until
 
 
 def _replace_session_attendance(session_id, paper_id, lecturer_id, student_ids, method="biometric"):
@@ -319,6 +320,21 @@ def _load_session_candidates(session: dict):
     return prepare_profile_candidates(profiles)
 
 
+def _session_candidates_cache_max_entries():
+    try:
+        return max(
+            50,
+            int(
+                current_app.config.get(
+                    "QUERY_CACHE_MAX_ENTRIES",
+                    _SESSION_CANDIDATES_CACHE_MAX_ENTRIES_DEFAULT,
+                )
+            ),
+        )
+    except Exception:
+        return _SESSION_CANDIDATES_CACHE_MAX_ENTRIES_DEFAULT
+
+
 def _get_cached_session_candidates(session: dict):
     """Return pre-normalized candidates cached for the active session."""
     session_id = str(session.get("session_id") or "")
@@ -328,12 +344,17 @@ def _get_cached_session_candidates(session: dict):
     with _SESSION_CANDIDATES_LOCK:
         cached = _SESSION_CANDIDATES_CACHE.get(session_id)
         if cached is not None:
+            _SESSION_CANDIDATES_CACHE.move_to_end(session_id)
             return cached
 
     prepared = _load_session_candidates(session)
 
     with _SESSION_CANDIDATES_LOCK:
+        max_entries = _session_candidates_cache_max_entries()
+        while len(_SESSION_CANDIDATES_CACHE) >= max_entries:
+            _SESSION_CANDIDATES_CACHE.popitem(last=False)
         _SESSION_CANDIDATES_CACHE[session_id] = prepared
+        _SESSION_CANDIDATES_CACHE.move_to_end(session_id)
 
     return prepared
 
@@ -813,7 +834,7 @@ def commit_session(user):
     _replace_session_attendance(session_id, paper_id, lecturer_id, present_student_ids, method="biometric")
     increment_total_classes(paper_id)
 
-    committed_at = datetime.utcnow()
+    committed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     rollback_until = committed_at + timedelta(minutes=ROLLBACK_MINUTES)
     current_year = str(committed_at.year)
     sessions = get_collection("attendance", "attendance_sessions")
@@ -923,7 +944,7 @@ def adjust_committed_session(user, session_id):
         {
             "$set": {
                 "student_ids": student_ids,
-                "last_updated_at": datetime.utcnow(),
+                "last_updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
             }
         },
     )

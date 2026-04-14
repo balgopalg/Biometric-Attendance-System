@@ -92,8 +92,8 @@ class Config:
     REQUIRE_CSRF_ON_MUTATION = _env_bool("REQUIRE_CSRF_ON_MUTATION", True)
     CONTENT_SECURITY_POLICY = os.getenv(
         "CONTENT_SECURITY_POLICY",
-        "default-src 'self'; img-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'; connect-src 'self' http: https: ws: wss:; "
+        "default-src 'self'; img-src 'self' data: blob:; script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
         "font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     )
     HSTS_ENABLED = _env_bool("HSTS_ENABLED", ENV in {"production", "prod", "staging"})

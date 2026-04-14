@@ -4,7 +4,7 @@ import json
 import logging
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import request, g, has_request_context
 from pythonjsonlogger import jsonlogger
 
@@ -16,7 +16,7 @@ class CustomJsonFormatter(jsonlogger.JsonFormatter):
         super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
         
         # Add standard fields
-        log_record['timestamp'] = datetime.utcnow().isoformat()
+        log_record['timestamp'] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         log_record['level'] = record.levelname
         log_record['logger'] = record.name
         
@@ -115,7 +115,7 @@ def configure_logging(app, log_level='INFO', log_format='text'):
     def add_request_context():
         import uuid
         g.request_id = request.headers.get('X-Request-ID', str(uuid.uuid4()))
-        g.request_started_at = datetime.utcnow()
+        g.request_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
     
     # Set up app logger
     app.logger.addHandler(console_handler)
@@ -128,7 +128,7 @@ def configure_logging(app, log_level='INFO', log_format='text'):
     @app.after_request
     def log_request_summary(response):
         if hasattr(g, 'request_started_at') and isinstance(g.request_started_at, datetime):
-            duration_ms = (datetime.utcnow() - g.request_started_at).total_seconds() * 1000
+            duration_ms = (datetime.now(timezone.utc).replace(tzinfo=None) - g.request_started_at).total_seconds() * 1000
             app.logger.info('request_complete', extra={
                 'status_code': response.status_code,
                 'duration_ms': round(duration_ms, 2),

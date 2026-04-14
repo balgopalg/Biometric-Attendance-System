@@ -1,6 +1,6 @@
 """Paper (Subject) model helpers."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from app.extensions import get_collection
 
@@ -14,7 +14,7 @@ def create_paper(name, code, course_id, lecturer_id=None, semester=None, total_c
         "lecturer_id": lecturer_id,
         "semester": semester,
         "total_classes": total_classes,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     result = papers.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

@@ -63,8 +63,8 @@ def identify_faces(user):
         embedding = generate_embedding(face["crop"])
         match = find_best_match(embedding, profiles, threshold=threshold)
         if match:
-            user = find_user_by_id(match["user_id"])
-            match["name"] = user["name"] if user else "Unknown"
+            matched_user = find_user_by_id(match["user_id"])
+            match["name"] = matched_user["name"] if matched_user else "Unknown"
             matches.append(match)
 
     return jsonify({

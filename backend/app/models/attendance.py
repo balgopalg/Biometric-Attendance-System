@@ -1,6 +1,6 @@
 """Attendance log model helpers."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from app.extensions import get_collection
 
@@ -13,7 +13,7 @@ def log_attendance(paper_id, student_id, lecturer_id, session_id, method="biomet
         "lecturer_id": lecturer_id,
         "session_id": session_id,
         "method": method,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     result = logs.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

@@ -20,7 +20,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from statistics import median
@@ -152,7 +152,7 @@ def _require_seed_course_and_paper():
                 "department": "Computing",
                 "course_duration": 2,
                 "status": "active",
-                "year": str(datetime.utcnow().year),
+                "year": str(datetime.now(timezone.utc).replace(tzinfo=None).year),
             }
         ).inserted_id
         course = courses.find_one({"_id": cid})
@@ -330,7 +330,7 @@ def benchmark_export_large_dataset(client, csrf, course_id, paper_id):
     papers = get_collection("academic", "papers")
 
     tag = f"perf-export-{uuid.uuid4().hex[:8]}"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Ensure paper has a lecturer for matrix pipeline stability.
     paper_doc = papers.find_one({"_id": ObjectId(paper_id)}) if ObjectId.is_valid(paper_id) else papers.find_one({"_id": paper_id})
