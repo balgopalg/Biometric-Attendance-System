@@ -1,1 +1,0 @@
-{"_id": {"$oid": "69dbf048836e8aa19a3db3a8"}, "migration_id": "20260413_001", "name": "normalize_attendance_sessions", "applied_at": {"$date": "2026-04-12T19:19:36.945Z"}, "duration_ms": 2397.67, "result": {"total_documents": 16, "updated_documents": 16}}

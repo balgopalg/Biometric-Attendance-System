@@ -50,6 +50,8 @@ backend/uploads/
 uploads/
 instance/
 backend/dataset/
+backend/backups/*
+!backend/backups/.gitkeep
 backend/trainer/*.keras
 backend/trainer/*.h5
 !backend/trainer/.gitkeep
