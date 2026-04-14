@@ -13,21 +13,6 @@ function getUserStorage() {
   }
 }
 
-function readUserFromStorage() {
-  const storage = getUserStorage();
-  if (!storage) return null;
-
-  const saved = storage.getItem(USER_STORAGE_KEY);
-  if (!saved) return null;
-
-  try {
-    return JSON.parse(saved);
-  } catch {
-    storage.removeItem(USER_STORAGE_KEY);
-    return null;
-  }
-}
-
 function writeUserToStorage(userData) {
   const storage = getUserStorage();
   if (!storage) return;

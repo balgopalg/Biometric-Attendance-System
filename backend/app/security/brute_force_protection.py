@@ -149,25 +149,38 @@ class IPRateLimiter:
         collection = get_collection("auth", cls.COLLECTION_NAME)
         now = datetime.utcnow()
         cutoff = now - timedelta(minutes=window_minutes)
-        
-        result = collection.aggregate([
-            {
-                "$match": {
-                    "ip_address": ip_address,
-                    "endpoint": endpoint,
-                    "requested_at": {"$gte": cutoff}
+
+        # Primary path for MongoDB collections.
+        if hasattr(collection, "aggregate"):
+            result = collection.aggregate([
+                {
+                    "$match": {
+                        "ip_address": ip_address,
+                        "endpoint": endpoint,
+                        "requested_at": {"$gte": cutoff}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "total_weight": {"$sum": "$weight"}
+                    }
                 }
-            },
-            {
-                "$group": {
-                    "_id": None,
-                    "total_weight": {"$sum": "$weight"}
-                }
-            }
-        ])
-        
-        results = list(result)
-        return results[0]["total_weight"] if results else 0
+            ])
+
+            results = list(result)
+            return results[0]["total_weight"] if results else 0
+
+        # Compatibility path for in-memory test doubles that expose raw docs.
+        docs = getattr(collection, "docs", [])
+        total = 0
+        for doc in docs:
+            if doc.get("ip_address") != ip_address or doc.get("endpoint") != endpoint:
+                continue
+            requested_at = doc.get("requested_at")
+            if requested_at and requested_at >= cutoff:
+                total += int(doc.get("weight", 1))
+        return total
 
     @classmethod
     def is_ip_blocked(cls, ip_address, endpoint, threshold=50, window_minutes=10):
