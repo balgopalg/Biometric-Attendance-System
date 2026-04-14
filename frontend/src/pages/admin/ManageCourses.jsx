@@ -233,7 +233,7 @@ export default function ManageCourses() {
   return (
     <div className="admin-page">
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+      <div className="courses-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Courses</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalCourses} courses in current filter</p>
@@ -251,7 +251,7 @@ export default function ManageCourses() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className="courses-filter-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -272,7 +272,7 @@ export default function ManageCourses() {
         </select>
       </div>
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card">
         {loadingCourses ? (
           <StatePanel variant="loading" title="Loading courses" description="Fetching course records and filters." compact />
         ) : null}
@@ -286,6 +286,7 @@ export default function ManageCourses() {
         ) : null}
 
         {!loadingCourses && !coursesError && filtered.length > 0 ? (
+          <div className="table-scroll courses-table-scroll">
           <table className="data-table">
             <thead>
               <tr>
@@ -310,7 +311,7 @@ export default function ManageCourses() {
                     </span>
                   </td>
                   <td>
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <div className="courses-row-actions" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       <button className="icon-btn" title="Edit" onClick={() => openEdit(c)}><HiOutlinePencil size={15} /></button>
                       {String(c.status || 'active').toLowerCase() === 'active' ? (
                         <button className="icon-btn danger" title="Mark Inactive" onClick={() => handleDelete(c._id)}><HiOutlineTrash size={15} /></button>
@@ -326,6 +327,7 @@ export default function ManageCourses() {
               ))}
             </tbody>
           </table>
+          </div>
         ) : null}
       </div>
 

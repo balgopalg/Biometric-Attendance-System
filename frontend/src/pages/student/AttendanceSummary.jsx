@@ -32,7 +32,7 @@ export default function AttendanceSummary() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Detailed view of your attendance across all papers.</p>
       </div>
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card">
         {loadingSummary ? (
           <StatePanel variant="loading" title="Loading attendance summary" description="Fetching paper-wise attendance and session history." compact />
         ) : null}
@@ -46,6 +46,7 @@ export default function AttendanceSummary() {
         ) : null}
 
         {!loadingSummary && !summaryError && data.length > 0 ? (
+          <div className="table-scroll student-table-scroll">
           <table className="data-table">
           <thead><tr><th>Paper Code</th><th>Paper Name</th><th>Attended</th><th>Total</th><th>Percentage</th><th>Status</th></tr></thead>
           <tbody>
@@ -130,6 +131,7 @@ export default function AttendanceSummary() {
             })}
           </tbody>
           </table>
+          </div>
         ) : null}
       </div>
     </div>

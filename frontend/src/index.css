@@ -667,6 +667,10 @@ textarea:focus-visible,
   top: auto;
 }
 
+.attendance-matrix-shell {
+  display: block;
+}
+
 .admin-page .mobile-card-list {
   display: none;
   gap: 10px;
@@ -679,6 +683,61 @@ textarea:focus-visible,
 
 .admin-page .mobile-card-row {
   padding: 6px 0;
+}
+
+.students-toolbar-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.students-toolbar-actions .btn-primary,
+.students-toolbar-actions .btn-secondary,
+.students-toolbar-actions .btn-danger {
+  white-space: nowrap;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.students-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.students-table-scroll .data-table {
+  min-width: 1100px;
+}
+
+.student-table-scroll .data-table {
+  min-width: 860px;
+}
+
+.lecturers-table-scroll .data-table {
+  min-width: 920px;
+}
+
+.courses-table-scroll .data-table {
+  min-width: 860px;
+}
+
+.papers-table-scroll .data-table {
+  min-width: 980px;
+}
+
+.lecturers-row-actions,
+.courses-row-actions,
+.papers-row-actions {
+  min-width: 150px;
+}
+
+.students-row-actions {
+  min-width: 220px;
 }
 
 @keyframes admin-fade-in {
@@ -876,6 +935,79 @@ textarea:focus-visible,
 
 /* ─── Responsive Tweaks ─── */
 @media (max-width: 1024px) {
+  .lecturers-toolbar,
+  .courses-toolbar,
+  .papers-toolbar {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+  }
+
+  .lecturers-toolbar .btn-primary,
+  .courses-toolbar .btn-primary,
+  .papers-toolbar .btn-primary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .lecturers-filter-grid,
+  .courses-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .lecturers-filter-grid > :first-child,
+  .courses-filter-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .students-toolbar {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+  }
+
+  .students-toolbar-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px !important;
+    width: 100%;
+  }
+
+  .students-toolbar-actions .btn-primary,
+  .students-toolbar-actions .btn-secondary,
+  .students-toolbar-actions .btn-danger {
+    width: 100%;
+    justify-content: center;
+    min-height: 36px;
+    padding: 8px 10px;
+    font-size: 0.76rem;
+  }
+
+  .students-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .students-filter-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .students-table-scroll {
+    border-radius: inherit;
+  }
+
+  .students-table-scroll .data-table th,
+  .students-table-scroll .data-table td,
+  .student-table-scroll .data-table th,
+  .student-table-scroll .data-table td,
+  .lecturers-table-scroll .data-table th,
+  .lecturers-table-scroll .data-table td,
+  .courses-table-scroll .data-table th,
+  .courses-table-scroll .data-table td,
+  .papers-table-scroll .data-table th,
+  .papers-table-scroll .data-table td {
+    white-space: nowrap;
+  }
+
   .admin-page .filter-bar {
     padding: 12px;
     gap: 8px;
@@ -933,6 +1065,27 @@ textarea:focus-visible,
 }
 
 @media (max-width: 768px) {
+  .attendance-matrix-shell {
+    display: block;
+  }
+
+  .attendance-matrix-shell .data-table {
+    min-width: 980px;
+  }
+
+  .lecturers-filter-grid,
+  .courses-filter-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .students-toolbar-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .students-filter-grid {
+    grid-template-columns: 1fr !important;
+  }
+
   .btn-primary,
   .btn-secondary,
   .btn-danger {

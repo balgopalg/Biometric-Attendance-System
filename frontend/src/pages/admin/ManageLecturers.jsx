@@ -227,7 +227,7 @@ export default function ManageLecturers() {
   return (
     <div className="admin-page">
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+      <div className="lecturers-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Lecturers</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalLecturers} lecturers in current filter</p>
@@ -237,7 +237,7 @@ export default function ManageLecturers() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className="lecturers-filter-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input className="search-input" placeholder="Search by name, email or subject..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -258,7 +258,7 @@ export default function ManageLecturers() {
         </select>
       </div>
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card">
         {loadingLecturers ? (
           <StatePanel variant="loading" title="Loading lecturers" description="Retrieving lecturer records and assignments." compact />
         ) : null}
@@ -272,6 +272,7 @@ export default function ManageLecturers() {
         ) : null}
 
         {!loadingLecturers && !lecturersError && lecturers.length > 0 ? (
+        <div className="table-scroll lecturers-table-scroll">
         <table className="data-table">
           <thead>
             <tr>
@@ -317,7 +318,7 @@ export default function ManageLecturers() {
                   )}
                 </td>
                 <td>
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <div className="lecturers-row-actions" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                     <button className="icon-btn" title="Manage Assignments" onClick={() => openAssignModal(l)}>
                       <HiOutlineClipboardList size={15} />
                     </button>
@@ -336,6 +337,7 @@ export default function ManageLecturers() {
             ))}
           </tbody>
         </table>
+        </div>
         ) : null}
       </div>
 

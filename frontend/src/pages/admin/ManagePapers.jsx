@@ -289,7 +289,7 @@ export default function ManagePapers() {
   return (
     <div className="admin-page">
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+      <div className="papers-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Papers</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalPapers} papers in current filter</p>
@@ -349,7 +349,7 @@ export default function ManagePapers() {
         </div>
       )}
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card">
         {loadingPapers ? (
           <StatePanel variant="loading" title="Loading subjects" description="Fetching subject records for selected filters." compact />
         ) : null}
@@ -363,6 +363,7 @@ export default function ManagePapers() {
         ) : null}
 
         {!loadingPapers && !papersError && filtered.length > 0 ? (
+        <div className="table-scroll papers-table-scroll">
         <table className="data-table">
           <thead>
             <tr>
@@ -386,7 +387,7 @@ export default function ManagePapers() {
                 <td>{p.total_classes}</td>
                 <td>
                   <SoftLockWrapper locked={p.is_course_inactive} title="Locked: course inactive">
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <div className="papers-row-actions" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       <button className="icon-btn" title={p.is_course_inactive ? 'Locked: course inactive' : 'Edit'} onClick={() => openEdit(p)} disabled={p.is_course_inactive}><HiOutlinePencil size={15} /></button>
                       <button className="icon-btn danger" title={p.is_course_inactive ? 'Locked: course inactive' : 'Delete'} onClick={() => handleDelete(p._id)} disabled={p.is_course_inactive}><HiOutlineTrash size={15} /></button>
                     </div>
@@ -396,6 +397,7 @@ export default function ManagePapers() {
             ))}
           </tbody>
         </table>
+        </div>
         ) : null}
       </div>
 
