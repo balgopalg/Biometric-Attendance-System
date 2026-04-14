@@ -29,7 +29,7 @@ pip install -r requirements.txt
 
 ```powershell
 cd frontend
-npm install
+npm ci
 ```
 
 ## 2. Run the system
@@ -173,7 +173,7 @@ python migrate.py status
 ```powershell
 cd backend
 python migrate.py up
-python migrate.py up --target 20260413_001
+python migrate.py up --target m20260413_001_normalize_attendance_sessions
 ```
 
 ### 5.3 Legacy one-off migration wrapper
@@ -375,7 +375,7 @@ In new terminal:
 
 ```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 

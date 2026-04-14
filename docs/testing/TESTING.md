@@ -24,8 +24,6 @@ This project includes a comprehensive, deterministic end-to-end test suite cover
 
 ```bash
 cd backend
-python -m pytest tests/test_api_flows.py -v
-# or
 python -m unittest backend.tests.test_api_flows -v
 ```
 
@@ -279,22 +277,22 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - run: pip install -r backend/requirements.txt
-      - run: python -m pytest backend/tests/ -v
+      - run: python -m unittest discover -s backend/tests -p "test_*.py"
 
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
-      - run: cd frontend && npm install
-      - run: cd frontend && npx playwright install chromium
+          node-version: '20'
+      - run: cd frontend && npm ci
+      - run: cd frontend && npx playwright install --with-deps chromium
       - run: cd frontend && npm run test:e2e
 ```
 
@@ -322,7 +320,7 @@ jobs:
 
 ### Backend
 - Test output: stdout (assertion errors, Python tracebacks)
-- Coverage: `pytest --cov backend/tests` (if coverage package installed)
+- Coverage: no dedicated coverage tool is wired by default; configure one explicitly if required
 
 ### Frontend
 - Traces: `test-results/` directory (on-first-retry mode)

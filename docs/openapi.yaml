@@ -1,11 +1,12 @@
 openapi: 3.0.3
 info:
   title: Biometric Face Attendance API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     API specification for the Biometric Face Attendance Management System.
     This specification focuses on the highest-impact operational workflows
     used by Admin, Lecturer, Student, and Operations users.
+  x-last-reviewed: 2026-04-14
 
 servers:
   - url: http://localhost:5000

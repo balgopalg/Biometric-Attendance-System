@@ -21,12 +21,12 @@ Run from `backend/`:
 ```bash
 python migrate.py status
 python migrate.py up
-python migrate.py up --target 20260413_001
+python migrate.py up --target m20260413_001_normalize_attendance_sessions
 ```
 
 ## Current migration history
 
-- `20260413_001` `normalize_attendance_sessions`
+- `m20260413_001_normalize_attendance_sessions`
   - Replaces legacy one-off normalization run for `attendance_sessions`
   - Normalizes IDs and `academic_session`/`academic_year` consistency
 
@@ -67,6 +67,6 @@ These are expected and checked by diagnostics:
 ## Replacing one-off scripts
 
 - Legacy: `normalize_sessions_once.py`
-- New: tracked migration `20260413_001` via `migrate.py`
+- New: tracked migration `m20260413_001_normalize_attendance_sessions` via `migrate.py`
 
 Use one-off scripts only for temporary diagnostics, not schema/data evolution.
