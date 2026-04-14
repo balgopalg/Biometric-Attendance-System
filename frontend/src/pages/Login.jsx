@@ -7,6 +7,13 @@ import toast from 'react-hot-toast';
 import { HiOutlineLockClosed, HiOutlineMail, HiOutlineEye, HiOutlineEyeOff, HiOutlineSun, HiOutlineMoon } from 'react-icons/hi';
 import { formatDateTimeIndia } from '../utils/dateTime';
 
+const LOCKOUT_WITHOUT_TZ_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+function normalizeUtcLockoutTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  return LOCKOUT_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
+}
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,6 +25,7 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     if (!email || !password) return toast.error('Please fill in all fields');
     setLoading(true);
     try {
@@ -33,8 +41,9 @@ export default function Login() {
       });
     } catch (err) {
       const lockoutUntil = err.response?.data?.lockout_until;
+      const normalizedLockoutUntil = normalizeUtcLockoutTimestamp(lockoutUntil);
       const message = lockoutUntil
-        ? `Account locked until ${formatDateTimeIndia(lockoutUntil, { dateStyle: 'short', timeStyle: 'medium' })}`
+        ? `Account locked until ${formatDateTimeIndia(normalizedLockoutUntil, { dateStyle: 'short', timeStyle: 'medium' })}`
         : err.response?.data?.error || 'Login failed';
       toast.error(message);
     } finally {

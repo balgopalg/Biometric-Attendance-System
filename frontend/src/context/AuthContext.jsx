@@ -56,9 +56,7 @@ function fetchCurrentUserOnce() {
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    return readUserFromStorage();
-  });
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {
