@@ -13,8 +13,6 @@ This directory contains comprehensive API flow tests for the biometric attendanc
 
 ```bash
 # From backend directory
-python -m pytest tests/test_api_flows.py -v
-# or
 python -m unittest tests.test_api_flows -v
 ```
 
@@ -108,5 +106,5 @@ Run in GitHub Actions, GitLab CI, or any CI platform:
 
 ```bash
 pip install -r backend/requirements.txt
-python -m pytest backend/tests/test_api_flows.py -v
+python -m unittest discover -s backend/tests -p "test_*.py"
 ```

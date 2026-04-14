@@ -25,7 +25,7 @@ Your project now has a **comprehensive, production-ready test suite** with two i
 ### Backend Tests
 ```bash
 cd backend
-python -m pytest tests/test_api_flows.py -v
+python -m unittest tests.test_api_flows -v
 ```
 
 ### Frontend Tests
@@ -37,7 +37,7 @@ npm run test:e2e
 ### Both Suites (from root)
 ```bash
 # Terminal 1: Backend
-cd backend && python -m pytest tests/test_api_flows.py -v
+cd backend && python -m unittest tests.test_api_flows -v
 
 # Terminal 2: Frontend
 cd frontend && npm run test:e2e

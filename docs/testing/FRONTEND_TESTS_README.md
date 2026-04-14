@@ -171,7 +171,7 @@ page.getByRole('main').getByRole('heading', { name: 'Students' })
 ### Prerequisites
 ```bash
 cd frontend
-npm install
+npm ci
 npx playwright install chromium
 ```
 
@@ -206,11 +206,11 @@ npx playwright test --reporter=html
 
 ### GitHub Actions
 ```yaml
-- uses: actions/setup-node@v3
+- uses: actions/setup-node@v4
   with:
-    node-version: 18
-- run: cd frontend && npm install
-- run: cd frontend && npx playwright install chromium
+    node-version: 20
+- run: cd frontend && npm ci
+- run: cd frontend && npx playwright install --with-deps chromium
 - run: cd frontend && npm run test:e2e
 ```
 

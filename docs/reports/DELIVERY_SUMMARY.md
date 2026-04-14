@@ -217,7 +217,7 @@ Result: 4/4 PASSING
 - name: Frontend Tests
   run: |
     cd frontend
-    npm install
+    npm ci
     npx playwright install chromium
     npm run test:e2e
 ```
@@ -230,7 +230,7 @@ backend_tests:
 
 frontend_tests:
   script:
-    - cd frontend && npm install && npx playwright install chromium && npm run test:e2e
+    - cd frontend && npm ci && npx playwright install --with-deps chromium && npm run test:e2e
 ```
 
 ---

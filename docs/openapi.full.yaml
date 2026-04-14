@@ -1,10 +1,11 @@
 openapi: 3.0.3
 info:
   title: Biometric Face Attendance API (Full)
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Exhaustive endpoint specification for the backend route surface.
     Includes all discovered routes from auth, admin, lecturer, student, and recognition blueprints.
+  x-last-reviewed: 2026-04-14
 
 servers:
   - url: http://localhost:5000
