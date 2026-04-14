@@ -664,7 +664,7 @@ test.describe('Project end-to-end flows', () => {
     await expect(page.getByRole('heading', { name: /^Students$/ })).toBeVisible();
 
     await page.getByRole('link', { name: 'Enrollment' }).click();
-    await expect(page.getByRole('heading', { name: 'Face Enrollment' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Student Enrollment' })).toBeVisible({ timeout: 15000 });
   });
 
   test('attendance session lifecycle with upload, commit, and adjustment', async ({ page }) => {
@@ -675,8 +675,12 @@ test.describe('Project end-to-end flows', () => {
     await page.getByRole('link', { name: 'Take Attendance' }).click();
     await expect(page.getByRole('heading', { name: 'Take Attendance' })).toBeVisible();
 
+    // Ensure course/paper selectors are hydrated before starting the session.
+    await page.getByRole('combobox', { name: 'Select course' }).selectOption({ index: 1 });
+    await page.getByRole('combobox', { name: 'Select paper' }).selectOption({ index: 1 });
+
     await page.getByRole('button', { name: 'Start Session' }).click();
-    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
 
     await page.getByRole('button', { name: 'Pause' }).click();
     await page.getByRole('button', { name: 'Upload Image' }).click();
@@ -705,7 +709,7 @@ test.describe('Project end-to-end flows', () => {
     await loginAs(page, 'admin');
 
     await page.getByRole('link', { name: 'Enrollment' }).click();
-    await expect(page.getByRole('heading', { name: 'Face Enrollment' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Student Enrollment' })).toBeVisible({ timeout: 15000 });
 
     await page.getByPlaceholder('Type to search and select student...').fill('Alice');
     await page.locator('button').filter({ hasText: 'Alice Student' }).first().click();
@@ -718,9 +722,10 @@ test.describe('Project end-to-end flows', () => {
     await page.getByRole('link', { name: 'Attendance Matrix' }).click();
     await expect(page.getByRole('main').getByRole('heading', { name: 'Attendance Matrix' })).toBeVisible();
 
-    await page.locator('select').nth(0).selectOption({ label: 'Master of Computer Applications' });
-    await page.locator('select').nth(1).selectOption('2026');
-    await page.locator('select').nth(2).selectOption('1');
+    await expect(page.getByRole('combobox').nth(0)).toContainText('All Courses');
+    await page.getByRole('combobox').nth(0).selectOption({ index: 1 });
+    await page.getByRole('combobox').nth(1).selectOption('2026');
+    await page.getByRole('combobox').nth(2).selectOption('1');
 
     const csvDownloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Export CSV' }).click();

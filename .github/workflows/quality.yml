@@ -88,7 +88,7 @@ jobs:
         run: python -m compileall backend
 
       - name: Run backend API tests
-        run: python -m unittest discover -s backend/tests -p "test_*.py"
+        run: PYTHONPATH=backend python -m unittest discover -s backend/tests -p "test_*.py"
 
   dependency-vulnerability-scan:
     name: Dependency Vulnerability Scan
