@@ -99,7 +99,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-Copy-Item .env.example .env
+copy .env.example .env
 ```
 
 Update `backend/.env` for your environment.
