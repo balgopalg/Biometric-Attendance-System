@@ -369,6 +369,6 @@ Content-Type: application/json
 
 ## 6. Source of truth
 
-- OpenAPI contract: [docs/openapi.yaml](docs/openapi.yaml)
+- OpenAPI contract: [/docs/openapi.yaml](/docs/openapi.yaml)
 - Functional operations manual: [/docs/operations/SYSTEM_OPERATIONS_MANUAL.md](/docs/operations/SYSTEM_OPERATIONS_MANUAL.md)
 - Command runbook: [/docs/operations/CLI_COMMAND_RUNBOOK.md](/docs/operations/CLI_COMMAND_RUNBOOK.md)

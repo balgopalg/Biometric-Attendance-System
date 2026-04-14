@@ -253,14 +253,6 @@ export default function ManageStudents() {
     [students, showInactiveRows]
   );
 
-  if (!loadingStudents && studentsError) {
-    return (
-      <div className="admin-page">
-        <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => fetchStudents(page)} compact />
-      </div>
-    );
-  }
-
   const subjectOptions = useMemo(() => {
     return papers.filter((p) => {
       const sameCourse = !filters.course_id || p.course_id === filters.course_id;
