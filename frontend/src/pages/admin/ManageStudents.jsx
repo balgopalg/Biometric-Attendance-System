@@ -835,12 +835,12 @@ export default function ManageStudents() {
         cancelling={trainingCancelPending}
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+      <div className="students-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Students</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalStudents} students in current filter</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div className="students-toolbar-actions" style={{ display: 'flex', gap: 10 }}>
           <button className="btn-secondary" onClick={handleRebuildAllFaces} disabled={rebuildingAllFaces}>
             <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
           </button>
@@ -867,7 +867,7 @@ export default function ManageStudents() {
 
       <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+      <div className="students-filter-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -920,7 +920,7 @@ export default function ManageStudents() {
         </label>
       </div>
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card">
         {loadingStudents ? (
           <StatePanel variant="loading" title="Loading students" description="Fetching student records and enrollment status." compact />
         ) : null}
@@ -934,6 +934,7 @@ export default function ManageStudents() {
         ) : null}
 
         {!loadingStudents && !studentsError && filtered.length > 0 ? (
+        <div className="table-scroll students-table-scroll">
         <table className="data-table">
           <thead>
             <tr>
@@ -1011,7 +1012,7 @@ export default function ManageStudents() {
                 </td>
                 <td>
                   <SoftLockWrapper locked={s.is_course_inactive} title="Locked: course inactive">
-                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <div className="students-row-actions" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       <button
                         className="icon-btn"
                         title={s.is_course_inactive ? 'Locked: course inactive' : 'Train Face From Dataset'}
@@ -1042,6 +1043,7 @@ export default function ManageStudents() {
             ))}
           </tbody>
         </table>
+        </div>
         ) : null}
       </div>
 

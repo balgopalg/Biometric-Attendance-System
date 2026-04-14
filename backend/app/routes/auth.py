@@ -145,7 +145,10 @@ def login():
                 user_agent=request.headers.get("User-Agent", ""),
             )
 
-        token = create_access_token(identity=user["email"])
+        token = create_access_token(
+            identity=user["email"],
+            additional_claims={"sv": int(user.get("session_version", 1) or 1)},
+        )
         response = jsonify(
             {
                 "user": {
@@ -247,7 +250,10 @@ def refresh_token():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    token = create_access_token(identity=user["email"])
+    token = create_access_token(
+        identity=user["email"],
+        additional_claims={"sv": int(user.get("session_version", 1) or 1)},
+    )
     response = jsonify({
         "message": "Token refreshed",
         "user": {
@@ -338,4 +344,11 @@ def change_password():
             upsert=True,
         )
 
-    return jsonify({"message": "Password changed successfully"})
+    refreshed_user = find_user_by_email(email)
+    token = create_access_token(
+        identity=email,
+        additional_claims={"sv": int((refreshed_user or {}).get("session_version", 1) or 1)},
+    )
+    response = jsonify({"message": "Password changed successfully"})
+    set_access_cookies(response, token)
+    return response

@@ -33,7 +33,22 @@ def create_app(config_class=Config, seed_default_admin=False):
     def _is_token_revoked(_jwt_header, jwt_payload):
         try:
             revoked = get_collection("auth", "revoked_jwts")
-            return revoked.find_one({"jti": jwt_payload.get("jti")}) is not None
+            if revoked.find_one({"jti": jwt_payload.get("jti")}) is not None:
+                return True
+
+            from app.models.user import find_user_by_email
+
+            identity = str(jwt_payload.get("sub") or "").strip().lower()
+            if not identity:
+                return True
+
+            user = find_user_by_email(identity)
+            if not user:
+                return True
+
+            token_session_version = int(jwt_payload.get("sv", 1) or 1)
+            current_session_version = int(user.get("session_version", 1) or 1)
+            return token_session_version != current_session_version
         except Exception:
             return False
 
@@ -286,6 +301,7 @@ def _seed_admin(mongo):
                 ).decode(),
                 "role": "admin",
                 "department": "Administration",
+                "session_version": 1,
                 "created_at": __import__("datetime").datetime.now(timezone.utc).replace(tzinfo=None),
             }
         )

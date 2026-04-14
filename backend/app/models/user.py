@@ -85,6 +85,7 @@ def create_user(name, email, password, role, department="", pin=None, must_chang
         "role": role,
         "department": department,
         "must_change_password": must_change_password,
+        "session_version": 1,
         "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
     }
     if role == "lecturer" and pin:
@@ -147,7 +148,10 @@ def reset_user_password(user_id, temp_password=None):
     user = users.find_one({"_id": ObjectId(user_id)}, {"email": 1})
     users.update_one(
         {"_id": ObjectId(user_id)},
-        {"$set": {"password_hash": pw_hash, "must_change_password": True}},
+        {
+            "$set": {"password_hash": pw_hash, "must_change_password": True},
+            "$inc": {"session_version": 1},
+        },
     )
 
     if user and user.get("email"):
@@ -173,6 +177,9 @@ def change_user_password(user_id, old_password, new_password):
     users = get_collection("auth", "users")
     users.update_one(
         {"_id": ObjectId(user_id)},
-        {"$set": {"password_hash": pw_hash, "must_change_password": False}},
+        {
+            "$set": {"password_hash": pw_hash, "must_change_password": False},
+            "$inc": {"session_version": 1},
+        },
     )
     return True, None

@@ -326,7 +326,7 @@ export default function AttendanceMatrix() {
         </div>
       </div>
 
-      <div className="glass-card table-desktop" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
+      <div className="glass-card attendance-matrix-shell" style={{ width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
         {loading && !matrixError ? (
           <StatePanel variant="loading" title="Loading attendance matrix" description="Building date-wise attendance columns and totals." compact />
         ) : null}
