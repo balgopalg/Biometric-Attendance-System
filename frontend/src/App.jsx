@@ -50,7 +50,10 @@ function ProtectedRoute({ children, allowedRoles }) {
 }
 
 function RootRedirect() {
-  const { isAuthenticated, user, mustChangePassword } = useAuth();
+  const { isAuthenticated, user, mustChangePassword, loading } = useAuth();
+  if (loading) {
+    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><StatePanel variant="loading" title="Loading session" description="Checking access rights." compact /></div>;
+  }
   
   // Redirect to login if not authenticated
   if (!isAuthenticated) {

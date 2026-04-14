@@ -1,6 +1,6 @@
 """Authentication routes."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
@@ -20,6 +20,15 @@ from app.utils.validation import validate_email, validate_password_strength, Val
 from app.models.audit import log_action
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _to_utc_iso8601(value):
+    """Serialize datetimes as explicit UTC ISO-8601 strings."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat().replace("+00:00", "Z")
 
 
 @auth_bp.route("/health", methods=["GET"])
@@ -60,7 +69,7 @@ def health():
 
 
 @auth_bp.route("/login", methods=["POST"])
-@limiter.limit("5 per minute")  # 5 login attempts per minute per IP
+@limiter.limit("20 per minute")  # Keep per-IP burst control; account lockout handles credential abuse.
 def login():
     """
     Authenticate user and set JWT in secure HttpOnly cookie.
@@ -84,12 +93,45 @@ def login():
     if not validate_email(email):
         return jsonify({"error": "Invalid email format"}), 400
     
-    # Verify credentials
+    # Lookup user once, then apply lockout/IP checks before allowing login.
     user = find_user_by_email(email)
-    password_ok = bool(user and verify_password(user["password_hash"], password))
 
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
+        if is_locked:
+            lockout_until = _to_utc_iso8601(lockout_expiry)
+            log_action(
+                user_id=None,
+                action="login_account_locked",
+                resource_type="auth",
+                description=f"Login attempt on locked account: {email}",
+                ip_address=ip_address,
+                user_agent=request.headers.get("User-Agent", ""),
+            )
+            return jsonify({
+                "error": f"Account temporarily locked. Try again after {lockout_until}",
+                "lockout_until": lockout_until
+            }), 429
+
+        is_ip_blocked = IPRateLimiter.is_ip_blocked(
+            ip_address,
+            "auth.login",
+            threshold=current_app.config.get("IP_RATELIMIT_THRESHOLD", 100),
+            window_minutes=current_app.config.get("IP_RATELIMIT_WINDOW_MINUTES", 10),
+        )
+        if is_ip_blocked:
+            log_action(
+                user_id=None,
+                action="login_ip_blocked",
+                resource_type="auth",
+                description=f"Login attempt from blocked IP: {ip_address}",
+                ip_address=ip_address,
+                user_agent=request.headers.get("User-Agent", ""),
+            )
+            return jsonify({"error": "Too many login attempts from your IP. Try again later."}), 429
+
+    password_ok = bool(user and verify_password(user["password_hash"], password))
     if password_ok:
-        # Successful login should always be allowed, even if stale lockout records exist.
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
             BruteForceProtector.clear_failed_attempts(email)
             IPRateLimiter.record_request(ip_address, "auth.login", weight=0)  # Don't count successful logins
@@ -119,40 +161,6 @@ def login():
         set_access_cookies(response, token)
         return response
 
-    # Check account lockout only for invalid credentials.
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
-        if is_locked:
-            log_action(
-                user_id=None,
-                action="login_account_locked",
-                resource_type="auth",
-                description=f"Login attempt on locked account: {email}",
-                ip_address=ip_address,
-                user_agent=request.headers.get("User-Agent", ""),
-            )
-            return jsonify({
-                "error": f"Account temporarily locked. Try again after {lockout_expiry.isoformat()}",
-                "lockout_until": lockout_expiry.isoformat()
-            }), 429
-
-        is_ip_blocked = IPRateLimiter.is_ip_blocked(
-            ip_address,
-            "auth.login",
-            threshold=current_app.config.get("IP_RATELIMIT_THRESHOLD", 100),
-            window_minutes=current_app.config.get("IP_RATELIMIT_WINDOW_MINUTES", 10),
-        )
-        if is_ip_blocked:
-            log_action(
-                user_id=None,
-                action="login_ip_blocked",
-                resource_type="auth",
-                description=f"Login attempt from blocked IP: {ip_address}",
-                ip_address=ip_address,
-                user_agent=request.headers.get("User-Agent", ""),
-            )
-            return jsonify({"error": "Too many login attempts from your IP. Try again later."}), 429
-
     if not user or not verify_password(user["password_hash"], password):
         # Record failed attempt
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
@@ -169,9 +177,12 @@ def login():
             )
             
             if failed_count >= current_app.config.get("LOGIN_LOCKOUT_THRESHOLD", 5):
-                return jsonify({
-                    "error": "Account locked after too many failed attempts"
-                }), 429
+                is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
+                lockout_until = _to_utc_iso8601(lockout_expiry) if is_locked and lockout_expiry else None
+                payload = {"error": "Account locked after too many failed attempts"}
+                if lockout_until:
+                    payload["lockout_until"] = lockout_until
+                return jsonify(payload), 429
         
         return jsonify({"error": "Invalid email or password"}), 401
 
