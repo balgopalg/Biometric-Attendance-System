@@ -44,6 +44,9 @@ Frontend highlights:
 - Paper management: create, update, delete, list, course-linked filtering
 - Lecturer management: create, update, delete, reset password, reset or update PIN, assign papers
 - Student management: create, update, delete, reset password, enrollment support
+- Bulk lecturer import from Excel with row-level success/skip/error output
+- Bulk student import from Excel (course + semester aware) with row-level success/skip/error output
+- Welcome and password-reset emails sent automatically when Resend is configured
 - Student enrollment workflows: filtered options and paper assignments
 - Bulk student promotion by semester with guardrails
 - Face enrollment and training workflows:
@@ -116,14 +119,15 @@ Overall route mapping is coherent with frontend usage and role-based screens.
 ## 5. Dependency Review
 
 ### 5.1 Backend Dependencies (backend/requirements.txt)
-- Flask 3.1.0
+- Flask 3.1.3
 - Flask-PyMongo 2.3.0
 - Flask-JWT-Extended 4.7.1
-- Flask-CORS 5.0.1
+- Flask-CORS 6.0.0
+- Flask-Limiter 3.5.0
 - pymongo 4.11.3
 - bcrypt 4.2.1
 - python-dotenv 1.0.1
-- Pillow 11.1.0
+- Pillow 12.2.0
 - numpy 1.26.4
 - scipy 1.14.1
 - mediapipe 0.10.21
@@ -132,6 +136,11 @@ Overall route mapping is coherent with frontend usage and role-based screens.
 - gunicorn 23.0.0
 - redis 5.2.1
 - openpyxl 3.1.5
+- python-json-logger 2.0.7
+- prometheus-client 0.19.0
+- sentry-sdk 2.8.0
+- cryptography 46.0.7
+- resend 2.28.0
 
 Dependency intent:
 - Web/API: Flask stack

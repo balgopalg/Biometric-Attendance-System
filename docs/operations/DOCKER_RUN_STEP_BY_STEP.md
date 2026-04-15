@@ -20,7 +20,7 @@ docker compose version
 From terminal, go to project root where `docker-compose.yml` exists:
 
 ```bash
-cd "C:\Users\guruv\Desktop\Final bhai au hebani"
+cd "C:\Users\guruv\Desktop\smart-attendance-using-face-biometric\Biometric-Attendance-System"
 ```
 
 ## 3. Create Backend Environment File
@@ -48,6 +48,11 @@ Then edit `backend/.env` and set at minimum:
 - `CORS_ORIGINS` (for local compose keep `http://localhost:8080`)
 - `JWT_COOKIE_DOMAIN` (leave blank for local)
 - `SENTRY_DSN` (optional, can be blank)
+- `RESEND_API_KEY` (optional; enables welcome and password-reset emails)
+- `RESEND_FROM_EMAIL` (optional; verified sender recommended)
+- `TEMP_PASS_DISPLAY_ENABLED` (`0` recommended; set to `1` to return temp passwords in admin API responses)
+
+Note: Excel student/lecturer imports require email delivery to be configured.
 
 ## 4. Build Docker Images
 

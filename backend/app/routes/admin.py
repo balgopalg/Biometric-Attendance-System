@@ -7,6 +7,7 @@ import os
 import time
 import csv
 from io import BytesIO, StringIO
+import openpyxl
 from datetime import datetime, timedelta, timezone
 import cv2
 import numpy as np
@@ -73,6 +74,11 @@ from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
 from app.utils.timezone import india_timestamp_token
 from app.utils.validation import validate_password_strength
+from app.services.email_service import (
+    send_welcome_email,
+    send_password_reset_email,
+    is_email_delivery_enabled,
+)
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -99,6 +105,10 @@ class _JobCancelledError(Exception):
 
 def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _temp_pass_display_enabled():
+    return bool(current_app.config.get("TEMP_PASS_DISPLAY_ENABLED", False))
 
 
 def _cache_get(key):
@@ -1559,10 +1569,31 @@ def add_lecturer(user):
     )
     _clear_query_cache()
     lec_clean = sanitise_mongo_doc(lec)
-    return jsonify({
+
+    email_delivery_enabled = is_email_delivery_enabled()
+    temp_pass_display_enabled = _temp_pass_display_enabled()
+    if email_delivery_enabled:
+        send_welcome_email(
+            to_email=d["email"],
+            name=d["name"],
+            temp_password=initial_password,
+            role="lecturer",
+        )
+    message = (
+        "Lecturer created. Credentials have been emailed."
+        if email_delivery_enabled
+        else "Lecturer created. Email delivery is not configured; share the initial password securely."
+    )
+
+    payload = {
         **lec_clean,
-        "message": "Lecturer created. Deliver the initial password via a secure out-of-band channel.",
-    }), 201
+        "message": message,
+        "email_delivery_enabled": email_delivery_enabled,
+        "temp_pass_display_enabled": temp_pass_display_enabled,
+    }
+    if temp_pass_display_enabled:
+        payload["temp_password"] = initial_password
+    return jsonify(payload), 201
 
 
 @admin_bp.route("/lecturers/<lid>", methods=["PUT"])
@@ -1603,7 +1634,33 @@ def reset_lecturer_password(user, lid):
     temp_password = reset_user_password(lid, temp_password=str(d.get("temp_password", "")).strip() or None)
     log_action("RESET_PASSWORD", str(user["_id"]), target_user=lid,
                details="Lecturer password reset")
-    return jsonify({"message": "Lecturer password reset.", "temp_password": temp_password})
+
+    email_delivery_enabled = is_email_delivery_enabled()
+    temp_pass_display_enabled = _temp_pass_display_enabled()
+
+    # Send reset email
+    lec_user = find_user_by_id(lid)
+    if email_delivery_enabled and lec_user and lec_user.get("email"):
+        send_password_reset_email(
+            to_email=lec_user["email"],
+            name=lec_user.get("name", "Lecturer"),
+            temp_password=temp_password,
+            role="lecturer",
+        )
+    message = (
+        "Lecturer password reset. New credentials have been emailed."
+        if email_delivery_enabled
+        else "Lecturer password reset. Email delivery is not configured; share the new password securely."
+    )
+
+    payload = {
+        "message": message,
+        "email_delivery_enabled": email_delivery_enabled,
+        "temp_pass_display_enabled": temp_pass_display_enabled,
+    }
+    if temp_pass_display_enabled:
+        payload["temp_password"] = temp_password
+    return jsonify(payload)
 
 
 @admin_bp.route("/lecturers/<lid>/reset-pin", methods=["POST"])
@@ -1742,8 +1799,6 @@ def list_students(user):
         item["course_code"] = (course or {}).get("code")
         item["course_status"] = _as_text((course or {}).get("status") or "active").lower() or "active"
         item["is_course_inactive"] = item["course_status"] != "active"
-        if item["is_course_inactive"] and not include_inactive:
-            continue
         item["course_department"] = (course or {}).get("department")
         item["course_duration"] = (course or {}).get("course_duration")
         item["current_semester"] = _to_int(item.get("current_semester"), 0) or None
@@ -1757,29 +1812,6 @@ def list_students(user):
             for pid in enrolled_papers
         ]
 
-        student_semesters = set()
-        if item.get("current_semester"):
-            student_semesters.add(str(item.get("current_semester")))
-        for pid in enrolled_papers:
-            pdoc = paper_map.get(pid) or {}
-            psem = _to_int(pdoc.get("semester"), 0)
-            if psem > 0:
-                student_semesters.add(str(psem))
-
-        if course_id and item.get("course_id") != course_id:
-            continue
-        if paper_id and paper_id not in enrolled_papers:
-            continue
-        if semester and semester not in student_semesters:
-            continue
-        if academic_session and _as_text(item.get("academic_session")) != academic_session:
-            continue
-        if q and not (
-            q in _as_text(item.get("name")).lower()
-            or q in _as_text(item.get("email")).lower()
-            or q in _as_text(item.get("reg_number")).lower()
-        ):
-            continue
 
         # Don't send raw embeddings to the frontend
         item.pop("face_embeddings", None)
@@ -2003,11 +2035,31 @@ def add_student(user):
     stu_clean = sanitise_mongo_doc(stu)
     profile_clean = sanitise_mongo_doc(profile) if profile else None
     
-    return jsonify({
+    email_delivery_enabled = is_email_delivery_enabled()
+    temp_pass_display_enabled = _temp_pass_display_enabled()
+    if email_delivery_enabled:
+        send_welcome_email(
+            to_email=d["email"],
+            name=d["name"],
+            temp_password=initial_password,
+            role="student",
+        )
+    message = (
+        "Student created. Credentials have been emailed."
+        if email_delivery_enabled
+        else "Student created. Email delivery is not configured; share the initial password securely."
+    )
+
+    payload = {
         **stu_clean,
         "profile": profile_clean,
-        "message": "Student created. Deliver the initial password via a secure out-of-band channel.",
-    }), 201
+        "message": message,
+        "email_delivery_enabled": email_delivery_enabled,
+        "temp_pass_display_enabled": temp_pass_display_enabled,
+    }
+    if temp_pass_display_enabled:
+        payload["temp_password"] = initial_password
+    return jsonify(payload), 201
 
 
 @admin_bp.route("/students/<sid>", methods=["PUT"])
@@ -2221,6 +2273,316 @@ def bulk_promote_students(user):
     )
 
 
+# ─── Excel Import ────────────────────────────────────────────────────────────
+
+@admin_bp.route("/students/import-excel", methods=["POST"])
+@role_required("admin")
+def import_students_excel(user):
+    """Bulk-import students from an uploaded Excel file.
+
+    Expects multipart/form-data with:
+      - file    : .xlsx file
+      - course_id : required
+      - semester  : required (integer)
+
+    Excel columns (case-insensitive, stripped):
+      Name, RollNo / Roll No, RegdNo / Regd No / Regd. No., Email, PhoneNo / Phone No (optional)
+    """
+    if not is_email_delivery_enabled():
+        return jsonify({"error": "Email delivery is not configured. Configure RESEND_API_KEY before Excel import."}), 400
+
+    course_id = _as_text(request.form.get("course_id"))
+    semester = _to_int(request.form.get("semester"), 0)
+
+    if not course_id:
+        return jsonify({"error": "course_id is required"}), 400
+    if semester <= 0:
+        return jsonify({"error": "semester is required and must be a positive integer"}), 400
+
+    course, err = _get_active_course_or_error(course_id)
+    if err:
+        return err
+
+    uploaded = request.files.get("file")
+    if not uploaded:
+        return jsonify({"error": "No file uploaded"}), 400
+    if not uploaded.filename.lower().endswith((".xlsx", ".xlsm", ".xltx")):
+        return jsonify({"error": "Only .xlsx files are supported"}), 400
+
+    try:
+        wb = openpyxl.load_workbook(BytesIO(uploaded.read()), read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+    except Exception as exc:
+        return jsonify({"error": f"Could not parse Excel file: {str(exc)}"}), 400
+
+    if not rows:
+        return jsonify({"error": "Excel file is empty"}), 400
+
+    # Normalise header row
+    header_raw = [str(h).strip().lower() if h is not None else "" for h in rows[0]]
+
+    COL_ALIASES = {
+        "name": ["name"],
+        "roll_number": ["rollno", "roll no", "roll_no", "roll number"],
+        "reg_number": ["regdno", "regd no", "regd. no.", "regd.no.", "reg no", "reg_no", "reg number", "regno"],
+        "email": ["email"],
+        "mobile_no": ["phoneno", "phone no", "phone_no", "phone number", "mobile", "mobile_no", "mobileno"],
+    }
+
+    col_idx = {}
+    for field, aliases in COL_ALIASES.items():
+        for idx, h in enumerate(header_raw):
+            if h in aliases:
+                col_idx[field] = idx
+                break
+
+    required_cols = ["name", "email", "reg_number"]
+    missing_cols = [c for c in required_cols if c not in col_idx]
+    if missing_cols:
+        return jsonify({"error": f"Missing required columns: {', '.join(missing_cols)}. Found headers: {header_raw}"}), 400
+
+    enrollment_year = datetime.now(timezone.utc).replace(tzinfo=None).year
+    course_duration = _to_int((course or {}).get("course_duration"), 1)
+    academic_session = _derive_academic_session(enrollment_year, course_duration)
+
+    results = []
+    created_count = 0
+    skipped_count = 0
+    error_count = 0
+    temp_pass_display_enabled = _temp_pass_display_enabled()
+
+    for row_num, row in enumerate(rows[1:], start=2):
+        def _cell(field):
+            idx = col_idx.get(field)
+            if idx is None:
+                return ""
+            val = row[idx] if idx < len(row) else None
+            return str(val).strip() if val is not None else ""
+
+        name = _cell("name")
+        email = _cell("email")
+        reg_number = _cell("reg_number")
+        roll_number = _cell("roll_number") or reg_number
+        mobile_no = _cell("mobile_no")
+
+        if not name or not email or not reg_number:
+            skipped_count += 1
+            results.append({"row": row_num, "status": "skipped", "reason": "Missing required field (Name, Email, or RegdNo)"})
+            continue
+
+        if find_user_by_email(email):
+            skipped_count += 1
+            results.append({"row": row_num, "name": name, "email": email, "status": "skipped", "reason": "Email already exists"})
+            continue
+
+        try:
+            initial_password = _generate_import_temp_password()
+
+            stu = create_user(
+                name,
+                email,
+                initial_password,
+                "student",
+                (course or {}).get("department", ""),
+                must_change_password=True,
+            )
+
+            if mobile_no:
+                try:
+                    update_user(str(stu["_id"]), {"mobile_no": mobile_no})
+                except Exception:
+                    pass
+
+            profile = None
+            for attempt in range(3):
+                try:
+                    use_reg = reg_number if attempt == 0 else _generate_registration_number(course, academic_session)
+                    profile = create_student_profile(str(stu["_id"]), use_reg, course_id, academic_session)
+                    break
+                except DuplicateKeyError:
+                    continue
+                except Exception:
+                    break
+
+            if not profile:
+                delete_user(str(stu["_id"]))
+                error_count += 1
+                results.append({"row": row_num, "name": name, "email": email, "status": "error", "reason": "Could not create profile (duplicate reg number?)"})
+                continue
+
+            update_profile(str(stu["_id"]), {
+                "enrollment_year": enrollment_year,
+                "current_semester": semester,
+                "roll_number": roll_number,
+                "reg_number": reg_number,
+                "academic_session": academic_session,
+                "academic_year": academic_session,
+                "year": academic_session,
+            })
+
+            log_action(
+                "CREATE_STUDENT",
+                str(user["_id"]),
+                target_user=stu["_id"],
+                rollback=_rb_batch([
+                    _rb_delete("academic", "student_profiles", {"user_id": str(stu["_id"])}),
+                    _rb_delete("auth", "users", {"_id": str(stu["_id"])}),
+                ]),
+            )
+            created_count += 1
+            row_result = {"row": row_num, "name": name, "email": email, "status": "created"}
+            if temp_pass_display_enabled:
+                row_result["temp_password"] = initial_password
+            results.append(row_result)
+
+            # Send welcome email (fire-and-forget)
+            send_welcome_email(
+                to_email=email,
+                name=name,
+                temp_password=initial_password,
+                role="student",
+            )
+        except DuplicateKeyError:
+            skipped_count += 1
+            results.append({"row": row_num, "name": name, "email": email, "status": "skipped", "reason": "Duplicate email or registration number"})
+        except Exception as exc:
+            error_count += 1
+            results.append({"row": row_num, "name": name, "email": email, "status": "error", "reason": str(exc)})
+
+    _clear_query_cache()
+    return jsonify({
+        "message": f"Import complete: {created_count} created, {skipped_count} skipped, {error_count} errors",
+        "created": created_count,
+        "skipped": skipped_count,
+        "errors": error_count,
+        "temp_pass_display_enabled": temp_pass_display_enabled,
+        "results": results,
+    }), 207 if (skipped_count + error_count) > 0 else 201
+
+
+@admin_bp.route("/lecturers/import-excel", methods=["POST"])
+@role_required("admin")
+def import_lecturers_excel(user):
+    """Bulk-import lecturers from an uploaded Excel file.
+
+    Expects multipart/form-data with:
+      - file : .xlsx file
+
+    Excel columns (case-insensitive):
+      Name, Email
+    """
+    if not is_email_delivery_enabled():
+        return jsonify({"error": "Email delivery is not configured. Configure RESEND_API_KEY before Excel import."}), 400
+
+    uploaded = request.files.get("file")
+    if not uploaded:
+        return jsonify({"error": "No file uploaded"}), 400
+    if not uploaded.filename.lower().endswith((".xlsx", ".xlsm", ".xltx")):
+        return jsonify({"error": "Only .xlsx files are supported"}), 400
+
+    try:
+        wb = openpyxl.load_workbook(BytesIO(uploaded.read()), read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+    except Exception as exc:
+        return jsonify({"error": f"Could not parse Excel file: {str(exc)}"}), 400
+
+    if not rows:
+        return jsonify({"error": "Excel file is empty"}), 400
+
+    header_raw = [str(h).strip().lower() if h is not None else "" for h in rows[0]]
+
+    name_idx = next((i for i, h in enumerate(header_raw) if h in ["name", "full name", "fullname"]), None)
+    email_idx = next((i for i, h in enumerate(header_raw) if h in ["email", "email address", "e-mail"]), None)
+
+    if name_idx is None or email_idx is None:
+        return jsonify({"error": f"Missing required columns: Name and/or Email. Found headers: {header_raw}"}), 400
+
+    results = []
+    created_count = 0
+    skipped_count = 0
+    error_count = 0
+    temp_pass_display_enabled = _temp_pass_display_enabled()
+
+    for row_num, row in enumerate(rows[1:], start=2):
+        def _cell(idx):
+            val = row[idx] if idx < len(row) else None
+            return str(val).strip() if val is not None else ""
+
+        name = _cell(name_idx)
+        email = _cell(email_idx)
+
+        if not name or not email:
+            skipped_count += 1
+            results.append({"row": row_num, "status": "skipped", "reason": "Missing Name or Email"})
+            continue
+
+        if find_user_by_email(email):
+            skipped_count += 1
+            results.append({"row": row_num, "name": name, "email": email, "status": "skipped", "reason": "Email already exists"})
+            continue
+
+        try:
+            initial_password = _generate_import_temp_password()
+            lec = create_user(name, email, initial_password, "lecturer", "", must_change_password=True)
+            log_action(
+                "CREATE_LECTURER",
+                str(user["_id"]),
+                target_user=lec["_id"],
+                rollback=_rb_delete("auth", "users", {"_id": lec.get("_id")}),
+            )
+            created_count += 1
+            row_result = {"row": row_num, "name": name, "email": email, "status": "created"}
+            if temp_pass_display_enabled:
+                row_result["temp_password"] = initial_password
+            results.append(row_result)
+
+            # Send welcome email (fire-and-forget)
+            send_welcome_email(
+                to_email=email,
+                name=name,
+                temp_password=initial_password,
+                role="lecturer",
+            )
+        except DuplicateKeyError:
+            skipped_count += 1
+            results.append({"row": row_num, "name": name, "email": email, "status": "skipped", "reason": "Duplicate email"})
+        except Exception as exc:
+            error_count += 1
+            results.append({"row": row_num, "name": name, "email": email, "status": "error", "reason": str(exc)})
+
+    _clear_query_cache()
+    return jsonify({
+        "message": f"Import complete: {created_count} created, {skipped_count} skipped, {error_count} errors",
+        "created": created_count,
+        "skipped": skipped_count,
+        "errors": error_count,
+        "temp_pass_display_enabled": temp_pass_display_enabled,
+        "results": results,
+    }), 207 if (skipped_count + error_count) > 0 else 201
+
+
+def _generate_import_temp_password(length=14):
+    """Generate a cryptographically random temporary password for bulk imports."""
+    import string
+    upper = string.ascii_uppercase.replace("I", "").replace("O", "")
+    lower = string.ascii_lowercase.replace("l", "").replace("o", "")
+    digits = "23456789"
+    symbols = "!@#$%^&*"
+    all_chars = upper + lower + digits + symbols
+    chars = [
+        secrets.choice(upper),
+        secrets.choice(lower),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    while len(chars) < length:
+        chars.append(secrets.choice(all_chars))
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
+
+
 @admin_bp.route("/students/<sid>/reset-password", methods=["POST"])
 @role_required("admin")
 def reset_student_password(user, sid):
@@ -2232,7 +2594,33 @@ def reset_student_password(user, sid):
     temp_password = reset_user_password(user_id, temp_password=str(d.get("temp_password", "")).strip() or None)
     log_action("RESET_PASSWORD", str(user["_id"]), target_user=user_id,
                details="Student password reset")
-    return jsonify({"message": "Student password reset.", "temp_password": temp_password})
+
+    email_delivery_enabled = is_email_delivery_enabled()
+    temp_pass_display_enabled = _temp_pass_display_enabled()
+
+    # Send reset email
+    stu_user = find_user_by_id(user_id)
+    if email_delivery_enabled and stu_user and stu_user.get("email"):
+        send_password_reset_email(
+            to_email=stu_user["email"],
+            name=stu_user.get("name", "Student"),
+            temp_password=temp_password,
+            role="student",
+        )
+    message = (
+        "Student password reset. New credentials have been emailed."
+        if email_delivery_enabled
+        else "Student password reset. Email delivery is not configured; share the new password securely."
+    )
+
+    payload = {
+        "message": message,
+        "email_delivery_enabled": email_delivery_enabled,
+        "temp_pass_display_enabled": temp_pass_display_enabled,
+    }
+    if temp_pass_display_enabled:
+        payload["temp_password"] = temp_password
+    return jsonify(payload)
 
 
 # ─── Student Enrollment (Photo → Embedding) ────────────────────────────────
