@@ -28,7 +28,9 @@ Production-ready full stack attendance platform for classroom operations using f
 ### Admin
 
 - Manage courses, papers, lecturers, students, and mappings
+- Bulk import students and lecturers from Excel files with per-row result reporting (requires configured email delivery)
 - Enrollment workflows and semester progression utilities
+- Automated welcome and password-reset credential emails (Resend-backed, optional)
 - Attendance matrix and exports
 - Audit trail with rollback support for eligible operations
 
@@ -103,6 +105,14 @@ copy .env.example .env
 ```
 
 Update `backend/.env` for your environment.
+
+Optional email delivery configuration (for welcome/reset emails):
+
+```dotenv
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=Biometric Attendance <onboarding@resend.dev>
+TEMP_PASS_DISPLAY_ENABLED=0
+```
 
 Start the API:
 
@@ -235,6 +245,7 @@ python verify_security.py
 - CSRF cookie protection enabled by default
 - Configurable rate limiting and brute-force protection
 - Password policy controls in `backend/.env`
+- Transactional email delivery for account onboarding/password resets and Excel-import credentials (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`)
 - Strong JWT secret required for production/staging (`STRICT_JWT_SECRET`)
 
 ## Testing and Quality
@@ -279,6 +290,8 @@ Pipeline includes:
 - Use `backend/.env.production.example` as baseline for hardened production config.
 - Set a strong `JWT_SECRET_KEY` and restrict `CORS_ORIGINS`.
 - Set `FACE_EMBEDDING_ENCRYPTION_KEY` before handling biometric data at scale.
+- Configure `RESEND_API_KEY` and verified sender in `RESEND_FROM_EMAIL` for onboarding, password-reset, and Excel-import credential delivery.
+- Keep `TEMP_PASS_DISPLAY_ENABLED=0` in production unless temporary password display in API/UI is explicitly required.
 - Keep `backend/.env` out of source control.
 
 ## License

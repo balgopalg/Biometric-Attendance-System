@@ -23,6 +23,7 @@ import {
   HiOutlinePencil,
   HiOutlineArrowUp,
   HiOutlineSparkles,
+  HiOutlineDocumentAdd,
 } from 'react-icons/hi';
 
 const EMPTY_FORM = {
@@ -76,6 +77,7 @@ export default function ManageStudents() {
   const [showCreds, setShowCreds] = useState(false);
   const [showFaceEnroll, setShowFaceEnroll] = useState(false);
   const [showStudentPapers, setShowStudentPapers] = useState(false);
+  const [showExcelImport, setShowExcelImport] = useState(false);
 
   const [createdCreds, setCreatedCreds] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
@@ -94,6 +96,12 @@ export default function ManageStudents() {
   const [bulkSemesters, setBulkSemesters] = useState([]);
   const [bulkPapers, setBulkPapers] = useState([]);
   const [bulkStudents, setBulkStudents] = useState([]);
+  const [excelForm, setExcelForm] = useState({ course_id: '', semester: '' });
+  const [excelSemesters, setExcelSemesters] = useState([]);
+  const [excelFile, setExcelFile] = useState(null);
+  const [excelImporting, setExcelImporting] = useState(false);
+  const [excelResults, setExcelResults] = useState(null);
+  const excelFileInputRef = useRef(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [trainingStudentId, setTrainingStudentId] = useState('');
   const [bulkTraining, setBulkTraining] = useState(false);
@@ -381,12 +389,15 @@ export default function ManageStudents() {
 
       setShowAdd(false);
       setForm(EMPTY_FORM);
-      setCreatedCreds({
-        reg_number: data.profile?.reg_number || data.profile?.roll_number || 'N/A',
-        temp_password: initialPassword,
-        name: data.name,
-      });
-      setShowCreds(true);
+      if (data?.temp_password) {
+        setCreatedCreds({
+          reg_number: data.profile?.reg_number || data.profile?.roll_number || 'N/A',
+          temp_password: data.temp_password,
+          name: data.name,
+        });
+        setShowCreds(true);
+      }
+      toast.success(data?.message || 'Student created');
       fetchStudents(1);
     } catch (err) {
       console.error('Student creation error:', err.response?.data, err.message);
@@ -455,14 +466,17 @@ export default function ManageStudents() {
     if (!window.confirm(`Reset password for ${student.name}?`)) return;
     try {
       const res = await api.post(`/admin/students/${sid}/reset-password`);
-      const tempPassword = res.data?.temp_password || '';
-      setCreatedCreds({
-        reg_number: student.reg_number || student.name,
-        temp_password: tempPassword,
-        name: student.name,
-        isReset: true,
-      });
-      setShowCreds(true);
+      const tempPassword = res.data?.temp_password;
+      if (tempPassword) {
+        setCreatedCreds({
+          reg_number: student.reg_number || student.name,
+          temp_password: tempPassword,
+          name: student.name,
+          isReset: true,
+        });
+        setShowCreds(true);
+      }
+      toast.success(res.data?.message || 'Password reset');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to reset password');
     }
@@ -711,6 +725,44 @@ export default function ManageStudents() {
     }
   };
 
+  // ─── Excel import for students ────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    if (!showExcelImport || !excelForm.course_id) {
+      setExcelSemesters([]);
+      return () => { cancelled = true; };
+    }
+    api.get(`/admin/courses/${excelForm.course_id}/semesters`)
+      .then((r) => { if (!cancelled) setExcelSemesters(r.data || []); })
+      .catch(() => { if (!cancelled) setExcelSemesters([]); });
+    return () => { cancelled = true; };
+  }, [showExcelImport, excelForm.course_id]);
+
+  const handleExcelImport = async () => {
+    if (!excelForm.course_id) { toast.error('Please select a course'); return; }
+    if (!excelForm.semester) { toast.error('Please select a semester'); return; }
+    if (!excelFile) { toast.error('Please select an Excel file'); return; }
+
+    const fd = new FormData();
+    fd.append('file', excelFile);
+    fd.append('course_id', excelForm.course_id);
+    fd.append('semester', excelForm.semester);
+
+    try {
+      setExcelImporting(true);
+      const res = await api.post('/admin/students/import-excel', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setExcelResults(res.data);
+      toast.success(res.data.message || 'Import complete');
+      fetchStudents(1);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Import failed');
+    } finally {
+      setExcelImporting(false);
+    }
+  };
+
   const handleBulkAssign = async () => {
     if (!bulkForm.paper_id || bulkForm.student_ids.length === 0) {
       toast.error('Select subject and at least one student');
@@ -858,6 +910,15 @@ export default function ManageStudents() {
             setShowBulk(true);
           }}>
             <HiOutlineClipboardList size={16} /> Bulk Assign Subject
+          </button>
+          <button className="btn-secondary" title="Import students from Excel" onClick={() => {
+            setExcelForm({ course_id: '', semester: '' });
+            setExcelFile(null);
+            setExcelResults(null);
+            if (excelFileInputRef.current) excelFileInputRef.current.value = '';
+            setShowExcelImport(true);
+          }}>
+            <HiOutlineDocumentAdd size={16} /> Import Excel
           </button>
           <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
             <HiOutlinePlus size={16} /> Add Student
@@ -1282,6 +1343,159 @@ export default function ManageStudents() {
           onSuccess={handleFaceEnrollSuccess}
         />
       )}
+
+      {/* ─── Excel Import Modal ───────────────────────────────────────────── */}
+      <Modal
+        isOpen={showExcelImport}
+        onClose={() => { if (!excelImporting) { setShowExcelImport(false); setExcelResults(null); } }}
+        title="Import Students from Excel"
+        width={580}
+      >
+        {!excelResults ? (
+          <>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+              Upload an <strong>.xlsx</strong> file with columns:
+              {' '}<code>Name</code>, <code>RollNo</code>, <code>RegdNo</code>, <code>Email</code>,
+              {' '}<code>PhoneNo</code> (optional). Name, RegdNo, and Email are mandatory.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+              <div>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course *</label>
+                <select
+                  className="input-field"
+                  value={excelForm.course_id}
+                  onChange={(e) => setExcelForm({ course_id: e.target.value, semester: '' })}
+                >
+                  <option value="">Select course</option>
+                  {activeCourses.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {formatCourseName(c.name, { status: c.status })} ({c.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Semester *</label>
+                <select
+                  className="input-field"
+                  value={excelForm.semester}
+                  onChange={(e) => setExcelForm({ ...excelForm, semester: e.target.value })}
+                  disabled={!excelForm.course_id}
+                >
+                  <option value="">Select semester</option>
+                  {excelSemesters.map((s) => (
+                    <option key={s} value={String(s)}>Semester {s}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Excel File (.xlsx) *</label>
+              <input
+                ref={excelFileInputRef}
+                type="file"
+                accept=".xlsx,.xlsm,.xltx"
+                className="input-field"
+                style={{ padding: '8px 12px', cursor: 'pointer' }}
+                onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+              />
+              {excelFile && (
+                <p style={{ marginTop: 6, fontSize: '0.78rem', color: 'var(--accent-emerald)' }}>
+                  ✓ {excelFile.name} ({(excelFile.size / 1024).toFixed(1)} KB)
+                </p>
+              )}
+            </div>
+
+            <div
+              style={{
+                background: 'var(--bg-glass)',
+                border: '1px solid var(--border-glass)',
+                borderRadius: 'var(--radius)',
+                padding: '10px 14px',
+                marginBottom: 18,
+                fontSize: '0.78rem',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <strong style={{ color: 'var(--text-secondary)' }}>Expected column headers (row 1):</strong>
+              <br />
+              <code>Name</code> · <code>RollNo</code> · <code>RegdNo</code> · <code>Email</code> · <code>PhoneNo</code>
+              <br />
+              Duplicate emails are skipped automatically. Each student gets an auto-generated temporary password.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn-secondary" onClick={() => setShowExcelImport(false)} disabled={excelImporting}>Cancel</button>
+              <button className="btn-primary" onClick={handleExcelImport} disabled={excelImporting || !excelForm.course_id || !excelForm.semester || !excelFile}>
+                {excelImporting ? 'Importing...' : 'Import'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <HiOutlineCheckCircle size={22} style={{ color: 'var(--accent-emerald)', flexShrink: 0 }} />
+              <div>
+                <p style={{ fontWeight: 700, margin: 0 }}>{excelResults.message}</p>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                  Created: {excelResults.created} &nbsp;·&nbsp; Skipped: {excelResults.skipped} &nbsp;·&nbsp; Errors: {excelResults.errors}
+                </p>
+              </div>
+            </div>
+
+            {excelResults.results?.length > 0 && (
+              <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', marginBottom: 16 }}>
+                <table className="data-table" style={{ fontSize: '0.78rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Row</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                      <th>Temp Password / Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {excelResults.results.map((r) => (
+                      <tr key={r.row} style={{ opacity: r.status === 'skipped' || r.status === 'error' ? 0.65 : 1 }}>
+                        <td>{r.row}</td>
+                        <td>{r.name || '—'}</td>
+                        <td>{r.email || '—'}</td>
+                        <td>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            background: r.status === 'created' ? 'rgba(52,211,153,0.15)' : r.status === 'error' ? 'rgba(248,113,113,0.15)' : 'rgba(251,191,36,0.15)',
+                            color: r.status === 'created' ? 'var(--accent-emerald)' : r.status === 'error' ? '#f87171' : '#fbbf24',
+                          }}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td style={{ fontFamily: r.temp_password ? 'monospace' : 'inherit', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {r.temp_password || r.reason || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn-secondary" onClick={() => {
+                setExcelResults(null);
+                setExcelFile(null);
+                if (excelFileInputRef.current) excelFileInputRef.current.value = '';
+              }}>Import Another File</button>
+              <button className="btn-primary" onClick={() => { setShowExcelImport(false); setExcelResults(null); }}>Done</button>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }
