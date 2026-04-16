@@ -217,12 +217,12 @@ def _ensure_indexes(mongo, config):
     attendance_logs = client[config["MONGO_DB_ATTENDANCE"]]["attendance_logs"]
     _create_index_safe(
         attendance_logs,
-        [("session_id", ASCENDING), ("paper_id", ASCENDING), ("student_id", ASCENDING)],
+        [("session_id", ASCENDING), ("paper_id", ASCENDING), ("user_id", ASCENDING)],
         unique=True,
         name="uq_attendance_session_paper_student",
     )
     _create_index_safe(attendance_logs, [("timestamp", DESCENDING)], name="ix_attendance_timestamp")
-    _create_index_safe(attendance_logs, [("paper_id", ASCENDING), ("student_id", ASCENDING)], name="ix_attendance_paper_student")
+    _create_index_safe(attendance_logs, [("paper_id", ASCENDING), ("user_id", ASCENDING)], name="ix_attendance_paper_student")
 
     sessions = client[config["MONGO_DB_ATTENDANCE"]]["attendance_sessions"]
     _create_index_safe(sessions, [("session_id", ASCENDING)], unique=True, name="uq_sessions_id")
@@ -247,7 +247,7 @@ def _ensure_indexes(mongo, config):
     overrides = client[config["MONGO_DB_ATTENDANCE"]]["exam_eligibility_overrides"]
     _create_index_safe(
         overrides,
-        [("student_id", ASCENDING), ("paper_id", ASCENDING)],
+        [("user_id", ASCENDING), ("paper_id", ASCENDING)],
         unique=True,
         name="uq_overrides_student_paper",
     )

@@ -71,7 +71,7 @@ export default function ExamEligibility() {
     const byStudent = new Map();
 
     rows.forEach((row) => {
-      const key = String(row.student_id || '');
+      const key = String(row.user_id || '');
       if (!key) return;
 
       const existing = byStudent.get(key);
@@ -118,7 +118,7 @@ export default function ExamEligibility() {
 
   const displayedStudentIds = useMemo(() => (
     displayedRows
-      .map((row) => String(row.student_id || '').trim())
+      .map((row) => String(row.user_id || '').trim())
       .filter(Boolean)
   ), [displayedRows]);
 
@@ -194,7 +194,7 @@ export default function ExamEligibility() {
 
     try {
       await Promise.all(targetPaperIds.map((paperId) => api.put('/admin/exam-eligibility-override', {
-        student_id: row.student_id,
+        user_id: row.user_id,
         paper_id: paperId,
         override_status: overrideStatus,
         reason,
@@ -206,8 +206,8 @@ export default function ExamEligibility() {
     }
   };
 
-  const toggleStudentSelection = (studentId) => {
-    const key = String(studentId || '').trim();
+  const toggleStudentSelection = (userId) => {
+    const key = String(userId || '').trim();
     if (!key) return;
     setSelectedStudentIds((prev) => (
       prev.includes(key) ? prev.filter((id) => id !== key) : [...prev, key]
@@ -223,7 +223,7 @@ export default function ExamEligibility() {
   };
 
   const handleBulkOverride = async (overrideStatus) => {
-    const targetRows = displayedRows.filter((row) => selectedStudentIds.includes(String(row.student_id || '').trim()));
+    const targetRows = displayedRows.filter((row) => selectedStudentIds.includes(String(row.user_id || '').trim()));
     if (targetRows.length === 0) {
       toast.error(`Select at least one student to bulk ${overrideStatus ? 'allow' : 'block'}`);
       return;
@@ -237,13 +237,13 @@ export default function ExamEligibility() {
 
     const requests = [];
     targetRows.forEach((row) => {
-      const studentId = String(row.student_id || '').trim();
+      const userId = String(row.user_id || '').trim();
       const paperIds = Array.from(new Set((row.paper_ids || []).filter(Boolean)));
       paperIds.forEach((paperId) => {
         const normalizedPaperId = String(paperId || '').trim();
-        if (!studentId || !normalizedPaperId) return;
+        if (!userId || !normalizedPaperId) return;
         requests.push({
-          student_id: studentId,
+          user_id: userId,
           paper_id: normalizedPaperId,
           override_status: overrideStatus,
           reason,
@@ -439,12 +439,12 @@ export default function ExamEligibility() {
           </thead>
           <tbody>
             {displayedRows.map((row) => (
-              <tr key={row.student_id}>
+              <tr key={row.user_id}>
                 <td style={{ textAlign: 'center' }}>
                   <input
                     type="checkbox"
-                    checked={selectedStudentIds.includes(String(row.student_id || '').trim())}
-                    onChange={() => toggleStudentSelection(row.student_id)}
+                    checked={selectedStudentIds.includes(String(row.user_id || '').trim())}
+                    onChange={() => toggleStudentSelection(row.user_id)}
                     aria-label={`Select ${row.student_name || 'student'}`}
                   />
                 </td>
@@ -494,13 +494,13 @@ export default function ExamEligibility() {
           const attended = row.overall_attended_classes ?? row.attended_classes ?? 0;
           const totalClasses = row.overall_total_classes ?? row.classes_happened ?? 0;
           return (
-            <div key={row.student_id} className="glass-card mobile-card">
+            <div key={row.user_id} className="glass-card mobile-card">
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input
                     type="checkbox"
-                    checked={selectedStudentIds.includes(String(row.student_id || '').trim())}
-                    onChange={() => toggleStudentSelection(row.student_id)}
+                    checked={selectedStudentIds.includes(String(row.user_id || '').trim())}
+                    onChange={() => toggleStudentSelection(row.user_id)}
                     aria-label={`Select ${row.student_name || 'student'}`}
                   />
                   Select

@@ -17,12 +17,14 @@ const titleMap = {
   '/admin/attendance-matrix': 'Attendance Matrix',
   '/admin/audit': 'Audit Trail',
   '/admin/dead-letter': 'Dead-Letter Jobs',
+  // '/admin/leaves': 'Manage Leaves',
   '/lecturer': 'Lecturer Dashboard',
   '/lecturer/session': 'Attendance Session',
   '/lecturer/progress': 'Attendance History',
   '/student': 'Student Dashboard',
   '/student/attendance': 'Attendance Summary',
   '/student/exams': 'Exam Portal',
+  // '/student/leaves': 'Leave Requests',
 };
 
 export default function DashboardLayout() {

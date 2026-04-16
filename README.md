@@ -28,22 +28,26 @@ Production-ready full stack attendance platform for classroom operations using f
 ### Admin
 
 - Manage courses, papers, lecturers, students, and mappings
-- Bulk import students and lecturers from Excel files with per-row result reporting (requires configured email delivery)
+- Bulk import students and lecturers from Excel files with per-row result reporting
 - Enrollment workflows and semester progression utilities
-- Automated welcome and password-reset credential emails (Resend-backed, optional)
-- Attendance matrix and exports
+- Automated welcome and password-reset credential emails (Yagmail-backed, optional)
+- Automated attendance shortage warnings (email alerts for students below threshold)
+- Medical leave management (approve/reject student appeals)
+- Attendance matrix and exports (Excel/PDF)
 - Audit trail with rollback support for eligible operations
 
 ### Lecturer
 
 - Attendance session lifecycle: start, pause, resume, stop
 - Live recognition-assisted attendance
+- Biometric session commit (authenticated session closing via face recognition)
 - PIN-protected sensitive actions and correction windows
 
 ### Student
 
-- Attendance summary by assigned papers
-- Eligibility and projection views
+- Attendance summary by assigned papers (leave-adjusted)
+- Eligibility and projection views (accounting for approved medical leave)
+- Medical leave appeals (submission of medical certificates)
 - Course and paper visibility
 
 ## Repository Layout
@@ -109,9 +113,16 @@ Update `backend/.env` for your environment.
 Optional email delivery configuration (for welcome/reset emails):
 
 ```dotenv
-RESEND_API_KEY=
-RESEND_FROM_EMAIL=Biometric Attendance <onboarding@resend.dev>
+YAGMAIL_USER=
+YAGMAIL_PASSWORD=
+YAGMAIL_SMTP_HOST=smtp.gmail.com
+YAGMAIL_SMTP_PORT=587
+YAGMAIL_SMTP_SSL=0
+YAGMAIL_SMTP_STARTTLS=1
+APP_LOGIN_URL=http://localhost:5173/login
 TEMP_PASS_DISPLAY_ENABLED=0
+ATTENDANCE_THRESHOLD=75.0
+LECTURER_AUTH_MODE=pin
 ```
 
 Start the API:
@@ -245,7 +256,7 @@ python verify_security.py
 - CSRF cookie protection enabled by default
 - Configurable rate limiting and brute-force protection
 - Password policy controls in `backend/.env`
-- Transactional email delivery for account onboarding/password resets and Excel-import credentials (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`)
+- Transactional email delivery for account onboarding/password resets and Excel-import credentials (`YAGMAIL_USER`, `YAGMAIL_PASSWORD`)
 - Strong JWT secret required for production/staging (`STRICT_JWT_SECRET`)
 
 ## Testing and Quality
@@ -290,7 +301,7 @@ Pipeline includes:
 - Use `backend/.env.production.example` as baseline for hardened production config.
 - Set a strong `JWT_SECRET_KEY` and restrict `CORS_ORIGINS`.
 - Set `FACE_EMBEDDING_ENCRYPTION_KEY` before handling biometric data at scale.
-- Configure `RESEND_API_KEY` and verified sender in `RESEND_FROM_EMAIL` for onboarding, password-reset, and Excel-import credential delivery.
+- Configure `YAGMAIL_USER` and `YAGMAIL_PASSWORD` for onboarding and password-reset delivery. Excel imports will still run without mail credentials; they just skip sending credentials by email.
 - Keep `TEMP_PASS_DISPLAY_ENABLED=0` in production unless temporary password display in API/UI is explicitly required.
 - Keep `backend/.env` out of source control.
 

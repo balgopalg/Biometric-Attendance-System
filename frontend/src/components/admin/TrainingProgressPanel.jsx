@@ -1,5 +1,6 @@
+import { useEffect, useState, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { HiCheckCircle, HiClock, HiOutlineExclamationCircle } from 'react-icons/hi';
+import { HiCheckCircle, HiClock, HiOutlineExclamationCircle, HiX } from 'react-icons/hi';
 
 function getStatusMeta(status) {
   switch (status) {
@@ -61,7 +62,36 @@ export default function TrainingProgressPanel({ job, onCancel, cancelling = fals
   const StatusIcon = meta.icon;
   const canCancel = status === 'queued' || status === 'running';
 
-  if (!job) return null;
+  // Local state for visibility
+  const [visible, setVisible] = useState(true);
+  const timeoutRef = useRef(null);
+
+  // Auto-hide after 1 min if completed or failed
+  useEffect(() => {
+    if (status === 'completed' || status === 'failed') {
+      if (!timeoutRef.current) {
+        timeoutRef.current = setTimeout(() => setVisible(false), 60000);
+      }
+    } else {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    }
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [status]);
+
+  // Manual close handler
+  const handleClose = () => {
+    setVisible(false);
+  };
+
+  if (!job || !visible) return null;
 
   return (
     <AnimatePresence>
@@ -89,8 +119,33 @@ export default function TrainingProgressPanel({ job, onCancel, cancelling = fals
             backdropFilter: 'blur(16px)',
             padding: 16,
             color: 'var(--text-primary)',
+            position: 'relative',
           }}
         >
+          {/* Close button */}
+          <button
+            onClick={handleClose}
+            aria-label="Close"
+            style={{
+              position: 'absolute',
+              top: 10,
+              right: 10,
+              background: 'none',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              fontSize: 20,
+              cursor: 'pointer',
+              zIndex: 2,
+              padding: 2,
+              borderRadius: 4,
+              transition: 'background 0.2s',
+            }}
+            onMouseOver={e => (e.currentTarget.style.background = 'var(--bg-glass)')}
+            onMouseOut={e => (e.currentTarget.style.background = 'none')}
+          >
+            <HiX />
+          </button>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
             <div
               style={{

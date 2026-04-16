@@ -252,7 +252,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         admin_id = ObjectId()
         lecturer_id = ObjectId()
-        student_id = ObjectId()
+        user_id = ObjectId()
         course_id = ObjectId()
         paper_id = ObjectId()
         audit_id = ObjectId()
@@ -278,7 +278,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "must_change_password": False,
             },
             {
-                "_id": student_id,
+                "_id": user_id,
                 "name": "Alice Student",
                 "email": "alice@student.com",
                 "password_hash": self._hash_password("student123"),
@@ -315,7 +315,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
         student_profiles = FakeCollection([
             {
                 "_id": ObjectId(),
-                "user_id": str(student_id),
+                "user_id": str(user_id),
                 "name": "Alice Student",
                 "email": "alice@student.com",
                 "course_id": str(course_id),
@@ -336,7 +336,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
             {
                 "_id": ObjectId(),
                 "paper_id": str(paper_id),
-                "student_id": str(student_id),
+                "user_id": str(user_id),
                 "lecturer_id": str(lecturer_id),
                 "session_id": "sess-1",
                 "method": "biometric",
@@ -350,7 +350,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "session_id": "sess-1",
                 "paper_id": str(paper_id),
                 "lecturer_id": str(lecturer_id),
-                "student_ids": [str(student_id)],
+                "user_ids": [str(user_id)],
                 "committed_at": now - timedelta(days=1),
                 "rollback_until": now + timedelta(days=1),
                 "finalized": False,
@@ -361,7 +361,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "session_id": "sess-2",
                 "paper_id": str(paper_id),
                 "lecturer_id": str(lecturer_id),
-                "student_ids": [],
+                "user_ids": [],
                 "committed_at": now - timedelta(days=1),
                 "rollback_until": now + timedelta(days=1),
                 "finalized": False,
@@ -374,12 +374,12 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "_id": audit_id,
                 "action": "CREATE_STUDENT",
                 "performed_by": str(admin_id),
-                "target_user": str(student_id),
+                "target_user": str(user_id),
                 "details": "Created student",
                 "timestamp": now - timedelta(hours=1),
                 "rollback": {
                     "kind": "noop",
-                    "target": str(student_id),
+                    "target": str(user_id),
                 },
                 "rollback_until": now + timedelta(hours=2),
                 "rolled_back": False,
@@ -401,7 +401,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
         return FakeMongoClient({"biometric_auth": auth, "biometric_academic": academic, "biometric_attendance_ops": attendance, "biometric_audit": audit}), {
             "admin_id": str(admin_id),
             "lecturer_id": str(lecturer_id),
-            "student_id": str(student_id),
+            "user_id": str(user_id),
             "course_id": str(course_id),
             "paper_id": str(paper_id),
             "audit_id": str(audit_id),
@@ -504,7 +504,7 @@ class LecturerFlowTests(BaseApiFlowTestCase):
         self.assertEqual(upload.status_code, 200, upload.get_data(as_text=True))
         upload_payload = upload.get_json()
         self.assertEqual(upload_payload["faces_detected"], 1)
-        self.assertEqual(upload_payload["new_matches"][0]["user_id"], self.seed["student_id"])
+        self.assertEqual(upload_payload["new_matches"][0]["user_id"], self.seed["user_id"])
 
         commit = self.client.post("/api/lecturer/session/commit", json={"session_id": session_id, "pin": "1234"}, headers=self._csrf_headers())
         self.assertEqual(commit.status_code, 200, commit.get_data(as_text=True))
@@ -519,7 +519,7 @@ class LecturerFlowTests(BaseApiFlowTestCase):
 
         adjust = self.client.put(
             f"/api/lecturer/session/{session_id}/adjust",
-            json={"pin": "1234", "student_ids": []},
+            json={"pin": "1234", "user_ids": []},
             headers=self._csrf_headers(),
         )
         self.assertEqual(adjust.status_code, 200, adjust.get_data(as_text=True))
@@ -534,7 +534,7 @@ class AdminFlowTests(BaseApiFlowTestCase):
         response = self.client.post(
             "/api/admin/students/enroll",
             json={
-                "user_id": self.seed["student_id"],
+                "user_id": self.seed["user_id"],
                 "photo": "data:image/png;base64,not-a-valid-image",
             },
             headers=self._csrf_headers(),
@@ -571,7 +571,7 @@ class AdminFlowTests(BaseApiFlowTestCase):
             ],
             "rows": [
                 {
-                    "student_id": self.seed["student_id"],
+                    "user_id": self.seed["user_id"],
                     "roll_no": "R001",
                     "name": "Alice Student",
                     "cells": {"col-1": "P"},
@@ -603,7 +603,7 @@ class AdminFlowTests(BaseApiFlowTestCase):
             enroll = self.client.post(
                 "/api/admin/students/enroll",
                 json={
-                    "user_id": self.seed["student_id"],
+                    "user_id": self.seed["user_id"],
                     "photo": "data:image/png;base64," + base64.b64encode(PNG_1X1).decode(),
                     "dataset_photos": ["data:image/png;base64," + base64.b64encode(PNG_1X1).decode()],
                 },

@@ -15,6 +15,8 @@ def _env_bool(name, default=False):
 
 class Config:
     """Application configuration loaded from environment variables."""
+    # Feature flag: Enable leave-adjusted attendance (exclude approved leaves from denominator)
+    LEAVE_ADJUSTED_ATTENDANCE_ENABLED = _env_bool("LEAVE_ADJUSTED_ATTENDANCE_ENABLED", False)
 
     ENV = os.getenv("FLASK_ENV", "development").lower()
     DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
@@ -57,6 +59,7 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_SECONDS", "3600"))
 
     ENABLE_DEFAULT_ADMIN_SEED = _env_bool("ENABLE_DEFAULT_ADMIN_SEED", False)
+    LECTURER_AUTH_MODE = os.getenv("LECTURER_AUTH_MODE", "pin").lower()
     DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "")
     DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
     FACE_EMBEDDING_ENCRYPTION_KEY = os.getenv("FACE_EMBEDDING_ENCRYPTION_KEY", "")
@@ -82,7 +85,7 @@ class Config:
     IP_RATELIMIT_WINDOW_MINUTES = int(os.getenv("IP_RATELIMIT_WINDOW_MINUTES", "10"))
     
     # Password Policy
-    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "8"))
+    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "12"))
     PASSWORD_REQUIRE_UPPERCASE = _env_bool("PASSWORD_REQUIRE_UPPERCASE", True)
     PASSWORD_REQUIRE_LOWERCASE = _env_bool("PASSWORD_REQUIRE_LOWERCASE", True)
     PASSWORD_REQUIRE_DIGITS = _env_bool("PASSWORD_REQUIRE_DIGITS", True)

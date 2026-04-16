@@ -73,7 +73,7 @@ class ErrorTracker:
             errors_collection = get_collection("audit", cls.COLLECTION_NAME)
             errors_collection.insert_one(error_doc)
         except Exception:
-            pass
+            pass  # nosec B110
         
         return error_id
     
@@ -97,7 +97,7 @@ class ErrorTracker:
             errors_collection = get_collection("audit", cls.COLLECTION_NAME)
             errors_collection.insert_one(error_doc)
         except Exception:
-            pass
+            pass  # nosec B110
         
         return error_id
     

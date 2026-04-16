@@ -16,12 +16,13 @@ from app.extensions import get_collection
 from app.models.audit import log_action
 from app.models.attendance import log_attendance
 from app.models.course import get_course_by_id
-from app.models.enrollment import get_profiles_for_paper, count_profiles_for_paper
+from app.models.enrollment import get_profiles_for_paper, count_profiles_for_paper, get_profile_by_user
 from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
 from app.models.user import find_user_by_id, update_user, set_user_pin, verify_user_pin
 from app.services.face_detection import get_detector
 from app.services.face_recognition import (
     generate_embedding,
+    find_best_match,
     find_best_match_cached,
     prepare_profile_candidates,
 )
@@ -68,14 +69,14 @@ def _normalize_attendance_sessions_once():
 
             lecturer_id = doc.get("lecturer_id")
             paper_id = doc.get("paper_id")
-            student_ids = doc.get("student_ids") or []
-            if not isinstance(student_ids, list):
-                student_ids = [student_ids]
+            user_ids = doc.get("user_ids") or []
+            if not isinstance(user_ids, list):
+                user_ids = [user_ids]
 
             # Normalize IDs and deduplicate while preserving order.
             normalized_students = []
             seen = set()
-            for sid in student_ids:
+            for sid in user_ids:
                 text = str(sid).strip() if sid is not None else ""
                 if not text or text in seen:
                     continue
@@ -91,7 +92,7 @@ def _normalize_attendance_sessions_once():
                 "session_id": str(session_id),
                 "lecturer_id": str(lecturer_id) if lecturer_id is not None else "",
                 "paper_id": str(paper_id) if paper_id is not None else "",
-                "student_ids": normalized_students,
+                "user_ids": normalized_students,
                 "academic_session": str(academic_session) if academic_session else "",
                 "academic_year": str(academic_session) if academic_session else "",
                 "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc).replace(tzinfo=None),
@@ -245,16 +246,16 @@ def _within_rollback(session_doc):
     return datetime.now(timezone.utc).replace(tzinfo=None) <= rollback_until
 
 
-def _replace_session_attendance(session_id, paper_id, lecturer_id, student_ids, method="biometric"):
+def _replace_session_attendance(session_id, paper_id, lecturer_id, user_ids, method="biometric"):
     # Replace entire attendance set for this session atomically from caller perspective.
     logs = get_collection("attendance", "attendance_logs")
     logs.delete_many({"session_id": session_id})
-    for sid in student_ids:
+    for sid in user_ids:
         log_attendance(paper_id, sid, lecturer_id, session_id, method=method)
 
 
 def _session_review_payload(session_doc):
-    present_ids = session_doc.get("student_ids", [])
+    present_ids = session_doc.get("user_ids", [])
     present_students = []
     for uid in present_ids:
         u = find_user_by_id(uid)
@@ -789,13 +790,21 @@ def stop_session(user):
     return jsonify({"message": "Session stopped successfully"}), 200
 
 
+@lecturer_bp.route("/auth-mode", methods=["GET"])
+@role_required("lecturer")
+def get_auth_mode(user):
+    """Return the configured authentication mode (pin or face) for lecturers."""
+    return jsonify({"mode": current_app.config.get("LECTURER_AUTH_MODE", "pin")}), 200
+
+
 @lecturer_bp.route("/session/commit", methods=["POST"])
 @role_required("lecturer")
 def commit_session(user):
-    """Validate PIN, save attendance, and start 30-minute rollback window."""
-    d = request.get_json(silent=True) or {}
+    """Validate PIN or Face, save attendance, and start 30-minute rollback window."""
+    d = request.form if request.mimetype == "multipart/form-data" else request.get_json(silent=True) or {}
     session_id = d.get("session_id")
-    pin = str(d.get("pin", "")).strip()
+    
+    auth_mode = current_app.config.get("LECTURER_AUTH_MODE", "pin")
 
     if not session_id:
         return jsonify({"error": "Invalid session"}), 400
@@ -806,32 +815,72 @@ def commit_session(user):
     if str(session.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "Unauthorized"}), 403
 
-    has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
-    if not has_pin:
-        return jsonify({"error": "PIN not set. Generate or set your 4-digit PIN first."}), 400
+    if auth_mode == "face":
+        image = request.files.get("image")
+        if not image:
+            return jsonify({"error": "Lecturer face photo is required for biometric authentication."}), 400
+        
+        try:
+            # Read and decode the image
+            img_bytes = image.read()
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return jsonify({"error": "Invalid image file"}), 400
+            
+            # Detect face
+            detector = get_detector()
+            faces = detector.detect_faces(img)
+            if not faces:
+                return jsonify({"error": "No face detected in your commit photo. Please ensure your face is clearly visible."}), 400
+                
+            # Generate embedding
+            embedding = generate_embedding(faces[0]["crop"])
+            
+            # Get lecturer's profile (reusing student_profiles as generic biometric store)
+            profile = get_profile_by_user(str(user["_id"]))
+            if not profile or not profile.get("face_embeddings"):
+                return jsonify({"error": "Biometric profile not found. Please ensure you have enrolled your face samples."}), 403
+                
+            # Compare against stored embeddings
+            threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
+            match = find_best_match(embedding, [profile], threshold=threshold)
+            if not match:
+                log_action("LECTURER_AUTH_FAILED", str(user["_id"]), details="Biometric verification failed during session commit")
+                return jsonify({"error": "Biometric verification failed. Face does not match your enrolled profile."}), 403
+                
+            log_action("LECTURER_AUTH_SUCCESS", str(user["_id"]), details="Biometric verification successful")
+        except Exception as exc:
+            current_app.logger.exception("Biometric commit verification failed")
+            return jsonify({"error": f"Biometric system error: {str(exc)}"}), 500
+    else:
+        pin = str(d.get("pin", "")).strip()
+        has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
+        if not has_pin:
+            return jsonify({"error": "PIN not set. Generate or set your 4-digit PIN first."}), 400
 
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
-        blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
-        if blocked:
-            return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
-
-    if not verify_user_pin(user, pin):
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
             max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
-            if attempts >= max_attempts:
+            blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
+            if blocked:
                 return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
-        return jsonify({"error": "Invalid PIN"}), 403
 
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        BruteForceProtector.clear_pin_failures(session_id)
+        if not verify_user_pin(user, pin):
+            if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+                attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
+                max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+                if attempts >= max_attempts:
+                    return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+            return jsonify({"error": "Invalid PIN"}), 403
+
+        if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+            BruteForceProtector.clear_pin_failures(session_id)
 
     paper_id = session["paper_id"]
     lecturer_id = session["lecturer_id"]
-    present_student_ids = list(session["recognized"])
+    present_user_ids = list(session["recognized"])
 
-    _replace_session_attendance(session_id, paper_id, lecturer_id, present_student_ids, method="biometric")
+    _replace_session_attendance(session_id, paper_id, lecturer_id, present_user_ids, method="biometric")
     increment_total_classes(paper_id)
 
     committed_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -845,7 +894,7 @@ def commit_session(user):
                 "session_id": session_id,
                 "paper_id": paper_id,
                 "lecturer_id": lecturer_id,
-                "student_ids": present_student_ids,
+                "user_ids": present_user_ids,
                 "academic_session": current_year,
                 "academic_year": current_year,
                 "committed_at": committed_at,
@@ -860,14 +909,14 @@ def commit_session(user):
     log_action(
         "COMMIT_ATTENDANCE",
         lecturer_id,
-        details=f"Paper {paper_id}, {len(present_student_ids)} students, session {session_id}",
+        details=f"Paper {paper_id}, {len(present_user_ids)} students, session {session_id}",
     )
 
     _delete_active_session(session_id)
 
     return jsonify({
         "message": "Attendance committed successfully",
-        "students_marked": len(present_student_ids),
+        "students_marked": len(present_user_ids),
         "session_id": session_id,
         "rollback_until": rollback_until,
     })
@@ -911,7 +960,7 @@ def adjust_committed_session(user, session_id):
 
     d = request.get_json(silent=True) or {}
     pin = str(d.get("pin", "")).strip()
-    student_ids = d.get("student_ids") or []
+    user_ids = d.get("user_ids") or []
 
     if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
         max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
@@ -934,7 +983,7 @@ def adjust_committed_session(user, session_id):
         session_id=session_id,
         paper_id=session_doc.get("paper_id"),
         lecturer_id=str(user["_id"]),
-        student_ids=student_ids,
+        user_ids=user_ids,
         method="manual-adjust",
     )
 
@@ -943,7 +992,7 @@ def adjust_committed_session(user, session_id):
         {"session_id": session_id},
         {
             "$set": {
-                "student_ids": student_ids,
+                "user_ids": user_ids,
                 "last_updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
             }
         },
@@ -952,7 +1001,7 @@ def adjust_committed_session(user, session_id):
     log_action(
         "ADJUST_ATTENDANCE_WITHIN_ROLLBACK",
         str(user["_id"]),
-        details=f"Session {session_id}, students {len(student_ids)}",
+        details=f"Session {session_id}, students {len(user_ids)}",
     )
 
     refreshed = _get_session_doc(session_id)
@@ -981,7 +1030,7 @@ def lecturer_progress(user):
         if ObjectId.is_valid(lecturer_id):
             lecturer_id_variants.append(ObjectId(lecturer_id))
     except Exception:
-        pass
+        pass  # nosec B110
 
     query = {"lecturer_id": {"$in": lecturer_id_variants}}
     if paper_id:
@@ -1045,20 +1094,20 @@ def lecturer_progress(user):
         if not pid:
             continue
 
-        student_ids = session_doc.get("student_ids")
-        if not isinstance(student_ids, list) or len(student_ids) == 0:
-            student_ids = [entry.get("student_id") for entry in entries if entry.get("student_id")]
+        user_ids = session_doc.get("user_ids")
+        if not isinstance(user_ids, list) or len(user_ids) == 0:
+            user_ids = [entry.get("user_id") for entry in entries if entry.get("user_id")]
 
         students = []
         seen = set()
-        for stu_id in student_ids:
+        for stu_id in user_ids:
             stu = str(stu_id).strip() if stu_id is not None else ""
             if not stu or stu in seen:
                 continue
             seen.add(stu)
             u = find_user_by_id(stu)
             students.append({
-                "student_id": stu,
+                "user_id": stu,
                 "name": u.get("name", "Unknown") if u else "Unknown",
                 "email": u.get("email", "") if u else "",
             })
@@ -1098,13 +1147,13 @@ def lecturer_progress(user):
         students = []
         seen = set()
         for entry in entries:
-            stu = str(entry.get("student_id") or "").strip()
+            stu = str(entry.get("user_id") or "").strip()
             if not stu or stu in seen:
                 continue
             seen.add(stu)
             u = find_user_by_id(stu)
             students.append({
-                "student_id": stu,
+                "user_id": stu,
                 "name": u.get("name", "Unknown") if u else "Unknown",
                 "email": u.get("email", "") if u else "",
             })

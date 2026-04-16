@@ -451,7 +451,7 @@ export default function AttendanceMatrix() {
               (() => {
                 const totals = getRowTotals(row);
                 return (
-              <tr key={row.student_id}>
+              <tr key={row.user_id}>
                 <td
                   style={{
                     position: 'sticky',
@@ -478,7 +478,7 @@ export default function AttendanceMatrix() {
                   {row.name}
                 </td>
                 {visibleDates.flatMap((dateEntry, dateIndex) => (Array.isArray(dateEntry.subjects) ? dateEntry.subjects : []).map((subject, subIndex) => (
-                  <td key={`${row.student_id}-${subject.column_key || 'sub'}-${dateIndex}-${subIndex}`} style={{ textAlign: 'center', fontWeight: 700 }}>
+                  <td key={`${row.user_id}-${subject.column_key || 'sub'}-${dateIndex}-${subIndex}`} style={{ textAlign: 'center', fontWeight: 700 }}>
                     {(row.cells || {})[subject.column_key] || 'X'}
                   </td>
                 )))}

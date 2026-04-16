@@ -72,7 +72,7 @@ export default function LecturerProgress() {
     if (!sessionReview?.session_id) return;
     const res = await api.put(`/lecturer/session/${sessionReview.session_id}/adjust`, {
       pin,
-      student_ids: adjustIds,
+      user_ids: adjustIds,
     });
     setSessionReview(res.data.review);
     setShowRecommitPin(false);

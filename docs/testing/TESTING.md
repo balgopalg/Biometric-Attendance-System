@@ -240,7 +240,7 @@ def test_lecturer_bulk_mark_attendance(self):
     self.login('lecturer@system.com', 'lecturer123')
     response = self.client.post(
         '/api/lecturer/session/1/mark-bulk',
-        json={'student_ids': [self.seed['student_id']]},
+        json={'user_ids': [self.seed['user_id']]},
         headers=self._csrf_headers()
     )
     self.assertEqual(response.status_code, 200)
