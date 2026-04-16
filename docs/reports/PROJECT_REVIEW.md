@@ -46,7 +46,7 @@ Frontend highlights:
 - Student management: create, update, delete, reset password, enrollment support
 - Bulk lecturer import from Excel with row-level success/skip/error output
 - Bulk student import from Excel (course + semester aware) with row-level success/skip/error output
-- Welcome and password-reset emails sent automatically when Resend is configured
+- Welcome and password-reset emails sent automatically when Yagmail is configured
 - Student enrollment workflows: filtered options and paper assignments
 - Bulk student promotion by semester with guardrails
 - Face enrollment and training workflows:
@@ -140,7 +140,7 @@ Overall route mapping is coherent with frontend usage and role-based screens.
 - prometheus-client 0.19.0
 - sentry-sdk 2.8.0
 - cryptography 46.0.7
-- resend 2.28.0
+- yagmail 0.15.293
 
 Dependency intent:
 - Web/API: Flask stack

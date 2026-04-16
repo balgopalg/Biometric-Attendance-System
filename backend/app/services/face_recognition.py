@@ -14,6 +14,12 @@ _model = None
 _model_is_stub = False
 
 
+import threading
+
+_model = None
+_model_is_stub = False
+_model_lock = threading.Lock()
+
 def _current_env():
     if has_app_context():
         try:
@@ -21,14 +27,12 @@ def _current_env():
             if env:
                 return str(env).strip().lower()
         except Exception:
-            pass
+            pass  # nosec B110
 
     return (os.getenv("FLASK_ENV") or os.getenv("ENV") or "").strip().lower()
 
-
 def is_model_stub() -> bool:
     return _model_is_stub
-
 
 def normalize_embedding(embedding: list) -> list:
     """Return an L2-normalized embedding vector as a Python list."""
@@ -38,34 +42,48 @@ def normalize_embedding(embedding: list) -> list:
         return vector.tolist()
     return (vector / norm).tolist()
 
-
 def _load_model():
     global _model, _model_is_stub
     if _model is not None:
         return _model
 
-    try:
-        from keras_facenet import FaceNet
-        _model = FaceNet()
-        _model_is_stub = False
-    except Exception as exc:
-        # Fallback: if keras-facenet is unavailable, we create a stub
-        # that generates random embeddings (useful for UI development).
-        env = _current_env()
-        if env not in {"development", "dev", "local", "testing", "test"}:
-            raise RuntimeError(
-                f"CRITICAL: FaceNet model failed to load in {env or 'unknown'} environment: {exc}"
-            ) from exc
-        warnings.warn(
-            "keras-facenet not available — using RANDOM embeddings (dev mode only)."
-        )
+    with _model_lock:
+        if _model is not None:
+            return _model
 
-        class StubModel:
-            def embeddings(self, images):
-                return [np.random.randn(512).tolist() for _ in images]
+        try:
+            # Force TF CPU to prevent MediaPipe GPU allocation hangs.
+            os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+            os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+            
+            from keras_facenet import FaceNet
+            _model = FaceNet()
+            _model_is_stub = False
+            
+            # Pre-warm model cache in background to prevent first-call latency
+            def _warmup():
+                try:
+                    _model.embeddings(np.zeros((1, 160, 160, 3), dtype=np.uint8))
+                except Exception:
+                    pass
+            threading.Thread(target=_warmup, daemon=True).start()
+            
+        except Exception as exc:
+            env = _current_env()
+            if env not in {"development", "dev", "local", "testing", "test"}:
+                raise RuntimeError(
+                    f"CRITICAL: FaceNet model failed to load in {env or 'unknown'} environment: {exc}"
+                ) from exc
+            warnings.warn(
+                "keras-facenet not available — using RANDOM embeddings (dev mode only)."
+            )
 
-        _model = StubModel()
-        _model_is_stub = True
+            class StubModel:
+                def embeddings(self, images):
+                    return [np.random.randn(512).tolist() for _ in images]
+
+            _model = StubModel()
+            _model_is_stub = True
 
     return _model
 

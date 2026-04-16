@@ -194,17 +194,17 @@ def _create_bulk_students(client, csrf, course_id: str, count: int, prefix: str)
     return created_ids
 
 
-def _cleanup_students(student_ids):
-    if not student_ids:
+def _cleanup_students(user_ids):
+    if not user_ids:
         return
     users = get_collection("auth", "users")
     profiles = get_collection("academic", "student_profiles")
     attendance_logs = get_collection("attendance", "attendance_logs")
     attendance_sessions = get_collection("attendance", "attendance_sessions")
 
-    users.delete_many({"_id": {"$in": [ObjectId(s) for s in student_ids if ObjectId.is_valid(s)]}})
-    profiles.delete_many({"user_id": {"$in": student_ids}})
-    attendance_logs.delete_many({"student_id": {"$in": student_ids}})
+    users.delete_many({"_id": {"$in": [ObjectId(s) for s in user_ids if ObjectId.is_valid(s)]}})
+    profiles.delete_many({"user_id": {"$in": user_ids}})
+    attendance_logs.delete_many({"user_id": {"$in": user_ids}})
 
     # Sessions are tagged separately in export benchmark; keep cleanup isolated there.
     attendance_sessions.delete_many({"source": "perf-validation-bulk"})
@@ -216,14 +216,14 @@ def benchmark_bulk_admin_operations(client, csrf, course_id, paper_id):
     prefix = f"perf{run_id}"
 
     start = _now_ms()
-    student_ids = _create_bulk_students(client, csrf, course_id, count=30, prefix=prefix)
-    samples.append(Sample("bulk_create_students_30", _elapsed_ms(start), True, f"created={len(student_ids)}"))
+    user_ids = _create_bulk_students(client, csrf, course_id, count=30, prefix=prefix)
+    samples.append(Sample("bulk_create_students_30", _elapsed_ms(start), True, f"created={len(user_ids)}"))
 
-    if student_ids:
+    if user_ids:
         start = _now_ms()
         r = client.post(
             "/api/admin/papers/bulk-assign",
-            json={"paper_id": paper_id, "student_ids": student_ids},
+            json={"paper_id": paper_id, "user_ids": user_ids},
             headers=csrf,
         )
         ok = r.status_code == 200
@@ -232,13 +232,13 @@ def benchmark_bulk_admin_operations(client, csrf, course_id, paper_id):
         start = _now_ms()
         r2 = client.post(
             "/api/admin/students/bulk-promote",
-            json={"student_ids": student_ids, "from_semester": 1},
+            json={"user_ids": user_ids, "from_semester": 1},
             headers=csrf,
         )
         ok2 = r2.status_code == 200
         samples.append(Sample("bulk_promote_students", _elapsed_ms(start), ok2, str(_safe_json(r2))))
 
-    _cleanup_students(student_ids)
+    _cleanup_students(user_ids)
     return samples
 
 
@@ -304,12 +304,12 @@ def benchmark_face_endpoints(client, paper_id, fixture_bytes: bytes, fixture_nam
 
         students_opts = client.get("/api/admin/students/options", headers=admin_csrf)
         students_body = _safe_json(students_opts) or []
-        student_ids = [str(x.get("user_id") or x.get("_id")) for x in students_body[:10] if (x.get("user_id") or x.get("_id"))]
-        if student_ids:
+        user_ids = [str(x.get("user_id") or x.get("_id")) for x in students_body[:10] if (x.get("user_id") or x.get("_id"))]
+        if user_ids:
             t2 = _now_ms()
             tb = client.post(
                 "/api/admin/students/train-face/bulk",
-                json={"student_ids": student_ids, "async": True},
+                json={"user_ids": user_ids, "async": True},
                 headers=admin_csrf,
             )
             samples.append(Sample("bulk_train_face_queue_request", _elapsed_ms(t2), tb.status_code == 202, str(_safe_json(tb))))
@@ -341,14 +341,14 @@ def benchmark_export_large_dataset(client, csrf, course_id, paper_id):
             lecturer_id = str(lecturer.get("_id"))
             papers.update_one({"_id": paper_doc.get("_id")}, {"$set": {"lecturer_id": lecturer_id}})
 
-    student_ids = []
+    user_ids = []
     session_ids = []
 
     # Create synthetic students + profiles.
     for i in range(120):
         uid = ObjectId()
         sid = str(uid)
-        student_ids.append(sid)
+        user_ids.append(sid)
         users.insert_one(
             {
                 "_id": uid,
@@ -382,13 +382,13 @@ def benchmark_export_large_dataset(client, csrf, course_id, paper_id):
         dt = now - timedelta(days=d)
         sess_id = f"{tag}-sess-{d}"
         session_ids.append(sess_id)
-        present_subset = student_ids[: 80 + (d % 40)]
+        present_subset = user_ids[: 80 + (d % 40)]
         sessions.insert_one(
             {
                 "session_id": sess_id,
                 "paper_id": paper_id,
                 "lecturer_id": lecturer_id,
-                "student_ids": present_subset,
+                "user_ids": present_subset,
                 "academic_session": str(now.year),
                 "academic_year": str(now.year),
                 "committed_at": dt,
@@ -403,7 +403,7 @@ def benchmark_export_large_dataset(client, csrf, course_id, paper_id):
             logs.insert_one(
                 {
                     "paper_id": paper_id,
-                    "student_id": sid,
+                    "user_id": sid,
                     "lecturer_id": lecturer_id,
                     "session_id": sess_id,
                     "method": "biometric",

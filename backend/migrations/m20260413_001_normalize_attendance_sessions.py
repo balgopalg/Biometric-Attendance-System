@@ -13,13 +13,13 @@ def upgrade():
         session_id = doc.get("session_id") or str(doc.get("_id"))
         lecturer_id = doc.get("lecturer_id")
         paper_id = doc.get("paper_id")
-        student_ids = doc.get("student_ids") or []
-        if not isinstance(student_ids, list):
-            student_ids = [student_ids]
+        user_ids = doc.get("user_ids") or []
+        if not isinstance(user_ids, list):
+            user_ids = [user_ids]
 
         seen = set()
         normalized_students = []
-        for sid in student_ids:
+        for sid in user_ids:
             text = str(sid).strip() if sid is not None else ""
             if not text or text in seen:
                 continue
@@ -35,7 +35,7 @@ def upgrade():
             "session_id": str(session_id),
             "lecturer_id": str(lecturer_id) if lecturer_id is not None else "",
             "paper_id": str(paper_id) if paper_id is not None else "",
-            "student_ids": normalized_students,
+            "user_ids": normalized_students,
             "academic_session": str(academic_session) if academic_session else "",
             "academic_year": str(academic_session) if academic_session else "",
             "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc).replace(tzinfo=None),

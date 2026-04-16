@@ -205,15 +205,18 @@ It is intended for Admins, Lecturers, Students, and Operators.
     - PUT /api/admin/exam-eligibility-override
     - PUT /api/admin/exam-eligibility-override/bulk
 
-### 4.10 Dashboard and stats
-
-- Why:
-  - View operational health and planning trends
-- When:
-  - Daily monitoring and weekly administration reviews
 - How:
   - UI: Admin Dashboard
   - API: GET /api/admin/stats
+
+### 4.11 Attendance shortage alerts
+
+- Why:
+  - Proactively notify students when they fall below the mandatory threshold
+- When:
+  - Periodically (e.g., monthly) or before mid-terms
+- How:
+  - API: POST /api/admin/attendance/send-shortage-alerts (supports course_id and paper_id filters)
 
 ## 5. Lecturer operations
 
@@ -243,7 +246,7 @@ It is intended for Admins, Lecturers, Students, and Operators.
     - POST /api/lecturer/session/recognize
     - POST /api/lecturer/session/recognize-image
     - GET /api/lecturer/session/recognized
-    - POST /api/lecturer/session/commit
+    - POST /api/lecturer/session/commit (Supports biometric authentication if LECTURER_AUTH_MODE=face)
     - GET /api/lecturer/session/{session_id}/review
     - PUT /api/lecturer/session/{session_id}/adjust
     - POST /api/lecturer/session/stop
@@ -291,6 +294,8 @@ It is intended for Admins, Lecturers, Students, and Operators.
   - API:
     - GET /api/student/predictions
     - GET /api/student/exam-eligibility
+    - GET /api/student/leave-requests
+    - POST /api/student/leave-requests
 
 ## 7. Recognition utility operations
 
@@ -315,12 +320,12 @@ It is intended for Admins, Lecturers, Students, and Operators.
   - recognize requires session_id + frame
   - recognize-image requires multipart image + session_id
   - commit requires session_id + valid lecturer PIN
-  - adjust requires valid PIN + student_ids list + active rollback window
+  - adjust requires valid PIN + user_ids list + active rollback window
 - Admin:
   - create student requires name, email, course_id
   - face enroll requires user_id + photo
-  - bulk promote requires student_ids
-  - paper bulk assign requires paper_id + student_ids
+  - bulk promote requires user_ids
+  - paper bulk assign requires paper_id + user_ids
 
 ## 9. Full API inventory (operational reference)
 
@@ -392,6 +397,7 @@ It is intended for Admins, Lecturers, Students, and Operators.
 - GET /api/admin/attendance-matrix/export
 - GET /api/admin/attendance-matrix/export-csv
 - GET /api/admin/stats
+- POST /api/admin/attendance/send-shortage-alerts
 
 ### Lecturer
 
@@ -415,6 +421,8 @@ It is intended for Admins, Lecturers, Students, and Operators.
 - GET /api/student/attendance
 - GET /api/student/predictions
 - GET /api/student/exam-eligibility
+- GET /api/student/leave-requests
+- POST /api/student/leave-requests
 
 ### Recognition
 

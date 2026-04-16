@@ -13,9 +13,16 @@ def decode_base64_image(data_url: str) -> np.ndarray:
     """Convert a base64-encoded image (or data-URL) to a numpy RGB array."""
     if "," in data_url:
         data_url = data_url.split(",", 1)[1]
-    img_bytes = base64.b64decode(data_url)
-    image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    return np.array(image)
+    # Pad base64 string if necessary
+    missing_padding = len(data_url) % 4
+    if missing_padding:
+        data_url += "=" * (4 - missing_padding)
+    try:
+        img_bytes = base64.b64decode(data_url)
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        return np.array(image)
+    except Exception as e:
+        raise ValueError(f"Invalid or corrupt image data: {e}")
 
 
 def encode_image_base64(img_array: np.ndarray) -> str:
@@ -35,8 +42,10 @@ def sanitise_mongo_doc(doc: dict) -> dict:
     """Convert MongoDB ObjectId to string for JSON serialisation."""
     if doc is None:
         return None
-    doc["_id"] = str(doc["_id"])
-    return doc
+    new_doc = dict(doc)
+    if "_id" in new_doc:
+        new_doc["_id"] = str(new_doc["_id"])
+    return new_doc
 
 
 def sanitise_many(docs) -> list:

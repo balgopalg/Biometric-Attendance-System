@@ -145,18 +145,18 @@ Success response example:
 
 - Endpoint: POST /api/admin/students/bulk-promote
 - Required fields:
-  - student_ids
+  - user_ids
 - Optional fields:
   - from_semester
 - Validation rules:
-  - student_ids must be non-empty
+  - user_ids must be non-empty
   - students at max semester are skipped
 
 Request example:
 
 ```json
 {
-  "student_ids": [
+  "user_ids": [
     "69da6f37cd4bb4ef527e972d",
     "69db4d8fdc4feb73eefa4864"
   ],
@@ -181,14 +181,14 @@ Success response example:
 - Endpoint: POST /api/admin/papers/bulk-assign
 - Required fields:
   - paper_id
-  - student_ids
+  - user_ids
 
 Request example:
 
 ```json
 {
   "paper_id": "69da7292cd4bb4ef527e9735",
-  "student_ids": [
+  "user_ids": [
     "69da6f37cd4bb4ef527e972d"
   ]
 }
@@ -310,7 +310,7 @@ Request example:
 - Endpoint: PUT /api/lecturer/session/{session_id}/adjust
 - Required fields:
   - pin
-  - student_ids
+  - user_ids
 - Validation rules:
   - rollback window must be active
   - PIN must match lecturer PIN
@@ -320,7 +320,7 @@ Request example:
 ```json
 {
   "pin": "1234",
-  "student_ids": [
+  "user_ids": [
     "69da6f37cd4bb4ef527e972d"
   ]
 }

@@ -235,7 +235,7 @@ log_action(
     user_id=str(user_id),
     action="enroll_student",
     resource_type="student",
-    description=f"Enrolled student {student_id}",
+    description=f"Enrolled student {user_id}",
     ip_address=request.remote_addr,
     user_agent=request.headers.get("User-Agent", ""),
 )

@@ -6,17 +6,17 @@ from app.models.attendance import count_attendance
 from app.models.paper import get_paper_by_id
 
 
-def get_attendance_percentage(student_id: str, paper_id: str) -> float:
+def get_attendance_percentage(user_id: str, paper_id: str) -> float:
     """Return attendance percentage for a student in a paper."""
     paper = get_paper_by_id(paper_id)
     if not paper or paper.get("total_classes", 0) == 0:
         return 0.0
-    attended = count_attendance(student_id, paper_id)
+    attended = count_attendance(user_id, paper_id)
     return round((attended / paper["total_classes"]) * 100, 2)
 
 
 def classes_needed_for_threshold(
-    student_id: str, paper_id: str, threshold: float = 75.0
+    user_id: str, paper_id: str, threshold: float = 75.0
 ) -> int:
     """
     Calculate how many MORE classes the student must attend to reach
@@ -26,7 +26,7 @@ def classes_needed_for_threshold(
     if not paper:
         return 0
     total = paper.get("total_classes", 0)
-    attended = count_attendance(student_id, paper_id)
+    attended = count_attendance(user_id, paper_id)
 
     if total == 0:
         return 0
@@ -42,7 +42,7 @@ def classes_needed_for_threshold(
 
 
 def safe_bunks_remaining(
-    student_id: str, paper_id: str, threshold: float = 75.0
+    user_id: str, paper_id: str, threshold: float = 75.0
 ) -> int:
     """
     Calculate how many classes the student can MISS and still meet
@@ -52,7 +52,7 @@ def safe_bunks_remaining(
     if not paper:
         return 0
     total = paper.get("total_classes", 0)
-    attended = count_attendance(student_id, paper_id)
+    attended = count_attendance(user_id, paper_id)
 
     if total == 0:
         return 0

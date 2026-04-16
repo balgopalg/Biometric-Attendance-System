@@ -48,11 +48,11 @@ Then edit `backend/.env` and set at minimum:
 - `CORS_ORIGINS` (for local compose keep `http://localhost:8080`)
 - `JWT_COOKIE_DOMAIN` (leave blank for local)
 - `SENTRY_DSN` (optional, can be blank)
-- `RESEND_API_KEY` (optional; enables welcome and password-reset emails)
-- `RESEND_FROM_EMAIL` (optional; verified sender recommended)
+- `YAGMAIL_USER` and `YAGMAIL_PASSWORD` (optional; enables welcome and password-reset emails)
+- `YAGMAIL_SMTP_HOST`, `YAGMAIL_SMTP_PORT`, `YAGMAIL_SMTP_SSL`, `YAGMAIL_SMTP_STARTTLS` (optional; provider-specific)
 - `TEMP_PASS_DISPLAY_ENABLED` (`0` recommended; set to `1` to return temp passwords in admin API responses)
 
-Note: Excel student/lecturer imports require email delivery to be configured.
+Note: Excel student/lecturer imports do not require email delivery to be configured.
 
 ## 4. Build Docker Images
 

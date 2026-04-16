@@ -1,11 +1,11 @@
 """Course model helpers."""
 
 from datetime import datetime, timezone
+from typing import Any, Optional, List, Dict
 from bson import ObjectId
 from app.extensions import get_collection
 
-
-def create_course(name, code, department, course_duration):
+def create_course(name: str, code: str, department: str, course_duration: Any) -> dict:
     courses = get_collection("academic", "courses")
     doc = {
         "name": name,
@@ -20,7 +20,7 @@ def create_course(name, code, department, course_duration):
     return doc
 
 
-def get_all_courses(fields=None):
+def get_all_courses(fields: Optional[List[str]] = None) -> List[dict]:
     courses = get_collection("academic", "courses")
     projection = None
     if fields:
@@ -30,28 +30,28 @@ def get_all_courses(fields=None):
     return list(cursor)
 
 
-def get_course_by_id(course_id):
+def get_course_by_id(course_id: str) -> Optional[dict]:
     courses = get_collection("academic", "courses")
     return courses.find_one({"_id": ObjectId(course_id)})
 
 
-def update_course(course_id, fields):
+def update_course(course_id: str, fields: dict) -> Optional[dict]:
     courses = get_collection("academic", "courses")
     courses.update_one({"_id": ObjectId(course_id)}, {"$set": fields})
     return get_course_by_id(course_id)
 
 
-def delete_course(course_id):
+def delete_course(course_id: str) -> None:
     courses = get_collection("academic", "courses")
     courses.update_one({"_id": ObjectId(course_id)}, {"$set": {"status": "inactive"}})
 
 
-def hard_delete_course(course_id):
+def hard_delete_course(course_id: str) -> None:
     courses = get_collection("academic", "courses")
     courses.delete_one({"_id": ObjectId(course_id)})
 
 
-def is_course_active(course_id):
+def is_course_active(course_id: str) -> bool:
     course = get_course_by_id(course_id)
     if not course:
         return False

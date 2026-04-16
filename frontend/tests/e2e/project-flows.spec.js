@@ -171,7 +171,7 @@ function createEligibilitySummaryPayload() {
     ineligible_count: 1,
     items: [
       {
-        student_id: studentUser._id,
+        user_id: studentUser._id,
         student_name: studentUser.name,
         student_email: studentUser.email,
         student_semester: 1,
@@ -317,7 +317,7 @@ async function installApiMocks(page) {
           ],
           rows: [
             {
-              student_id: studentRow.user_id,
+              user_id: studentRow.user_id,
               roll_no: studentRow.roll_number,
               name: studentRow.name,
               cells: { 'col-1': 'P' },

@@ -18,6 +18,7 @@ const navMap = {
     { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
     { to: '/admin/audit', icon: HiOutlineClipboardList, label: 'Audit Log' },
     { to: '/admin/dead-letter', icon: HiOutlineExclamationCircle, label: 'Dead-Letter Jobs' },
+    // { to: '/admin/leaves', icon: HiOutlineClipboardList, label: 'Manage Leaves' },
   ],
   lecturer: [
     { to: '/lecturer', icon: HiOutlineHome, label: 'Dashboard' },
@@ -28,6 +29,7 @@ const navMap = {
     { to: '/student', icon: HiOutlineHome, label: 'Dashboard' },
     { to: '/student/attendance', icon: HiOutlineChartBar, label: 'Attendance' },
     { to: '/student/exams', icon: HiOutlineDocumentText, label: 'Exam Portal' },
+    // { to: '/student/leaves', icon: HiOutlineClipboardList, label: 'Leave Requests' },
   ],
 };
 
@@ -53,7 +55,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       aria-label="Primary"
       style={{
         width: isCollapsed ? 76 : 220,
-        minHeight: '100vh',
+        height: '100vh',
         background: 'var(--sidebar-bg)',
         display: 'flex',
         flexDirection: 'column',

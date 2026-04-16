@@ -151,10 +151,10 @@ export default function AdminDashboard() {
         students: new Map(),
       };
 
-      const prev = existing.students.get(row.student_id);
+      const prev = existing.students.get(row.user_id);
       if (!prev) {
-        existing.students.set(row.student_id, {
-          student_id: row.student_id,
+        existing.students.set(row.user_id, {
+          user_id: row.user_id,
           final_eligible: Boolean(row.final_eligible),
         });
       } else {
@@ -198,10 +198,10 @@ export default function AdminDashboard() {
         students: new Map(),
       };
 
-      const prev = existing.students.get(row.student_id);
+      const prev = existing.students.get(row.user_id);
       if (!prev) {
-        existing.students.set(row.student_id, {
-          student_id: row.student_id,
+        existing.students.set(row.user_id, {
+          user_id: row.user_id,
           final_eligible: Boolean(row.final_eligible),
         });
       } else {
@@ -232,10 +232,10 @@ export default function AdminDashboard() {
   const studentBuckets = useMemo(() => {
     const byStudent = new Map();
     eligibilityRows.forEach((row) => {
-      const prev = byStudent.get(row.student_id);
+      const prev = byStudent.get(row.user_id);
       if (!prev) {
-        byStudent.set(row.student_id, {
-          student_id: row.student_id,
+        byStudent.set(row.user_id, {
+          user_id: row.user_id,
           student_name: row.student_name,
           student_email: row.student_email,
           reg_number: row.reg_number,

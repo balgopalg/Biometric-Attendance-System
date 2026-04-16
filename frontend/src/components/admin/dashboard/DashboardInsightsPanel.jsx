@@ -245,7 +245,7 @@ export default function DashboardInsightsPanel({
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {studentBuckets.eligible.map((s) => (
-                <div key={s.student_id} style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-glass)' }}>
+                <div key={s.user_id} style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-glass)' }}>
                   <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{s.student_name}</p>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{s.reg_number || 'N/A'} · {s.student_email || ''}</p>
                 </div>
@@ -260,7 +260,7 @@ export default function DashboardInsightsPanel({
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {studentBuckets.ineligible.map((s) => (
-                <div key={s.student_id} style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-glass)' }}>
+                <div key={s.user_id} style={{ paddingBottom: 8, borderBottom: '1px solid var(--border-glass)' }}>
                   <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{s.student_name}</p>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{s.reg_number || 'N/A'} · {s.student_email || ''}</p>
                 </div>

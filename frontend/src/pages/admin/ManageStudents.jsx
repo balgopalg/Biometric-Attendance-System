@@ -92,7 +92,7 @@ export default function ManageStudents() {
   const debouncedFilters = useDebouncedValue(filters, 250);
 
   const [form, setForm] = useState(EMPTY_FORM);
-  const [bulkForm, setBulkForm] = useState({ course_id: '', semester: '', paper_id: '', student_ids: [] });
+  const [bulkForm, setBulkForm] = useState({ course_id: '', semester: '', paper_id: '', user_ids: [] });
   const [bulkSemesters, setBulkSemesters] = useState([]);
   const [bulkPapers, setBulkPapers] = useState([]);
   const [bulkStudents, setBulkStudents] = useState([]);
@@ -284,7 +284,7 @@ export default function ManageStudents() {
     }
 
     if (bulkForm.course_id && !activeCourses.some((course) => course._id === bulkForm.course_id)) {
-      setBulkForm({ course_id: '', semester: '', paper_id: '', student_ids: [] });
+      setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
     }
   }, [activeCourses, bulkForm.course_id, filters.course_id, showInactiveRows]);
 
@@ -359,7 +359,7 @@ export default function ManageStudents() {
 
   const areAllBulkStudentsSelected = eligibleBulkStudents.length > 0 && eligibleBulkStudents.every((s) => {
     const sid = s.user_id || s._id;
-    return bulkForm.student_ids.includes(sid);
+    return bulkForm.user_ids.includes(sid);
   });
 
   const areAllFilteredStudentsSelected = filtered.length > 0 && filtered.every((s) => {
@@ -666,7 +666,7 @@ export default function ManageStudents() {
     try {
       setBulkTraining(true);
       const res = await api.post('/admin/students/train-face/bulk', {
-        student_ids: selectedStudentIds,
+        user_ids: selectedStudentIds,
         async: true,
       });
 
@@ -764,7 +764,7 @@ export default function ManageStudents() {
   };
 
   const handleBulkAssign = async () => {
-    if (!bulkForm.paper_id || bulkForm.student_ids.length === 0) {
+    if (!bulkForm.paper_id || bulkForm.user_ids.length === 0) {
       toast.error('Select subject and at least one student');
       return;
     }
@@ -772,7 +772,7 @@ export default function ManageStudents() {
       await api.post('/admin/papers/bulk-assign', bulkForm);
       toast.success('Students assigned to subject');
       setShowBulk(false);
-      setBulkForm({ course_id: '', semester: '', paper_id: '', student_ids: [] });
+      setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
       setBulkSemesters([]);
       setBulkPapers([]);
       setBulkStudents([]);
@@ -795,7 +795,7 @@ export default function ManageStudents() {
     try {
       const fromSemester = Number(filters.semester || 0) || undefined;
       const res = await api.post('/admin/student-bulk-promote', {
-        student_ids: selectedStudentIds,
+        user_ids: selectedStudentIds,
         from_semester: fromSemester,
       });
       toast.success(res.data?.message || 'Students promoted');
@@ -903,7 +903,7 @@ export default function ManageStudents() {
             <HiOutlineArrowUp size={16} /> Promote Selected ({selectedStudentIds.length})
           </button>
           <button className="btn-secondary" onClick={() => {
-            setBulkForm({ course_id: '', semester: '', paper_id: '', student_ids: [] });
+            setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
             setBulkSemesters([]);
             setBulkPapers([]);
             setBulkStudents([]);
@@ -1162,7 +1162,7 @@ export default function ManageStudents() {
           <select
             className="input-field"
             value={bulkForm.course_id}
-            onChange={(e) => setBulkForm({ course_id: e.target.value, semester: '', paper_id: '', student_ids: [] })}
+            onChange={(e) => setBulkForm({ course_id: e.target.value, semester: '', paper_id: '', user_ids: [] })}
           >
             <option value="">Select course</option>
             {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
@@ -1174,7 +1174,7 @@ export default function ManageStudents() {
           <select
             className="input-field"
             value={bulkForm.semester}
-            onChange={(e) => setBulkForm({ ...bulkForm, semester: e.target.value, paper_id: '', student_ids: [] })}
+            onChange={(e) => setBulkForm({ ...bulkForm, semester: e.target.value, paper_id: '', user_ids: [] })}
             disabled={!bulkForm.course_id}
           >
             <option value="">Select semester</option>
@@ -1204,9 +1204,9 @@ export default function ManageStudents() {
               checked={areAllBulkStudentsSelected}
               onChange={(e) => {
                 if (e.target.checked) {
-                  setBulkForm({ ...bulkForm, student_ids: eligibleBulkStudents.map((s) => s.user_id || s._id) });
+                  setBulkForm({ ...bulkForm, user_ids: eligibleBulkStudents.map((s) => s.user_id || s._id) });
                 } else {
-                  setBulkForm({ ...bulkForm, student_ids: [] });
+                  setBulkForm({ ...bulkForm, user_ids: [] });
                 }
               }}
             />
@@ -1219,12 +1219,12 @@ export default function ManageStudents() {
                 <label key={s._id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', cursor: 'pointer', fontSize: '0.82rem' }}>
                   <input
                     type="checkbox"
-                    checked={bulkForm.student_ids.includes(sid)}
+                    checked={bulkForm.user_ids.includes(sid)}
                     onChange={(e) => {
                       const ids = e.target.checked
-                        ? [...bulkForm.student_ids, sid]
-                        : bulkForm.student_ids.filter((id) => id !== sid);
-                      setBulkForm({ ...bulkForm, student_ids: ids });
+                        ? [...bulkForm.user_ids, sid]
+                        : bulkForm.user_ids.filter((id) => id !== sid);
+                      setBulkForm({ ...bulkForm, user_ids: ids });
                     }}
                   />
                   {s.name} ({s.reg_number || 'N/A'})

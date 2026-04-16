@@ -16,8 +16,8 @@
    - `SENTRY_DSN`
    - `CORS_ORIGINS`
    - `JWT_COOKIE_DOMAIN`
-   - `RESEND_API_KEY` (if onboarding/reset emails are enabled)
-   - `RESEND_FROM_EMAIL` (must be a verified sender for your Resend account)
+   - `YAGMAIL_USER` and `YAGMAIL_PASSWORD` (if onboarding/reset emails are enabled)
+   - `YAGMAIL_SMTP_HOST`, `YAGMAIL_SMTP_PORT`, `YAGMAIL_SMTP_SSL`, `YAGMAIL_SMTP_STARTTLS` as needed for your SMTP provider
    - `TEMP_PASS_DISPLAY_ENABLED=0` (recommended for production)
 3. Confirm security values:
    - `STRICT_JWT_SECRET=1`
@@ -70,5 +70,5 @@ Use runbook commands in:
 ## Notes
 - For internet-facing production, terminate TLS at reverse proxy/load balancer and force HTTPS.
 - Restrict Mongo/Redis network exposure to private network only.
-- If `RESEND_API_KEY` is unset, account creation and password reset still succeed, but credential emails are skipped.
-- Excel student/lecturer import requires configured email delivery and returns an error when email delivery is disabled.
+- If mail credentials are unset, account creation and password reset still succeed, but credential emails are skipped.
+- Excel student/lecturer import still works without mail credentials; imported accounts simply skip email delivery.

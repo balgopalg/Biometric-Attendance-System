@@ -1,6 +1,8 @@
 """Recognition pipeline routes — standalone face detection & identification."""
 
 from flask import Blueprint, request, jsonify, current_app
+import cv2
+import numpy as np
 
 from app.security.rate_limiter import limiter
 from app.utils.helpers import decode_base64_image
@@ -17,13 +19,21 @@ recognition_bp = Blueprint("recognition", __name__)
 @role_required("lecturer", "admin")
 @limiter.limit("30 per minute")
 def detect_faces(user):
-    """Accept a base64 frame → return face bounding boxes."""
-    d = request.get_json(silent=True) or {}
-    frame = d.get("frame")
-    if not frame:
-        return jsonify({"error": "frame (base64) is required"}), 400
-
-    img = decode_base64_image(frame)
+    """Accept a frame (multipart image or base64 JSON) → return face bounding boxes."""
+    if "image" in request.files:
+        file = request.files["image"]
+        img_bytes = file.read()
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return jsonify({"error": "Invalid image file provided via multipart"}), 400
+    else:
+        d = request.get_json(silent=True) or {}
+        frame = d.get("frame")
+        if not frame:
+            return jsonify({"error": "image (multipart) or frame (base64) is required"}), 400
+        img = decode_base64_image(frame)
+        
     detector = get_detector()
     faces = detector.detect_faces(img)
 
@@ -42,13 +52,21 @@ def detect_faces(user):
 @role_required("lecturer", "admin")
 @limiter.limit("20 per minute")
 def identify_faces(user):
-    """Full pipeline: frame → detect → embed → match → return student IDs."""
-    d = request.get_json(silent=True) or {}
-    frame = d.get("frame")
-    if not frame:
-        return jsonify({"error": "frame (base64) is required"}), 400
-
-    img = decode_base64_image(frame)
+    """Full pipeline: frame (multipart/base64) → detect → embed → match → return student IDs."""
+    if "image" in request.files:
+        file = request.files["image"]
+        img_bytes = file.read()
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return jsonify({"error": "Invalid image file provided via multipart"}), 400
+    else:
+        d = request.get_json(silent=True) or {}
+        frame = d.get("frame")
+        if not frame:
+            return jsonify({"error": "image (multipart) or frame (base64) is required"}), 400
+        img = decode_base64_image(frame)
+        
     detector = get_detector()
     faces = detector.detect_faces(img)
 

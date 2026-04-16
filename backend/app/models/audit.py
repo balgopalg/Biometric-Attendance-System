@@ -9,15 +9,17 @@ from app.extensions import get_collection
 ROLLBACK_WINDOW_HOURS = 24
 
 
+from typing import Any, Optional, Tuple, Dict
+
 def log_action(
-    action=None,
-    performed_by=None,
-    target_user=None,
-    details="",
-    rollback=None,
-    rollback_until=None,
+    action: Optional[str] = None,
+    performed_by: Optional[str] = None,
+    target_user: Optional[str] = None,
+    details: str = "",
+    rollback: Any = None,
+    rollback_until: Any = None,
     **kwargs,
-):
+) -> dict:
     logs = get_collection("audit", "audit_logs")
     ts = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -75,7 +77,7 @@ def log_action(
     return doc
 
 
-def get_audit_logs(page=1, per_page=50, filters=None):
+def get_audit_logs(page: int = 1, per_page: int = 50, filters: Optional[dict] = None) -> Tuple[list, int]:
     """Return paginated audit logs, newest first, with optional filters."""
     skip = (page - 1) * per_page
     logs_col = get_collection("audit", "audit_logs")
@@ -90,7 +92,7 @@ def get_audit_logs(page=1, per_page=50, filters=None):
     return logs, total
 
 
-def get_audit_log_by_id(log_id):
+def get_audit_log_by_id(log_id: str) -> Optional[dict]:
     logs_col = get_collection("audit", "audit_logs")
     try:
         oid = ObjectId(log_id)
@@ -99,7 +101,7 @@ def get_audit_log_by_id(log_id):
     return logs_col.find_one({"_id": oid})
 
 
-def mark_audit_log_rolled_back(log_id, rolled_back_by):
+def mark_audit_log_rolled_back(log_id: str, rolled_back_by: str) -> None:
     logs_col = get_collection("audit", "audit_logs")
     try:
         oid = ObjectId(log_id)

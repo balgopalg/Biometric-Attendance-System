@@ -24,6 +24,8 @@ const LecturerProgress = lazy(() => import('./pages/lecturer/LecturerProgress'))
 const StudentDashboard = lazy(() => import('./pages/student/StudentDashboard'));
 const AttendanceSummary = lazy(() => import('./pages/student/AttendanceSummary'));
 const ExamPortal = lazy(() => import('./pages/student/ExamPortal'));
+const StudentLeaveRequests = lazy(() => import('./pages/student/StudentLeaveRequests'));
+const ManageLeaves = lazy(() => import('./pages/admin/ManageLeaves'));
 
 function PageFallback() {
   return (
@@ -92,6 +94,7 @@ export default function App() {
               <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
               <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
               <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
+              {/* <Route path="/admin/leaves" element={<LazyPage><ManageLeaves /></LazyPage>} /> */}
             </Route>
 
             {/* Lecturer */}
@@ -106,6 +109,7 @@ export default function App() {
               <Route path="/student" element={<LazyPage><StudentDashboard /></LazyPage>} />
               <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
               <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
+              {/* <Route path="/student/leaves" element={<LazyPage><StudentLeaveRequests /></LazyPage>} /> */}
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

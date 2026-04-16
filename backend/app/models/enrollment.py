@@ -1,9 +1,11 @@
 """Student enrollment / profile model helpers."""
 
+
 import json
 import os
 import shutil
 from datetime import datetime, timezone
+from typing import Any, Optional, List, Dict
 from bson import ObjectId
 from flask import current_app, has_app_context, has_request_context, request, g
 from app.extensions import get_collection
@@ -28,7 +30,7 @@ _DEDUPED_BIOMETRIC_ACTIONS = {
 }
 
 
-def _append_noisy_profile_log(payload):
+def _append_noisy_profile_log(payload: dict) -> None:
     """Persist high-volume profile access telemetry to backend/logs/logs.txt."""
     try:
         backend_dir = os.path.dirname(current_app.root_path)
@@ -44,25 +46,25 @@ def _append_noisy_profile_log(payload):
         current_app.logger.debug("noisy profile file logging skipped", exc_info=True)
 
 
-def _current_env():
+def _current_env() -> str:
     if has_app_context():
         try:
             env = current_app.config.get("ENV")
             if env:
                 return str(env).strip().lower()
         except Exception:
-            pass
+            pass  # nosec B110
 
     return (os.getenv("FLASK_ENV") or os.getenv("ENV") or "").strip().lower()
 
 
-def _legacy_safe_name(raw_value):
+def _legacy_safe_name(raw_value: Any) -> str:
     text = str(raw_value or "").strip()
     cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
     return cleaned.strip("_") or "unknown"
 
 
-def _log_biometric_read(action, user_id=None, details=None):
+def _log_biometric_read(action: str, user_id: Optional[str] = None, details: Optional[dict] = None) -> None:
     if not has_request_context():
         return
 
@@ -120,7 +122,7 @@ def _log_biometric_read(action, user_id=None, details=None):
         current_app.logger.debug("biometric read audit logging skipped", exc_info=True)
 
 
-def _get_embedding_cipher():
+def _get_embedding_cipher() -> Optional[Any]:
     global _EMBEDDING_CIPHER, _EMBEDDING_CIPHER_KEY
 
     key = (os.getenv("FACE_EMBEDDING_ENCRYPTION_KEY") or "").strip()
@@ -141,7 +143,7 @@ def _get_embedding_cipher():
     return _EMBEDDING_CIPHER
 
 
-def encode_face_embedding(embedding):
+def encode_face_embedding(embedding: Any) -> Any:
     """Encrypt a face embedding for storage when encryption is configured."""
     if isinstance(embedding, str) and embedding.startswith(_EMBEDDING_PREFIX):
         return embedding
@@ -155,7 +157,7 @@ def encode_face_embedding(embedding):
     return _EMBEDDING_PREFIX + cipher.encrypt(payload).decode("utf-8")
 
 
-def decode_face_embedding(stored_embedding):
+def decode_face_embedding(stored_embedding: Any) -> Optional[List[Any]]:
     """Decrypt a stored embedding or pass through legacy plaintext vectors."""
     if stored_embedding is None:
         return None
@@ -188,7 +190,12 @@ def decode_face_embedding(stored_embedding):
     return None
 
 
-def create_student_profile(user_id, roll_number, course_id, academic_year=None):
+def create_student_profile(
+    user_id: str,
+    roll_number: str,
+    course_id: str,
+    academic_year: Optional[Any] = None
+) -> dict:
     profiles = get_collection("academic", "student_profiles")
     doc = {
         "user_id": user_id,
@@ -209,21 +216,21 @@ def create_student_profile(user_id, roll_number, course_id, academic_year=None):
     return doc
 
 
-def get_profile_by_user(user_id):
+def get_profile_by_user(user_id: str) -> Optional[dict]:
     profiles = get_collection("academic", "student_profiles")
     profile = profiles.find_one({"user_id": user_id})
     _log_biometric_read("student_profile_read", user_id=str(user_id), details={"has_face_embeddings": bool((profile or {}).get("face_embeddings"))})
     return profile
 
 
-def get_profile_by_id(profile_id):
+def get_profile_by_id(profile_id: str) -> Optional[dict]:
     profiles = get_collection("academic", "student_profiles")
     profile = profiles.find_one({"_id": ObjectId(profile_id)})
     _log_biometric_read("student_profile_read_by_id", user_id=str((profile or {}).get("user_id") or ""), details={"profile_id": str(profile_id)})
     return profile
 
 
-def get_all_profiles(fields=None):
+def get_all_profiles(fields: Optional[List[str]] = None) -> List[dict]:
     profiles = get_collection("academic", "student_profiles")
     projection = None
     if fields:
@@ -236,7 +243,7 @@ def get_all_profiles(fields=None):
     return items
 
 
-def add_face_embedding(user_id, embedding, photo_url=None):
+def add_face_embedding(user_id: str, embedding: Any, photo_url: Optional[str] = None) -> None:
     """Append a new face embedding vector (list of floats) to the student profile."""
     push_fields = {"face_embeddings": encode_face_embedding(embedding)}
     if photo_url:
@@ -247,7 +254,7 @@ def add_face_embedding(user_id, embedding, photo_url=None):
     profiles.update_one({"user_id": user_id}, update)
 
 
-def set_face_embeddings(user_id, embeddings):
+def set_face_embeddings(user_id: str, embeddings: List[Any]) -> None:
     """Replace the full face embedding set for a student profile."""
     profiles = get_collection("academic", "student_profiles")
     profiles.update_one(
@@ -256,7 +263,7 @@ def set_face_embeddings(user_id, embeddings):
     )
 
 
-def enroll_in_papers(user_id, paper_ids):
+def enroll_in_papers(user_id: str, paper_ids: List[str]) -> None:
     """Add papers to a students enrolled papers list."""
     profiles = get_collection("academic", "student_profiles")
     profiles.update_one(
@@ -265,39 +272,39 @@ def enroll_in_papers(user_id, paper_ids):
     )
 
 
-def get_profiles_for_paper(paper_id):
+def get_profiles_for_paper(paper_id: str) -> List[dict]:
     """Return all student profiles enrolled in a given paper."""
     profiles = get_collection("academic", "student_profiles")
     filters = [paper_id, str(paper_id)]
     try:
         filters.append(ObjectId(str(paper_id)))
     except Exception:
-        pass
+        pass  # nosec B110
     items = list(profiles.find({"enrolled_papers": {"$in": filters}}))
     _log_biometric_read("paper_profile_read", details={"paper_id": str(paper_id), "count": len(items)})
     return items
 
 
-def count_profiles_for_paper(paper_id):
+def count_profiles_for_paper(paper_id: str) -> int:
     """Count enrolled students for a paper, handling string/ObjectId ids."""
     profiles = get_collection("academic", "student_profiles")
     filters = [paper_id, str(paper_id)]
     try:
         filters.append(ObjectId(str(paper_id)))
     except Exception:
-        pass
+        pass  # nosec B110
     count = int(profiles.count_documents({"enrolled_papers": {"$in": filters}}))
     _log_biometric_read("paper_profile_count", details={"paper_id": str(paper_id), "count": count})
     return count
 
 
-def update_profile(user_id, fields):
+def update_profile(user_id: str, fields: dict) -> Optional[dict]:
     profiles = get_collection("academic", "student_profiles")
     profiles.update_one({"user_id": user_id}, {"$set": fields})
     return get_profile_by_user(user_id)
 
 
-def _remove_path(path):
+def _remove_path(path: str) -> None:
     if not path:
         return
     if os.path.isdir(path):
@@ -309,7 +316,7 @@ def _remove_path(path):
             pass
 
 
-def _remove_prefix_matches(root_dir, prefixes):
+def _remove_prefix_matches(root_dir: str, prefixes: List[str]) -> None:
     if not os.path.isdir(root_dir):
         return
 
@@ -318,7 +325,7 @@ def _remove_prefix_matches(root_dir, prefixes):
             _remove_path(os.path.join(root_dir, name))
 
 
-def delete_profile(user_id, user=None):
+def delete_profile(user_id: str, user: Optional[dict] = None) -> None:
     profiles = get_collection("academic", "student_profiles")
     profile = profiles.find_one({"user_id": user_id})
     safe_name = _legacy_safe_name((user or {}).get("name") or "")

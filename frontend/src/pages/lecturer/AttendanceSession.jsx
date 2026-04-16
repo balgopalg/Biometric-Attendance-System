@@ -421,7 +421,7 @@ export default function AttendanceSession() {
     try {
       const res = await api.put(`/lecturer/session/${review.session_id}/adjust`, {
         pin,
-        student_ids: adjustIds,
+        user_ids: adjustIds,
       });
       setReview(res.data.review);
       setShowAdjustPin(false);

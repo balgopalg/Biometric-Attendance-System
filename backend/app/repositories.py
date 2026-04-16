@@ -14,7 +14,7 @@ def _normalize_object_ids(values):
         try:
             oid = ObjectId(value)
         except Exception:
-            continue
+            continue  # nosec B112
         if oid in seen:
             continue
         seen.add(oid)
