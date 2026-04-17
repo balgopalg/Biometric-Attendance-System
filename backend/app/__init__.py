@@ -1,9 +1,8 @@
 """Flask application factory."""
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
-from datetime import timedelta, timezone
 from flask import Flask, g, request
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
@@ -14,7 +13,7 @@ from .extensions import mongo, jwt, cors, get_collection
 def create_app(config_class=Config, seed_default_admin=False):
     app = Flask(__name__)
     app.config.from_object(config_class)
-    app.config["APP_STARTED_AT"] = datetime.now(timezone.utc).replace(tzinfo=None)
+    app.config["APP_STARTED_AT"] = datetime.now(timezone.utc)
     _validate_security_config(app)
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(
         seconds=config_class.JWT_ACCESS_TOKEN_EXPIRES
@@ -62,7 +61,7 @@ def create_app(config_class=Config, seed_default_admin=False):
     if app.config.get("RATELIMIT_ENABLED", True):
         try:
             from .security.rate_limiter import limiter
-            app.config["RATELIMIT_STORAGE_URI"] = app.config.get("RATELIMIT_STORAGE_URL", "memory://")
+            # RATELIMIT_STORAGE_URI is now the canonical config key
             app.config["RATELIMIT_HEADERS_ENABLED"] = True
             limiter.init_app(app)
         except Exception as exc:
@@ -302,7 +301,7 @@ def _seed_admin(mongo):
                 "role": "admin",
                 "department": "Administration",
                 "session_version": 1,
-                "created_at": __import__("datetime").datetime.now(timezone.utc).replace(tzinfo=None),
+                "created_at": __import__("datetime").datetime.now(timezone.utc),
             }
         )
 

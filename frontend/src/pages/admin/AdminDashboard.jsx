@@ -350,7 +350,7 @@ export default function AdminDashboard() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>Overview of your attendance management system.</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 16, marginBottom: 24 }}>
+      <div className="admin-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 16, marginBottom: 24 }}>
         <StatsCard icon={HiOutlineUsers} label="Total Students" value={stats.total_students || 0} color="#06b6d4" />
         <StatsCard icon={HiOutlineAcademicCap} label="Lecturers" value={stats.total_lecturers || 0} color="#f59e0b" />
         <StatsCard icon={HiOutlineBookOpen} label="Total Courses" value={stats.total_courses || 0} color="#8b5cf6" />
@@ -361,12 +361,12 @@ export default function AdminDashboard() {
         <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+      <div className="admin-charts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
         <Suspense fallback={<div className="glass-card" style={{ padding: 20, minHeight: 220 }} />}>
           <MonthlyAttendanceTrend points={monthlyAttendance} />
         </Suspense>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <div className="glass-card" style={{ padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
               <HiOutlineShieldCheck size={18} style={{ color: 'var(--accent-amber)' }} />
@@ -379,7 +379,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="glass-card" style={{ padding: 20 }}>
+          <div className="glass-card" style={{ padding: 20, overflow: 'hidden' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Queue Health</h3>
               <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.72rem' }} onClick={fetchQueueMetrics}>
@@ -392,7 +392,7 @@ export default function AdminDashboard() {
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queued Retries</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.queued_retries ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem' }}>{formatDateTimeIndia(queueMetrics?.jobs?.next_retry_job?.next_attempt_at, { dateStyle: 'short', timeStyle: 'medium' })}</b></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ flexShrink: 0 }}>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem', wordBreak: 'break-word', minWidth: 0 }}>{formatDateTimeIndia(queueMetrics?.jobs?.next_retry_job?.next_attempt_at, { dateStyle: 'short', timeStyle: 'medium' })}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
             </div>
@@ -405,23 +405,23 @@ export default function AdminDashboard() {
               <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8 }}>Recent Dead-Letter Jobs</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).map((job) => (
-                  <div key={job.job_id} className="glass-card" style={{ padding: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                      <div>
+                  <div key={job.job_id} className="glass-card" style={{ padding: 10, overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ minWidth: 0 }}>
                         <p style={{ fontSize: '0.76rem', fontWeight: 700 }}>{job.job_type || 'unknown'}</p>
-                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{job.job_id}</p>
+                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{job.job_id}</p>
                         <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Attempts: {job.attempts || 0}/{job.max_attempts || 0}</p>
                       </div>
                       <button
                         className="btn-secondary"
-                        style={{ padding: '4px 10px', fontSize: '0.72rem' }}
+                        style={{ padding: '4px 10px', fontSize: '0.72rem', alignSelf: 'flex-start' }}
                         disabled={replayingJobId === job.job_id}
                         onClick={() => replayDeadLetterJob(job.job_id)}
                       >
                         {replayingJobId === job.job_id ? 'Replaying...' : 'Replay'}
                       </button>
                     </div>
-                    {job.error && <p style={{ marginTop: 6, fontSize: '0.7rem', color: 'var(--accent-rose)' }}>{job.error}</p>}
+                    {job.error && <p style={{ marginTop: 6, fontSize: '0.7rem', color: 'var(--accent-rose)', wordBreak: 'break-word' }}>{job.error}</p>}
                   </div>
                 ))}
                 {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 && (

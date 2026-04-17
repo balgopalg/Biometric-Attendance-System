@@ -19,7 +19,7 @@ def log_attendance(
         "lecturer_id": lecturer_id,
         "session_id": session_id,
         "method": method,
-        "timestamp": datetime.now(timezone.utc).replace(tzinfo=None),
+        "timestamp": datetime.now(timezone.utc),
     }
     result = logs.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

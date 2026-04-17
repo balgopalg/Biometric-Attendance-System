@@ -32,7 +32,7 @@ export default function RecognizedList({ students = [] }) {
         )}
         {safeStudents.map((s, i) => {
           const displayName = toDisplayText(s?.name, 'Unknown');
-          const subLabel = toDisplayText(s?.roll_number ?? s?.user_id, 'N/A');
+          const subLabel = toDisplayText(s?.reg_number ?? s?.user_id, 'N/A');
           return (
           <motion.div
             key={toDisplayText(s?.user_id, String(i))}

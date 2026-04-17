@@ -122,7 +122,7 @@ export default function LecturerProgress() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div className="lecturer-progress-filters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         <select className="input-field" value={filters.paper_id} onChange={(e) => setFilters({ ...filters, paper_id: e.target.value })}>
           <option value="">All Papers</option>
           {(data.papers || []).map((p) => (
@@ -225,7 +225,7 @@ export default function LecturerProgress() {
               </p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="session-review-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div className="glass-card" style={{ padding: 12 }}>
                 <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 8 }}>Present</h4>
                 <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8 }}>

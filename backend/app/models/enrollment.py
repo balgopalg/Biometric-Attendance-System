@@ -38,7 +38,7 @@ def _append_noisy_profile_log(payload: dict) -> None:
         os.makedirs(logs_dir, exist_ok=True)
         logs_file = os.path.join(logs_dir, "logs.txt")
 
-        stamp = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{stamp}] {json.dumps(payload, default=str, separators=(',', ':'))}"
         with open(logs_file, "a", encoding="utf-8") as handle:
             handle.write(line + "\n")
@@ -192,15 +192,14 @@ def decode_face_embedding(stored_embedding: Any) -> Optional[List[Any]]:
 
 def create_student_profile(
     user_id: str,
-    roll_number: str,
+    reg_number: str,
     course_id: str,
     academic_year: Optional[Any] = None
 ) -> dict:
     profiles = get_collection("academic", "student_profiles")
     doc = {
         "user_id": user_id,
-        "roll_number": roll_number,
-        "reg_number": roll_number,
+        "reg_number": reg_number,
         "course_id": course_id,
         "academic_year": academic_year,
         "academic_session": academic_year,
@@ -209,7 +208,7 @@ def create_student_profile(
         "face_embeddings": [],
         "photo_urls": [],
         "enrolled_papers": [],
-        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
+        "created_at": datetime.now(timezone.utc),
     }
     result = profiles.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
@@ -330,7 +329,7 @@ def delete_profile(user_id: str, user: Optional[dict] = None) -> None:
     profile = profiles.find_one({"user_id": user_id})
     safe_name = _legacy_safe_name((user or {}).get("name") or "")
     if not safe_name and profile:
-        safe_name = _legacy_safe_name(profile.get("roll_number") or profile.get("reg_number") or "")
+        safe_name = _legacy_safe_name(profile.get("reg_number") or "")
 
     user_id_text = str(user_id).strip()
     dataset_root = "dataset"

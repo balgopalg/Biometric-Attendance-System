@@ -30,6 +30,7 @@ export default function Modal({ isOpen, onClose, title, children, width = 500 })
           >
             {/* Panel */}
             <motion.div
+              className="modal-panel-mobile"
               initial={{ opacity: 0, scale: 0.92, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.92, y: 20 }}

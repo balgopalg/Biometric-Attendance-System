@@ -21,7 +21,7 @@ def create_paper(
         "lecturer_id": lecturer_id,
         "semester": semester,
         "total_classes": total_classes,
-        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
+        "created_at": datetime.now(timezone.utc),
     }
     result = papers.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

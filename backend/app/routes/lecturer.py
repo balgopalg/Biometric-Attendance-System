@@ -95,7 +95,7 @@ def _normalize_attendance_sessions_once():
                 "user_ids": normalized_students,
                 "academic_session": str(academic_session) if academic_session else "",
                 "academic_year": str(academic_session) if academic_session else "",
-                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc).replace(tzinfo=None),
+                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc),
             }
             if committed_at:
                 updates["committed_at"] = committed_at
@@ -119,24 +119,23 @@ def _enrich_paper(paper):
     item["is_course_inactive"] = item["course_status"] != "active"
     item["academic_year"] = item.get("academic_session") or item.get("academic_year")
     item["semester"] = item.get("semester")
-    item["total_enrolled_students"] = count_profiles_for_paper(item.get("_id")) if item.get("_id") else 0
+    profiles = get_profiles_for_paper(item.get("_id")) if item.get("_id") else []
+    item["total_enrolled_students"] = len(profiles)
 
     # Derive academic sessions from enrolled student profiles so lecturer dashboard
     # reflects real enrollment session for the subject.
     enrolled_sessions = []
-    if item.get("_id"):
-        profiles = get_profiles_for_paper(item.get("_id"))
-        session_values = set()
-        for profile in profiles:
-            session = (
-                profile.get("academic_session")
-                or profile.get("academic_year")
-                or profile.get("year")
-            )
-            text = str(session).strip() if session is not None else ""
-            if text:
-                session_values.add(text)
-        enrolled_sessions = sorted(session_values)
+    session_values = set()
+    for profile in profiles:
+        session = (
+            profile.get("academic_session")
+            or profile.get("academic_year")
+            or profile.get("year")
+        )
+        text = str(session).strip() if session is not None else ""
+        if text:
+            session_values.add(text)
+    enrolled_sessions = sorted(session_values)
 
     item["enrolled_academic_sessions"] = enrolled_sessions
     if enrolled_sessions:
@@ -171,7 +170,7 @@ def _active_session_timeout_minutes():
 
 
 def _create_active_session(session_id, *, paper_id, lecturer_id):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     timeout_minutes = _active_session_timeout_minutes()
     expires_at = now + timedelta(minutes=timeout_minutes)
     _active_sessions_collection().update_one(
@@ -200,7 +199,7 @@ def _get_active_session(session_id):
         return None
 
     expires_at = session.get("expires_at")
-    if isinstance(expires_at, datetime) and expires_at <= datetime.now(timezone.utc).replace(tzinfo=None):
+    if isinstance(expires_at, datetime) and expires_at <= datetime.now(timezone.utc):
         _active_sessions_collection().delete_one({"session_id": str(session_id)})
         _clear_cached_session_candidates(session_id)
         return None
@@ -209,7 +208,7 @@ def _get_active_session(session_id):
 
 
 def _touch_active_session(session_id):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     timeout_minutes = _active_session_timeout_minutes()
     _active_sessions_collection().update_one(
         {"session_id": str(session_id)},
@@ -228,7 +227,7 @@ def _save_recognized_students(session_id, recognized_ids):
         {
             "$set": {
                 "recognized": list(recognized_ids),
-                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                "updated_at": datetime.now(timezone.utc),
             }
         },
     )
@@ -243,7 +242,7 @@ def _within_rollback(session_doc):
     rollback_until = session_doc.get("rollback_until")
     if not rollback_until:
         return False
-    return datetime.now(timezone.utc).replace(tzinfo=None) <= rollback_until
+    return datetime.now(timezone.utc) <= rollback_until
 
 
 def _replace_session_attendance(session_id, paper_id, lecturer_id, user_ids, method="biometric"):
@@ -529,7 +528,10 @@ def recognize_frame(user):
 
     paper_id = session["paper_id"]
 
-    img = decode_base64_image(frame_b64)
+    try:
+        img = decode_base64_image(frame_b64)
+    except ValueError as e:
+        return jsonify({"error": f"Invalid image data: {e}"}), 400
     detector = get_detector()
     faces = detector.detect_faces(img)
 
@@ -883,7 +885,7 @@ def commit_session(user):
     _replace_session_attendance(session_id, paper_id, lecturer_id, present_user_ids, method="biometric")
     increment_total_classes(paper_id)
 
-    committed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    committed_at = datetime.now(timezone.utc)
     rollback_until = committed_at + timedelta(minutes=ROLLBACK_MINUTES)
     current_year = str(committed_at.year)
     sessions = get_collection("attendance", "attendance_sessions")
@@ -993,7 +995,7 @@ def adjust_committed_session(user, session_id):
         {
             "$set": {
                 "user_ids": user_ids,
-                "last_updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                "last_updated_at": datetime.now(timezone.utc),
             }
         },
     )
@@ -1219,4 +1221,15 @@ def lecturer_progress(user):
         "papers": assigned_papers,
         "per_paper": per_paper,
         "sessions": sessions,
+    })
+
+
+@lecturer_bp.route('/capabilities', methods=['GET'])
+@role_required('lecturer')
+def get_lecturer_capabilities():
+    """Return a JSON object describing enabled lecturer features."""
+    # Example: add more features as needed
+    return jsonify({
+        "can_stop_session": True,
+        # Add other feature flags here as needed
     })

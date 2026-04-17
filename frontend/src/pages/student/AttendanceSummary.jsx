@@ -102,7 +102,7 @@ export default function AttendanceSummary() {
                   <tr key={`${a.paper_id}-details`}>
                     <td colSpan="6" style={{ paddingTop: 0, paddingBottom: 16 }}>
                       <div style={{ marginLeft: 16, borderLeft: '2px solid var(--border-glass)', paddingLeft: 14 }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr', gap: 10, padding: '8px 0', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                        <div className="session-detail-header" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr', gap: 10, padding: '8px 0', fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3 }}>
                           <span>Date & Time</span>
                           <span>Status</span>
                           <span>Session</span>
@@ -111,7 +111,7 @@ export default function AttendanceSummary() {
                           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '8px 0' }}>No class sessions found for this paper.</p>
                         ) : (
                           (a.sessions || []).map((session) => (
-                            <div key={session.session_id} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border-glass)', fontSize: '0.8rem' }}>
+                            <div key={session.session_id} className="session-detail-row" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 0.8fr', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border-glass)', fontSize: '0.8rem' }}>
                               <span>{formatSessionDateTime(session)}</span>
                               <span>
                                 <span className={`badge ${session.present ? 'badge-success' : 'badge-danger'}`}>

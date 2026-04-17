@@ -476,7 +476,7 @@ def manage_leave_requests(user):
             "paper_id":   paper_id,
             "reason":     reason,
             "status":     "pending",
-            "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
+            "created_at": datetime.now(timezone.utc),
         }
         leaves_col.insert_one(new_leave)
         return jsonify({"message": "Leave request submitted successfully"}), 201

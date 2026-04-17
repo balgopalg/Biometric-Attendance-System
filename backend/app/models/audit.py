@@ -21,7 +21,7 @@ def log_action(
     **kwargs,
 ) -> dict:
     logs = get_collection("audit", "audit_logs")
-    ts = datetime.now(timezone.utc).replace(tzinfo=None)
+    ts = datetime.now(timezone.utc)
 
     # Backward-compatible mapping for newer keyword call style used by some routes.
     action = action or kwargs.get("action")
@@ -112,7 +112,7 @@ def mark_audit_log_rolled_back(log_id: str, rolled_back_by: str) -> None:
         {
             "$set": {
                 "rolled_back": True,
-                "rolled_back_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                "rolled_back_at": datetime.now(timezone.utc),
                 "rolled_back_by": rolled_back_by,
             }
         },

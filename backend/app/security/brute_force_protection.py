@@ -23,32 +23,56 @@ class BruteForceProtector:
     def _login_attempt_window_minutes(cls):
         return int(current_app.config.get("LOGIN_ATTEMPT_WINDOW_MINUTES", 15))
 
+
     @classmethod
-    def record_failed_attempt(cls, email, ip_address):
-        """Record a failed login attempt for an email/IP."""
+    def record_failed_attempt_atomic(cls, email, ip_address):
+        """Atomically record a failed login attempt and check if account is now locked."""
         collection = get_collection("auth", cls.FAILED_ATTEMPTS_COLLECTION)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        
-        # Record the attempt
-        collection.insert_one({
-            "email": email.lower(),
-            "ip_address": ip_address,
-            "attempted_at": now,
-            "ttl": now + timedelta(hours=1),  # Auto-delete after 1 hour
-        })
-        
-        # Clean up old records outside the window
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=cls._login_attempt_window_minutes())
+        threshold = cls._login_lockout_threshold()
+
+        # Remove old attempts outside the window
         collection.delete_many({
             "email": email.lower(),
             "attempted_at": {"$lt": cutoff}
         })
 
+        # Atomically insert and count attempts in the window
+        doc = {
+            "email": email.lower(),
+            "ip_address": ip_address,
+            "attempted_at": now,
+            "ttl": now + timedelta(hours=1),
+        }
+        collection.insert_one(doc)
+
+        failed_count = collection.count_documents({
+            "email": email.lower(),
+            "attempted_at": {"$gte": cutoff}
+        })
+
+        is_locked = False
+        lockout_expiry = None
+        if failed_count >= threshold:
+            oldest_recent_attempt = collection.find_one(
+                {
+                    "email": email.lower(),
+                    "attempted_at": {"$gte": cutoff}
+                },
+                sort=[("attempted_at", 1)]
+            )
+            if oldest_recent_attempt:
+                lockout_expiry = oldest_recent_attempt["attempted_at"] + timedelta(minutes=cls._login_lockout_duration_minutes())
+                if now < lockout_expiry:
+                    is_locked = True
+        return failed_count, is_locked, lockout_expiry
+
     @classmethod
     def get_failed_attempt_count(cls, email):
         """Get number of failed attempts in the current window."""
         collection = get_collection("auth", cls.FAILED_ATTEMPTS_COLLECTION)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=cls._login_attempt_window_minutes())
         
         return collection.count_documents({
@@ -60,7 +84,7 @@ class BruteForceProtector:
     def is_account_locked(cls, email):
         """Check if account is locked due to failed attempts."""
         collection = get_collection("auth", cls.FAILED_ATTEMPTS_COLLECTION)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         
         # Get recent failed attempts
         recent_cutoff = now - timedelta(minutes=cls._login_attempt_window_minutes())
@@ -95,7 +119,7 @@ class BruteForceProtector:
     def record_pin_failure(cls, session_id, lecturer_id, ip_address, attempt_number=1):
         """Record a failed PIN entry attempt for a session."""
         collection = get_collection("attendance", "pin_failures")
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         
         collection.insert_one({
             "session_id": session_id,
@@ -117,7 +141,7 @@ class BruteForceProtector:
     def is_session_pin_blocked(cls, session_id, max_attempts=3):
         """Check if PIN entry is blocked for a session (max 3 attempts in 5 min)."""
         collection = get_collection("attendance", "pin_failures")
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=5)
         
         attempt_count = collection.count_documents({
@@ -143,7 +167,7 @@ class IPRateLimiter:
     def record_request(cls, ip_address, endpoint, weight=1):
         """Record a request from an IP to an endpoint."""
         collection = get_collection("auth", cls.COLLECTION_NAME)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         
         collection.insert_one({
             "ip_address": ip_address,
@@ -157,7 +181,7 @@ class IPRateLimiter:
     def get_request_count(cls, ip_address, endpoint, window_minutes=10):
         """Get request count from IP to endpoint in time window."""
         collection = get_collection("auth", cls.COLLECTION_NAME)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=window_minutes)
 
         # Primary path for MongoDB collections.

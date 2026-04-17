@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+const RECOGNITION_DEBUG = false;
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api/axios';
 import { useWebcam } from '../../hooks/useWebcam';
@@ -22,7 +23,6 @@ function safeMatches(value) {
 }
 
 export default function AttendanceSession() {
-  const RECOGNITION_DEBUG = false;
   const [params] = useSearchParams();
   const paperIdFromQuery = params.get('paper_id');
 
@@ -133,17 +133,17 @@ export default function AttendanceSession() {
   useEffect(() => {
     let cancelled = false;
 
-    const probeStopEndpoint = async () => {
+    const fetchCapabilities = async () => {
       try {
-        await api.post('/lecturer/session/stop', { session_id: '__probe__' });
-        if (!cancelled) setStopEndpointAvailable(true);
+        const res = await api.get('/lecturer/capabilities');
+        if (!cancelled) setStopEndpointAvailable(!!res.data.can_stop_session);
       } catch (err) {
         if (cancelled) return;
-        setStopEndpointAvailable(err.response?.status === 404 ? false : true);
+        setStopEndpointAvailable(false);
       }
     };
 
-    probeStopEndpoint();
+    fetchCapabilities();
     return () => {
       cancelled = true;
     };
@@ -163,9 +163,11 @@ export default function AttendanceSession() {
       toast.error('This subject is locked because its course is inactive');
       return;
     }
+    let createdSessionId = null;
     try {
       const res = await api.post('/lecturer/session/start', { paper_id: selectedPaperId });
-      setSessionId(res.data.session_id);
+      createdSessionId = res.data.session_id;
+      setSessionId(createdSessionId);
       setSessionStartedAt(res.data.started_at || new Date().toISOString());
       setRecognized([]);
       setReview(null);
@@ -173,6 +175,11 @@ export default function AttendanceSession() {
       setScanning(true);
       toast.success('Session started');
     } catch (err) {
+      if (createdSessionId) {
+        // Rollback the backend session
+        await api.post('/lecturer/session/stop', { session_id: createdSessionId }).catch(() => {});
+        setSessionId(null);
+      }
       toast.error(err.response?.data?.error || 'Failed to start session');
     }
   };
@@ -308,7 +315,7 @@ export default function AttendanceSession() {
     } finally {
       scanInFlightRef.current = false;
     }
-  }, [sessionId, selectedPaperId, captureFrame, RECOGNITION_DEBUG, notifyRecognitionBatch]);
+  }, [sessionId, selectedPaperId, captureFrame, notifyRecognitionBatch]);
 
   const handleUploadImage = async (imageBlob) => {
     if (!selectedPaperId) {
@@ -441,12 +448,12 @@ export default function AttendanceSession() {
     <div>
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+      <div className="session-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Take Attendance</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Select paper, verify recognition, then commit with your PIN.</p>
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div className="session-action-buttons" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {!sessionId ? (
             <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive}>
               <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Locked' : 'Start Session'}
@@ -501,7 +508,7 @@ export default function AttendanceSession() {
       {!loadingPapers && !papersError && papers.length > 0 ? (
       <>
       <div className="glass-card" style={{ padding: 14, marginBottom: 14 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        <div className="session-info-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
           <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
             <option value="">Select Course</option>
             {courseOptions.map((c) => (
@@ -532,7 +539,7 @@ export default function AttendanceSession() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+      <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
         <WebcamFeed ref={videoRef} isActive={isActive} error={error} />
         <RecognizedList students={recognized} />
       </div>

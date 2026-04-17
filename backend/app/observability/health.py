@@ -109,8 +109,8 @@ class HealthChecker:
             # Get recent failures (last 24 hours)
             recent_failures = r.zcount(
                 f'{queue_name}:failed',
-                min=datetime.now(timezone.utc).replace(tzinfo=None).timestamp() - 86400,
-                max=datetime.now(timezone.utc).replace(tzinfo=None).timestamp()
+                min=datetime.now(timezone.utc).timestamp() - 86400,
+                max=datetime.now(timezone.utc).timestamp()
             )
             
             return {
@@ -190,7 +190,7 @@ class HealthChecker:
         
         return {
             'status': overall_status,
-            'timestamp': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'checks': checks,
         }
 

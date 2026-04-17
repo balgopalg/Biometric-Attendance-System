@@ -447,6 +447,33 @@ class AuthFlowTests(BaseApiFlowTestCase):
         self.assertEqual(new_login.status_code, 200)
 
 
+    def test_brute_force_lockout_atomic(self):
+        email = "admin@system.com"
+        wrong_password = "wrongpass"
+        threshold = self.app.config.get("LOGIN_LOCKOUT_THRESHOLD", 5)
+        lockout_duration = self.app.config.get("LOGIN_LOCKOUT_DURATION_MINUTES", 15)
+
+        # Fail login up to threshold
+        for i in range(threshold):
+            resp = self.client.post("/api/auth/login", json={"email": email, "password": wrong_password})
+            self.assertEqual(resp.status_code, 401, f"Attempt {i+1} should be unauthorized")
+
+        # The next attempt should lock the account
+        resp = self.client.post("/api/auth/login", json={"email": email, "password": wrong_password})
+        self.assertEqual(resp.status_code, 429, "Should be locked out at threshold")
+        payload = resp.get_json()
+        self.assertIn("lockout_until", payload)
+        self.assertIn("error", payload)
+        self.assertIn("locked", payload["error"].lower())
+
+        # Further attempts remain locked
+        resp2 = self.client.post("/api/auth/login", json={"email": email, "password": wrong_password})
+        self.assertEqual(resp2.status_code, 429, "Should remain locked out")
+
+        # (Optional) Simulate lockout expiry and verify unlock
+        # This would require patching datetime or the protector logic for a full test
+
+
 class StudentFlowTests(BaseApiFlowTestCase):
     def test_student_profile_attendance_predictions_and_eligibility(self):
         self.login("alice@student.com", "student123")

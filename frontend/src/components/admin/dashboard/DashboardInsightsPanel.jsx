@@ -14,7 +14,7 @@ function EligibilityDonutChart({ eligible, ineligible }) {
   return (
     <div className="glass-card" style={{ padding: 14 }}>
       <p style={{ fontSize: '0.84rem', fontWeight: 700, marginBottom: 10 }}>Eligibility Ratio</p>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ width: 130, height: 130, position: 'relative', flexShrink: 0 }}>
           <svg width="130" height="130" viewBox="0 0 130 130" role="img" aria-label="Eligibility ratio donut chart">
             <circle cx="65" cy="65" r={radius} fill="none" stroke="var(--border-glass)" strokeWidth="14" />
@@ -129,7 +129,7 @@ export default function DashboardInsightsPanel({
     <div className="glass-card" style={{ padding: 18, marginTop: 10 }}>
       <h3 style={{ fontSize: '0.98rem', fontWeight: 800, marginBottom: 12 }}>Attendance Summary</h3>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 14 }}>
+      <div className="insights-snapshot-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 14 }}>
         <div className="glass-card" style={{ padding: 20 }}>
           <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Students by Course</h3>
           {(Object.entries(eligibilitySnapshot.students_by_course || {}).length === 0) ? (
@@ -159,7 +159,7 @@ export default function DashboardInsightsPanel({
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+      <div className="lecturer-progress-filters" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         <select className="input-field" value={filters.academic_session} onChange={(e) => onAcademicSessionChange(e.target.value)}>
           <option value="">Select Academic Session</option>
           {academicSessionOptions.map((session) => <option key={session} value={session}>{session}</option>)}
@@ -181,7 +181,7 @@ export default function DashboardInsightsPanel({
       </div>
 
       {filters.academic_session && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 14 }}>
           <EligibilityDonutChart
             eligible={eligibilitySnapshot.eligible_count}
             ineligible={eligibilitySnapshot.ineligible_count}
@@ -238,7 +238,7 @@ export default function DashboardInsightsPanel({
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div className="session-review-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div className="glass-card" style={{ padding: 14 }}>
             <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 10, color: 'var(--accent-emerald)' }}>
               Eligible Students ({studentBuckets.eligible.length})

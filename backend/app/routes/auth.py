@@ -5,10 +5,12 @@ from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import (
     create_access_token,
+    create_refresh_token,  # Added for proper refresh logic
     jwt_required,
     get_jwt_identity,
     get_jwt,
     set_access_cookies,
+    set_refresh_cookies,   # Added to set refresh cookie
     unset_jwt_cookies,
 )
 
@@ -31,6 +33,29 @@ def _to_utc_iso8601(value):
     return value.isoformat().replace("+00:00", "Z")
 
 
+def _revoke_current_token():
+    """Helper function to revoke the current JWT based on its JTI."""
+    try:
+        jwt_payload = get_jwt() or {}
+        jti = jwt_payload.get("jti")
+        expires_at = jwt_payload.get("exp")
+        if jti and expires_at:
+            revoked = get_collection("auth", "revoked_jwts")
+            revoked.update_one(
+                {"jti": jti},
+                {
+                    "$setOnInsert": {
+                        "jti": jti,
+                        "expires_at": datetime.fromtimestamp(int(expires_at), timezone.utc),
+                        "revoked_at": datetime.now(timezone.utc),
+                    }
+                },
+                upsert=True,
+            )
+    except Exception:
+        pass  # Failsafe: if no token exists, silently pass
+
+
 @auth_bp.route("/health", methods=["GET"])
 def health():
     """Lightweight health endpoint for DB connectivity and index verification."""
@@ -46,54 +71,52 @@ def health():
 
     cfg = current_app.config
     required_indexes = {
-        (cfg["MONGO_DB_AUTH"], "users"): ["uq_users_email", "ix_users_role"],
-        (cfg["MONGO_DB_ACADEMIC"], "papers"): ["uq_papers_code", "ix_papers_course", "ix_papers_lecturers"],
-        (cfg["MONGO_DB_ACADEMIC"], "student_profiles"): ["uq_profiles_user", "uq_profiles_reg", "ix_profiles_course"],
-        (cfg["MONGO_DB_ATTENDANCE"], "attendance_logs"): ["uq_attendance_session_paper_student", "ix_attendance_timestamp"],
-        (cfg["MONGO_DB_ATTENDANCE"], "attendance_sessions"): ["uq_sessions_id", "ix_sessions_lecturer_created"],
+        (cfg.get("MONGO_DB_AUTH", "auth"), "users"): ["uq_users_email", "ix_users_role"],
+        (cfg.get("MONGO_DB_ACADEMIC", "academic"), "papers"): ["uq_papers_code", "ix_papers_course", "ix_papers_lecturers"],
+        (cfg.get("MONGO_DB_ACADEMIC", "academic"), "student_profiles"): ["uq_profiles_user", "uq_profiles_reg", "ix_profiles_course"],
+        (cfg.get("MONGO_DB_ATTENDANCE", "attendance"), "attendance_logs"): ["uq_attendance_session_paper_student", "ix_attendance_timestamp"],
+        (cfg.get("MONGO_DB_ATTENDANCE", "attendance"), "attendance_sessions"): ["uq_sessions_id", "ix_sessions_lecturer_created"],
     }
 
     missing = []
     for (db_name, collection_name), names in required_indexes.items():
-        info = mongo.cx[db_name][collection_name].index_information()
-        present = set(info.keys())
-        for name in names:
-            if name not in present:
-                missing.append(f"{db_name}.{collection_name}:{name}")
+        try:
+            info = mongo.cx[db_name][collection_name].index_information()
+            present = set(info.keys())
+            for name in names:
+                if name not in present:
+                    missing.append(f"{db_name}.{collection_name}:{name}")
+        except Exception:
+            missing.extend(names) # Collection might not exist yet
 
-    checks["indexes_missing"] = missing
     if missing and status == "ok":
         status = "degraded"
+
+    # Security Fix: Only expose detailed index names in debug/development mode
+    if current_app.debug:
+        checks["indexes_missing"] = missing
+    else:
+        checks["indexes_missing_count"] = len(missing)
 
     return jsonify({"status": status, "checks": checks})
 
 
 @auth_bp.route("/login", methods=["POST"])
-@limiter.limit("20 per minute")  # Keep per-IP burst control; account lockout handles credential abuse.
+@limiter.limit("20 per minute")
 def login():
-    """
-    Authenticate user and set JWT in secure HttpOnly cookie.
-    
-    Security features:
-    - Rate limited to 5 attempts per minute per IP
-    - Account lockout after 5 failed attempts for 15 minutes
-    - IP-based rate limiting
-    - Email and password validation
-    """
+    """Authenticate user and set Access & Refresh JWTs in secure HttpOnly cookies."""
     ip_address = request.remote_addr
     
     data = request.get_json(silent=True) or {}
     email = normalize_email(data.get("email", ""))
     password = data.get("password", "")
 
-    # Input validation
     if not email or not password:
         return jsonify({"error": "Email and password are required"}), 400
     
     if not validate_email(email):
         return jsonify({"error": "Invalid email format"}), 400
     
-    # Lookup user once, then apply lockout/IP checks before allowing login.
     user = find_user_by_email(email)
 
     if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
@@ -134,7 +157,7 @@ def login():
     if password_ok:
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
             BruteForceProtector.clear_failed_attempts(email)
-            IPRateLimiter.record_request(ip_address, "auth.login", weight=0)  # Don't count successful logins
+            IPRateLimiter.record_request(ip_address, "auth.login", weight=0)
 
             log_action(
                 user_id=str(user.get("_id")),
@@ -145,31 +168,30 @@ def login():
                 user_agent=request.headers.get("User-Agent", ""),
             )
 
-        token = create_access_token(
-            identity=user["email"],
-            additional_claims={"sv": int(user.get("session_version", 1) or 1)},
-        )
-        response = jsonify(
-            {
-                "user": {
-                    "_id": str(user["_id"]),
-                    "name": user["name"],
-                    "email": user["email"],
-                    "role": user["role"],
-                    "department": user.get("department", ""),
-                    "must_change_password": user.get("must_change_password", False),
-                },
-            }
-        )
-        set_access_cookies(response, token)
+        sv_claim = {"sv": int(user.get("session_version", 1) or 1)}
+        
+        # Issue both access and refresh tokens
+        access_token = create_access_token(identity=user["email"], additional_claims=sv_claim)
+        refresh_token = create_refresh_token(identity=user["email"], additional_claims=sv_claim)
+        
+        response = jsonify({
+            "user": {
+                "_id": str(user["_id"]),
+                "name": user["name"],
+                "email": user["email"],
+                "role": user["role"],
+                "department": user.get("department", ""),
+                "must_change_password": user.get("must_change_password", False),
+            },
+        })
+        
+        set_access_cookies(response, access_token)
+        set_refresh_cookies(response, refresh_token)
         return response
-
-    if not user or not verify_password(user["password_hash"], password):
-        # Record failed attempt
+    else:
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            BruteForceProtector.record_failed_attempt(email, ip_address)
-            failed_count = BruteForceProtector.get_failed_attempt_count(email)
-            
+            failed_count, is_locked, lockout_expiry = BruteForceProtector.record_failed_attempt_atomic(email, ip_address)
+
             log_action(
                 user_id=None,
                 action="login_failed",
@@ -178,44 +200,24 @@ def login():
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
-            
-            if failed_count >= current_app.config.get("LOGIN_LOCKOUT_THRESHOLD", 5):
-                is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
-                lockout_until = _to_utc_iso8601(lockout_expiry) if is_locked and lockout_expiry else None
+
+            if is_locked:
+                lockout_until = _to_utc_iso8601(lockout_expiry) if lockout_expiry else None
                 payload = {"error": "Account locked after too many failed attempts"}
                 if lockout_until:
                     payload["lockout_until"] = lockout_until
                 return jsonify(payload), 429
-        
+                
         return jsonify({"error": "Invalid email or password"}), 401
 
 
 @auth_bp.route("/logout", methods=["POST"])
 @jwt_required(optional=True)
 def logout():
-    """Clear auth cookies."""
-    try:
-        jwt_payload = get_jwt() or {}
-    except Exception:
-        jwt_payload = {}
-
-    jti = jwt_payload.get("jti")
-    expires_at = jwt_payload.get("exp")
-    if jti and expires_at:
-        revoked = get_collection("auth", "revoked_jwts")
-        revoked.update_one(
-            {"jti": jti},
-            {
-                "$setOnInsert": {
-                    "jti": jti,
-                    "expires_at": datetime.fromtimestamp(int(expires_at), timezone.utc).replace(tzinfo=None),
-                    "revoked_at": datetime.now(timezone.utc).replace(tzinfo=None),
-                }
-            },
-            upsert=True,
-        )
-
+    """Clear auth cookies and revoke token."""
+    _revoke_current_token()
     response = jsonify({"message": "Logged out"})
+    # unset_jwt_cookies clears BOTH access and refresh cookies in flask_jwt_extended
     unset_jwt_cookies(response)
     return response
 
@@ -226,34 +228,40 @@ def me():
     """Return current authenticated user."""
     email = get_jwt_identity()
     user = find_user_by_email(email)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
-    return jsonify(
-        {
-            "_id": str(user["_id"]),
-            "name": user["name"],
-            "email": user["email"],
-            "role": user["role"],
-            "department": user.get("department", ""),
-            "must_change_password": user.get("must_change_password", False),
-        }
-    )
+    claims = get_jwt()
+    
+    # Security Fix: Ensure the user exists AND their session hasn't been forcefully invalidated
+    if not user or int(user.get("session_version", 1)) != claims.get("sv"):
+        return jsonify({"error": "Session expired or invalidated"}), 401
+        
+    return jsonify({
+        "_id": str(user["_id"]),
+        "name": user["name"],
+        "email": user["email"],
+        "role": user["role"],
+        "department": user.get("department", ""),
+        "must_change_password": user.get("must_change_password", False),
+    })
 
 
 @auth_bp.route("/refresh", methods=["POST"])
-@jwt_required()
+@jwt_required(refresh=True)  # Security Fix: Only allow Refresh tokens here, not Access tokens
 @limiter.limit("60 per minute")
 def refresh_token():
-    """Issue a new access token for the current authenticated session."""
+    """Issue a new access token using a valid refresh token."""
     email = get_jwt_identity()
     user = find_user_by_email(email)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+    claims = get_jwt()
+    
+    # Security Fix: Ensure the session version matches (prevents refreshing banned/logged-out accounts)
+    if not user or int(user.get("session_version", 1)) != claims.get("sv"):
+        return jsonify({"error": "Session expired or invalidated. Please log in again."}), 401
 
-    token = create_access_token(
+    access_token = create_access_token(
         identity=user["email"],
         additional_claims={"sv": int(user.get("session_version", 1) or 1)},
     )
+    
     response = jsonify({
         "message": "Token refreshed",
         "user": {
@@ -265,26 +273,21 @@ def refresh_token():
             "must_change_password": user.get("must_change_password", False),
         },
     })
-    set_access_cookies(response, token)
+    set_access_cookies(response, access_token)
     return response
 
 
 @auth_bp.route("/change-password", methods=["POST"])
 @jwt_required()
-@limiter.limit("10 per minute")  # 10 password change attempts per minute
+@limiter.limit("10 per minute")
 def change_password():
-    """
-    Change the authenticated user's password.
-    
-    Security features:
-    - Password strength validation required
-    - Rate limited to 10 attempts per minute
-    - Audit logged
-    """
+    """Change the authenticated user's password."""
     email = get_jwt_identity()
     user = find_user_by_email(email)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+    claims = get_jwt()
+    
+    if not user or int(user.get("session_version", 1)) != claims.get("sv"):
+        return jsonify({"error": "Session expired or invalidated"}), 401
 
     data = request.get_json(silent=True) or {}
     old_pw = data.get("current_password", "")
@@ -301,22 +304,38 @@ def change_password():
     is_strong, msg = validate_password_strength(new_pw)
     if not is_strong:
         return jsonify({"error": f"Password does not meet security requirements: {msg}"}), 400
-    
-    # Ensure new password is different from old
+
+    # Security Fix: Check brute-force limits BEFORE processing password change
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
+        if is_locked:
+            return jsonify({"error": "Account temporarily locked due to too many failed attempts."}), 429
+
+    # Security Fix: Explicitly check current password to trigger BruteForce logic if they are guessing
+    if not verify_password(user["password_hash"], old_pw):
+        if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+            BruteForceProtector.record_failed_attempt_atomic(email, request.remote_addr)
+        
+        log_action(
+            user_id=str(user["_id"]),
+            action="change_password_failed",
+            resource_type="auth",
+            description=f"Failed password change for {email}: Incorrect current password",
+            ip_address=request.remote_addr,
+            user_agent=request.headers.get("User-Agent", ""),
+        )
+        return jsonify({"error": "Incorrect current password"}), 401
+        
     if old_pw == new_pw:
         return jsonify({"error": "New password must be different from current password"}), 400
 
     success, error = change_user_password(str(user["_id"]), old_pw, new_pw)
     if not success:
-        log_action(
-            user_id=str(user["_id"]),
-            action="change_password_failed",
-            resource_type="auth",
-            description=f"Failed password change for {email}: {error}",
-            ip_address=request.remote_addr,
-            user_agent=request.headers.get("User-Agent", ""),
-        )
         return jsonify({"error": error}), 400
+    
+    # If successful, clear any accumulated failed attempts
+    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+        BruteForceProtector.clear_failed_attempts(email)
     
     log_action(
         user_id=str(user["_id"]),
@@ -327,28 +346,17 @@ def change_password():
         user_agent=request.headers.get("User-Agent", ""),
     )
 
-    jwt_payload = get_jwt() or {}
-    jti = jwt_payload.get("jti")
-    expires_at = jwt_payload.get("exp")
-    if jti and expires_at:
-        revoked = get_collection("auth", "revoked_jwts")
-        revoked.update_one(
-            {"jti": jti},
-            {
-                "$setOnInsert": {
-                    "jti": jti,
-                    "expires_at": datetime.fromtimestamp(int(expires_at), timezone.utc).replace(tzinfo=None),
-                    "revoked_at": datetime.now(timezone.utc).replace(tzinfo=None),
-                }
-            },
-            upsert=True,
-        )
+    # Security Fix: DRY up revocation logic
+    _revoke_current_token()
 
     refreshed_user = find_user_by_email(email)
-    token = create_access_token(
-        identity=email,
-        additional_claims={"sv": int((refreshed_user or {}).get("session_version", 1) or 1)},
-    )
+    sv_claim = {"sv": int((refreshed_user or {}).get("session_version", 1) or 1)}
+    
+    # Re-issue both tokens so they don't get logged out immediately
+    new_access_token = create_access_token(identity=email, additional_claims=sv_claim)
+    new_refresh_token = create_refresh_token(identity=email, additional_claims=sv_claim)
+    
     response = jsonify({"message": "Password changed successfully"})
-    set_access_cookies(response, token)
+    set_access_cookies(response, new_access_token)
+    set_refresh_cookies(response, new_refresh_token)
     return response

@@ -81,7 +81,7 @@ export default function ExamPortal() {
           <span className={`badge ${overallStatusClass}`}>{overallStatus}</span>
         </div>
 
-        <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
+        <div className="exam-overall-stats" style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
           <div>
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Overall Percentage</p>
             <p style={{ fontSize: '1.15rem', fontWeight: 800 }}>{overallTotal <= 0 ? 'N/A' : `${overallPct}%`}</p>
@@ -97,7 +97,7 @@ export default function ExamPortal() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
+      <div className="exam-cards-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
         {eligibility.map((e) => (
           (() => {
             const isNoLecturesYet = e.eligible === null || String(e.status || '').toLowerCase().includes('no lectures');
