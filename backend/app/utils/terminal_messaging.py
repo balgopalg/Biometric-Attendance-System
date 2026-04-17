@@ -69,7 +69,7 @@ class TerminalMessenger:
         self._write("")
         self._write("-" * 72)
         self._write(self._style(title.upper(), _Ansi.BOLD))
-        self._write(f"Timestamp : {datetime.now(timezone.utc).replace(tzinfo=None).isoformat()}Z")
+        self._write(f"Timestamp : {datetime.now(timezone.utc).isoformat()}Z")
         self._write(f"Passed    : {passed}")
         self._write(f"Failed    : {failed}")
         self._write(f"Warnings  : {warnings}")

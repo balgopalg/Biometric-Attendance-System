@@ -4,7 +4,10 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '')
-  const apiProxyTarget = env.VITE_API_PROXY_URL || 'http://localhost:5000'
+  const apiProxyTarget = env.VITE_API_PROXY_URL
+  if (!apiProxyTarget) {
+    throw new Error('VITE_API_PROXY_URL must be set in your environment. Refusing to fall back to localhost:5000.');
+  }
 
   return {
   plugins: [react(), tailwindcss()],

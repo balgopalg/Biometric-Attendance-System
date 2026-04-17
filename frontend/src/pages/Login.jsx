@@ -56,6 +56,7 @@ export default function Login() {
       minHeight: '100vh',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'var(--bg-primary)',
+      padding: '20px 16px',
       position: 'relative', overflow: 'hidden',
     }}>
       <button
@@ -96,8 +97,9 @@ export default function Login() {
       }} />
 
       <div
+        className="login-card"
         style={{
-          width: 420, padding: 40,
+          width: '100%', maxWidth: 420, padding: '40px 36px',
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-glass)',
           borderRadius: 'var(--radius-xl)',

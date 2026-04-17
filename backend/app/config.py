@@ -69,7 +69,7 @@ class Config:
     
     # Rate Limiting
     RATELIMIT_ENABLED = _env_bool("RATELIMIT_ENABLED", True)
-    RATELIMIT_STORAGE_URL = os.getenv("RATELIMIT_STORAGE_URL", "memory://")  # Use "redis://localhost:6379" for distributed
+    RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")  # Use "redis://localhost:6379" for distributed
     
     # Brute Force Protection
     BRUTE_FORCE_PROTECTION_ENABLED = _env_bool("BRUTE_FORCE_PROTECTION_ENABLED", True)
@@ -85,7 +85,7 @@ class Config:
     IP_RATELIMIT_WINDOW_MINUTES = int(os.getenv("IP_RATELIMIT_WINDOW_MINUTES", "10"))
     
     # Password Policy
-    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "12"))
+    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "8"))
     PASSWORD_REQUIRE_UPPERCASE = _env_bool("PASSWORD_REQUIRE_UPPERCASE", True)
     PASSWORD_REQUIRE_LOWERCASE = _env_bool("PASSWORD_REQUIRE_LOWERCASE", True)
     PASSWORD_REQUIRE_DIGITS = _env_bool("PASSWORD_REQUIRE_DIGITS", True)

@@ -10,6 +10,7 @@ from app.utils.auth_decorators import role_required
 from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, find_best_match
 from app.models.enrollment import get_all_profiles
+from app.services.profile_cache import get_profiles_for_paper_cached
 from app.models.user import find_user_by_id
 
 recognition_bp = Blueprint("recognition", __name__)
@@ -32,7 +33,10 @@ def detect_faces(user):
         frame = d.get("frame")
         if not frame:
             return jsonify({"error": "image (multipart) or frame (base64) is required"}), 400
-        img = decode_base64_image(frame)
+        try:
+            img = decode_base64_image(frame)
+        except ValueError as e:
+            return jsonify({"error": f"Invalid image data: {e}"}), 400
         
     detector = get_detector()
     faces = detector.detect_faces(img)
@@ -65,7 +69,10 @@ def identify_faces(user):
         frame = d.get("frame")
         if not frame:
             return jsonify({"error": "image (multipart) or frame (base64) is required"}), 400
-        img = decode_base64_image(frame)
+        try:
+            img = decode_base64_image(frame)
+        except ValueError as e:
+            return jsonify({"error": f"Invalid image data: {e}"}), 400
         
     detector = get_detector()
     faces = detector.detect_faces(img)
@@ -73,7 +80,12 @@ def identify_faces(user):
     if not faces:
         return jsonify({"matches": [], "faces_detected": 0})
 
-    profiles = get_all_profiles(["user_id", "face_embeddings", "roll_number"])
+    d = request.get_json(silent=True) or {}
+    paper_id = d.get("paper_id")
+    if not paper_id:
+        return jsonify({"error": "paper_id is required for identification"}), 400
+
+    profiles = get_profiles_for_paper_cached(paper_id)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
 
     matches = []

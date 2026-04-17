@@ -236,7 +236,7 @@ class MetricsSnapshot:
             error_stats = ErrorTracker.get_error_stats(hours=24)
             
             return {
-                'timestamp': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'database': {
                     'status': db_status,
                     'latency_ms': db_latency_ms,
@@ -248,6 +248,6 @@ class MetricsSnapshot:
             }
         except Exception as e:
             return {
-                'timestamp': datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'error': str(e),
             }

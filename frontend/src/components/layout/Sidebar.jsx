@@ -48,13 +48,13 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
   const initials = safeName
     ? safeName.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
-  const textVisible = !isCollapsed;
+  const textVisible = isMobile ? true : !isCollapsed;
 
   return (
     <aside
       aria-label="Primary"
       style={{
-        width: isCollapsed ? 76 : 220,
+        width: isMobile ? 260 : (isCollapsed ? 76 : 220),
         height: '100vh',
         background: 'var(--sidebar-bg)',
         display: 'flex',

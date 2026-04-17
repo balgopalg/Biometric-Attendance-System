@@ -110,6 +110,7 @@ export default function ChangePassword() {
       background: 'var(--bg-primary)', padding: 20,
     }}>
       <div
+        className="change-password-card"
         style={{
           width: '100%', maxWidth: 440,
           background: 'var(--bg-card)',

@@ -8,12 +8,9 @@ from flask import current_app, has_app_context
 
 from app.models.enrollment import decode_face_embedding
 
+
 # We use keras-facenet which provides a ready-to-use InceptionResNetV1 model.
 # It will be lazily loaded on first call to avoid slow startup.
-_model = None
-_model_is_stub = False
-
-
 import threading
 
 _model = None
@@ -135,7 +132,7 @@ def prepare_profile_candidates(stored_profiles: list) -> list:
         prepared.append(
             {
                 "user_id": str(profile.get("user_id", profile.get("_id"))),
-                "roll_number": profile.get("roll_number", ""),
+                "reg_number": profile.get("reg_number", ""),
                 "vectors": vectors,
             }
         )
@@ -163,7 +160,7 @@ def find_best_match_cached(query_embedding: list, prepared_candidates: list, thr
             {
                 "user_id": best_candidate["user_id"],
                 "similarity": round(best_score, 4),
-                "roll_number": best_candidate.get("roll_number", ""),
+                "reg_number": best_candidate.get("reg_number", ""),
             },
             best_score,
         )
@@ -208,7 +205,7 @@ def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6)
         return {
             "user_id": str(best_match.get("user_id", best_match.get("_id"))),
             "similarity": round(best_score, 4),
-            "roll_number": best_match.get("roll_number", ""),
+            "reg_number": best_match.get("reg_number", ""),
         }
 
     return None

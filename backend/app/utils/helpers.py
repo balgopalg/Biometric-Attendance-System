@@ -35,7 +35,7 @@ def encode_image_base64(img_array: np.ndarray) -> str:
 
 def utcnow():
     """Return the current UTC datetime."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
 
 
 def sanitise_mongo_doc(doc: dict) -> dict:
@@ -53,6 +53,3 @@ def sanitise_many(docs) -> list:
     return [sanitise_mongo_doc(d) for d in docs]
 
 
-def validate_email(email: str) -> bool:
-    pattern = r"^[\w\.\+\-]+@[\w\-]+\.[\w]{2,}$"
-    return bool(re.match(pattern, email))

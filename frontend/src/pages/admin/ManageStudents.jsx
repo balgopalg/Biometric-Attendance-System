@@ -31,7 +31,7 @@ const EMPTY_FORM = {
   email: '',
   course_id: '',
   mobile_no: '',
-  roll_number: '',
+  // roll_number removed, use reg_number only
   reg_number: '',
 };
 const PAGE_SIZE = 10;
@@ -391,7 +391,7 @@ export default function ManageStudents() {
       setForm(EMPTY_FORM);
       if (data?.temp_password) {
         setCreatedCreds({
-          reg_number: data.profile?.reg_number || data.profile?.roll_number || 'N/A',
+          reg_number: data.profile?.reg_number || 'N/A',
           temp_password: data.temp_password,
           name: data.name,
         });
@@ -413,7 +413,7 @@ export default function ManageStudents() {
       email: student.email || '',
       course_id: student.course_id || '',
       mobile_no: student.mobile_no || '',
-      roll_number: student.roll_number || '',
+      // roll_number removed, use reg_number only
       reg_number: student.reg_number || '',
     });
     setShowEdit(true);
@@ -856,8 +856,7 @@ export default function ManageStudents() {
             <input
               className="input-field"
               placeholder="Update roll number"
-              value={form.roll_number || ''}
-              onChange={(e) => setForm({ ...form, roll_number: e.target.value })}
+              // roll_number field removed from form
             />
           </div>
           <div>

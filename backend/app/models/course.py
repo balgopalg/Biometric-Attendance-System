@@ -13,7 +13,7 @@ def create_course(name: str, code: str, department: str, course_duration: Any) -
         "department": department,
         "course_duration": course_duration,
         "status": "active",
-        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
+        "created_at": datetime.now(timezone.utc),
     }
     result = courses.insert_one(doc)
     doc["_id"] = str(result.inserted_id)

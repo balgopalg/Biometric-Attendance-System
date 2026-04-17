@@ -36,7 +36,7 @@ function renderHighlightedText(text, query) {
 }
 
 function studentOptionLabel(student) {
-  return `${student.name || 'Unknown'} - ${student.reg_number || student.roll_number || 'No reg'} - ${formatCourseName(student.course_name || 'N/A', { isInactive: student.is_course_inactive, status: student.course_status })}`;
+  return `${student.name || 'Unknown'} - ${student.reg_number || 'No reg'} - ${formatCourseName(student.course_name || 'N/A', { isInactive: student.is_course_inactive, status: student.course_status })}`;
 }
 
 export default function StudentEnrollment() {
@@ -336,7 +336,7 @@ export default function StudentEnrollment() {
                     const sid = s.user_id || s._id;
                     const disabled = Boolean(s.is_course_inactive);
                     const active = index === highlightedIndex;
-                    const metaText = `${s.reg_number || s.roll_number || 'No reg'} - ${formatCourseName(s.course_name || 'N/A', { isInactive: s.is_course_inactive, status: s.course_status })}`;
+                    const metaText = `${s.reg_number || 'No reg'} - ${formatCourseName(s.course_name || 'N/A', { isInactive: s.is_course_inactive, status: s.course_status })}`;
                     return (
                       <button
                         key={sid}

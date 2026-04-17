@@ -1,6 +1,5 @@
 """User model helpers — thin wrappers around PyMongo operations."""
 
-
 import secrets
 import hmac
 from datetime import datetime, timezone
@@ -8,6 +7,7 @@ from typing import Any, Optional, Dict, List, Tuple
 
 import bcrypt
 from bson import ObjectId
+from bson.errors import InvalidId
 
 from app.extensions import get_collection
 from app.repositories import find_many_by_ids
@@ -64,13 +64,18 @@ def verify_user_pin(user: dict, provided_pin: Any) -> bool:
 
 def set_user_pin(user_id: str, pin: Any) -> Optional[dict]:
     """Set a lecturer PIN using hashed storage and clear legacy plaintext field."""
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        return None
+
     users = get_collection("auth", "users")
     users.update_one(
-        {"_id": ObjectId(user_id)},
+        {"_id": oid},
         {
             "$set": {
                 "pin_hash": hash_pin(pin),
-                "pin_last_set": datetime.now(timezone.utc).replace(tzinfo=None),
+                "pin_last_set": datetime.now(timezone.utc),
                 "pin": "",
             }
         },
@@ -97,12 +102,13 @@ def create_user(
         "department": department,
         "must_change_password": must_change_password,
         "session_version": 1,
-        "created_at": datetime.now(timezone.utc).replace(tzinfo=None),
+        "created_at": datetime.now(timezone.utc),
     }
     if role == "lecturer" and pin:
         doc["pin_hash"] = hash_pin(pin)
-        doc["pin_last_set"] = datetime.now(timezone.utc).replace(tzinfo=None)
+        doc["pin_last_set"] = datetime.now(timezone.utc)
         doc["pin"] = ""
+        
     users = get_collection("auth", "users")
     result = users.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
@@ -110,21 +116,28 @@ def create_user(
 
 
 def find_user_by_email(email: str) -> Optional[dict]:
-    users = get_collection("auth", "users")
     normalized_email = normalize_email(email)
+    if not normalized_email:
+        return None
+        
+    users = get_collection("auth", "users")
     user = users.find_one({"email": normalized_email})
     if user:
         return user
 
-    if normalized_email:
-        escaped_email = re.escape(normalized_email)
-        return users.find_one({"email": {"$regex": f"^{escaped_email}$", "$options": "i"}})
-    return None
+    # Fallback to case-insensitive regex if the user was inserted without normalization
+    escaped_email = re.escape(normalized_email)
+    return users.find_one({"email": {"$regex": f"^{escaped_email}$", "$options": "i"}})
 
 
 def find_user_by_id(user_id: str) -> Optional[dict]:
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        return None
+        
     users = get_collection("auth", "users")
-    return users.find_one({"_id": ObjectId(user_id)})
+    return users.find_one({"_id": oid})
 
 
 def get_users_by_role(role: str) -> List[dict]:
@@ -138,35 +151,59 @@ def get_users_by_ids(user_ids: List[str]) -> Dict[str, dict]:
 
 
 def update_user(user_id: str, update_fields: dict) -> Optional[dict]:
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        return None
+        
     users = get_collection("auth", "users")
-    users.update_one({"_id": ObjectId(user_id)}, {"$set": update_fields})
+    users.update_one({"_id": oid}, {"$set": update_fields})
     return find_user_by_id(user_id)
 
 
-def delete_user(user_id: str) -> None:
+def delete_user(user_id: str) -> bool:
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        return False
+        
     users = get_collection("auth", "users")
-    users.delete_one({"_id": ObjectId(user_id)})
+    result = users.delete_one({"_id": oid})
+    return result.deleted_count > 0
 
 
 def verify_password(stored_hash: str, password: str) -> bool:
-    return bcrypt.checkpw(password.encode(), stored_hash.encode())
+    try:
+        return bcrypt.checkpw(password.encode(), stored_hash.encode())
+    except Exception:
+        return False
 
 
-def reset_user_password(user_id: str, temp_password: Optional[str] = None) -> str:
+def reset_user_password(user_id: str, temp_password: Optional[str] = None) -> Optional[str]:
     """Set a temporary password for a user and require password change on next login."""
+    try:
+        oid = ObjectId(user_id)
+    except InvalidId:
+        return None
+
     temp_pw = temp_password or generate_temp_password()
     pw_hash = bcrypt.hashpw(temp_pw.encode(), bcrypt.gensalt()).decode()
+    
     users = get_collection("auth", "users")
-    user = users.find_one({"_id": ObjectId(user_id)}, {"email": 1})
+    user = users.find_one({"_id": oid}, {"email": 1})
+    
+    if not user:
+        return None
+        
     users.update_one(
-        {"_id": ObjectId(user_id)},
+        {"_id": oid},
         {
             "$set": {"password_hash": pw_hash, "must_change_password": True},  # nosec B105
             "$inc": {"session_version": 1},
         },
     )
 
-    if user and user.get("email"):
+    if user.get("email"):
         BruteForceProtector.clear_failed_attempts(user["email"])
 
     return temp_pw
@@ -181,8 +218,10 @@ def change_user_password(
     user = find_user_by_id(user_id)
     if not user:
         return False, "User not found"
+        
     if not verify_password(user["password_hash"], old_password):
         return False, "Current password is incorrect"
+        
     is_strong, msg = validate_password_strength(new_password)
     if not is_strong:
         return False, msg

@@ -5,7 +5,13 @@ from flask_limiter.util import get_remote_address
 
 # Will be initialized in app factory
 # Keep global defaults off; use explicit @limiter.limit decorators on sensitive endpoints.
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[],
+    swallow_errors=True,
+    in_memory_fallback_enabled=True,
+    storage_options={"socket_connect_timeout": 1}
+)
 
 # Rate limit definitions for specific endpoints
 RATE_LIMITS = {

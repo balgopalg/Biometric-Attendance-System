@@ -132,7 +132,7 @@ class _JobCancelledError(Exception):
 
 
 def _utcnow():
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(timezone.utc)
 
 
 def _temp_pass_display_enabled():
@@ -737,7 +737,7 @@ def _execute_rollback_operation(operation):
 
 def _derive_academic_session(enrollment_year, course_duration):
     """Build session label like 2024-26 from start year and duration."""
-    start_year = _to_int(enrollment_year, datetime.now(timezone.utc).replace(tzinfo=None).year)
+    start_year = _to_int(enrollment_year, datetime.now(timezone.utc).year)
     duration_years = max(1, _to_int(course_duration, 1))
     end_year_short = str(start_year + duration_years)[-2:]
     return f"{start_year}-{end_year_short}"
@@ -1155,7 +1155,7 @@ def list_course_sessions(user, cid):
 
     # Ensure at least current derived session appears when course has active profiles but no stored session field.
     if not sessions and profiles.count_documents({"course_id": cid}) > 0:
-        now_year = datetime.now(timezone.utc).replace(tzinfo=None).year
+        now_year = datetime.now(timezone.utc).year
         sessions.add(_derive_academic_session(now_year, course_duration))
 
     return jsonify(sorted(sessions))
@@ -1844,7 +1844,7 @@ def list_students(user):
             item["email"] = u["email"]
 
         item["reg_number"] = item.get("reg_number") or item.get("roll_number")
-        enrollment_year = item.get("enrollment_year") or (item.get("created_at") or datetime.now(timezone.utc).replace(tzinfo=None)).year
+        enrollment_year = item.get("enrollment_year") or (item.get("created_at") or datetime.now(timezone.utc)).year
         duration_years = _to_int((course or {}).get("course_duration"), 1)
         item["academic_session"] = (
             _as_text(item.get("academic_session"))
@@ -1949,13 +1949,13 @@ def student_options(user):
         is_course_inactive = _as_text((course or {}).get("status") or "active").lower() != "active"
         if is_course_inactive and not include_inactive:
             continue
-        enrollment_year = _to_int((profile.get("created_at") or datetime.now(timezone.utc).replace(tzinfo=None)).year if hasattr(profile.get("created_at"), "year") else None, 0)
+        enrollment_year = _to_int((profile.get("created_at") or datetime.now(timezone.utc)).year if hasattr(profile.get("created_at"), "year") else None, 0)
         duration_years = _to_int((course or {}).get("course_duration"), 1)
         resolved_session = (
             _as_text(profile.get("academic_session"))
             or _as_text(profile.get("academic_year"))
             or _as_text(profile.get("year"))
-            or _derive_academic_session(enrollment_year or datetime.now(timezone.utc).replace(tzinfo=None).year, duration_years)
+            or _derive_academic_session(enrollment_year or datetime.now(timezone.utc).year, duration_years)
         )
         current_semester = _to_int(profile.get("current_semester"), 0)
 
@@ -2006,7 +2006,7 @@ def add_student(user):
     if _course_is_inactive(course):
         return jsonify({"error": "Cannot create student under inactive course"}), 409
     
-    enrollment_year = _to_int(d.get("enrollment_year"), datetime.now(timezone.utc).replace(tzinfo=None).year)
+    enrollment_year = _to_int(d.get("enrollment_year"), datetime.now(timezone.utc).year)
     course_duration = _to_int((course or {}).get("course_duration"), 1)
     academic_session = _derive_academic_session(enrollment_year, course_duration)
 
@@ -2167,7 +2167,7 @@ def edit_student(user, sid):
 
     current_course_id = (profile or {}).get("course_id")
     next_course_id = profile_fields.get("course_id", current_course_id)
-    current_enrollment_year = _to_int((profile or {}).get("enrollment_year"), (profile or {}).get("created_at", datetime.now(timezone.utc).replace(tzinfo=None)).year)
+    current_enrollment_year = _to_int((profile or {}).get("enrollment_year"), (profile or {}).get("created_at", datetime.now(timezone.utc)).year)
     next_enrollment_year = _to_int(profile_fields.get("enrollment_year"), current_enrollment_year)
     next_course = _safe_get_course(next_course_id) if next_course_id else None
     if next_course_id and _course_is_inactive(next_course):
@@ -2401,7 +2401,7 @@ def import_students_excel(user):
     if missing_cols:
         return jsonify({"error": f"Missing required columns: {', '.join(missing_cols)}. Found headers: {header_raw}"}), 400
 
-    enrollment_year = datetime.now(timezone.utc).replace(tzinfo=None).year
+    enrollment_year = datetime.now(timezone.utc).year
     course_duration = _to_int((course or {}).get("course_duration"), 1)
     academic_session = _derive_academic_session(enrollment_year, course_duration)
 
@@ -3813,15 +3813,31 @@ def list_audit_logs(user):
         rollback_payload = item.get("rollback")
         ts = item.get("timestamp")
         rollback_until = item.get("rollback_until")
+
+        # Ensure ts is timezone-aware if present
+        if ts and ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+
         if rollback_payload and not rollback_until and ts:
             rollback_until = ts + timedelta(days=1)
             item["rollback_until"] = rollback_until
 
         rolled_back = bool(item.get("rolled_back"))
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
+
+        # Ensure rollback_until is timezone-aware for comparison with 'now'
+        if rollback_until and rollback_until.tzinfo is None:
+            rollback_until = rollback_until.replace(tzinfo=timezone.utc)
+
         eligible = bool(rollback_payload) and not rolled_back and bool(rollback_until) and now <= rollback_until
         item["rollback_available"] = eligible
         item["rolled_back"] = rolled_back
+
+        # Ensure IDs are stringified for JSON serialization
+        if "performed_by" in item:
+            item["performed_by"] = _as_text(item["performed_by"])
+        if "target_user" in item:
+            item["target_user"] = _as_text(item["target_user"])
 
         # Raw rollback payload may contain nested ObjectIds/documents used internally
         # for rollback execution and is not needed by UI list rendering.
@@ -3853,9 +3869,9 @@ def rollback_audit_action(user, log_id):
 
     rollback_until = audit_log.get("rollback_until")
     if not rollback_until:
-        rollback_until = (audit_log.get("timestamp") or datetime.now(timezone.utc).replace(tzinfo=None)) + timedelta(days=1)
+        rollback_until = (audit_log.get("timestamp") or datetime.now(timezone.utc)) + timedelta(days=1)
 
-    if datetime.now(timezone.utc).replace(tzinfo=None) > rollback_until:
+    if datetime.now(timezone.utc) > rollback_until:
         return jsonify({"error": "Rollback window expired (1 day)"}), 403
 
     try:
@@ -4227,7 +4243,7 @@ def set_exam_eligibility_override(user):
                 "override_status": override_status,
                 "reason": reason,
                 "updated_by": str(user["_id"]),
-                "updated_at": datetime.now(timezone.utc).replace(tzinfo=None),
+                "updated_at": datetime.now(timezone.utc),
             }
         },
         upsert=True,
@@ -4280,7 +4296,7 @@ def set_exam_eligibility_override_bulk(user):
         return jsonify({"error": "No valid override items found"}), 400
 
     overrides_col = get_collection("attendance", "exam_eligibility_overrides")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     admin_id = str(user["_id"])
     unique_pairs = set()
 
@@ -4365,7 +4381,7 @@ def approve_leave_request(user, leave_id):
     if not doc:
         return jsonify({"error": "Leave request not found"}), 404
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
     leaves_col.update_one(
         {"_id": ObjectId(leave_id)},
         {"$set": {
@@ -4394,7 +4410,7 @@ def reject_leave_request(user, leave_id):
 
     d      = request.get_json(silent=True) or {}
     remark = _as_text(d.get("remark", ""))
-    now    = datetime.now(timezone.utc).replace(tzinfo=None)
+    now    = datetime.now(timezone.utc)
 
     leaves_col.update_one(
         {"_id": ObjectId(leave_id)},
@@ -4995,7 +5011,7 @@ def attendance_matrix_export_pdf(user):
     elements.append(t)
     
     elements.append(Spacer(1, 40))
-    elements.append(Paragraph(f"Generated at: {datetime.now(timezone.utc).replace(tzinfo=None).strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+    elements.append(Paragraph(f"Generated at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
     elements.append(Paragraph("Authorized Administrator Signature: _______________________", styles['Normal']))
     
     doc.build(elements)
@@ -5024,7 +5040,7 @@ def dashboard_stats(user):
         return jsonify(cached_payload)
 
     started_at = current_app.config.get("APP_STARTED_AT")
-    uptime_seconds = int((datetime.now(timezone.utc).replace(tzinfo=None) - started_at).total_seconds()) if started_at else 0
+    uptime_seconds = int((datetime.now(timezone.utc) - started_at).total_seconds()) if started_at else 0
     uptime_days, remainder = divmod(max(uptime_seconds, 0), 86400)
     uptime_hours, remainder = divmod(remainder, 3600)
     uptime_minutes, uptime_seconds = divmod(remainder, 60)
@@ -5046,7 +5062,7 @@ def dashboard_stats(user):
         return datetime(year, month, 1)
 
     def _monthly_attendance(attendance_col, months=6):
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc)
         current_month = _month_start(now)
         start_month = _shift_month(current_month, -(months - 1))
 
@@ -5058,7 +5074,7 @@ def dashboard_stats(user):
             ts = doc.get("timestamp")
             if isinstance(ts, str):
                 try:
-                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).replace(tzinfo=None)
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                 except Exception:
                     continue  # nosec B112
 
@@ -5168,7 +5184,7 @@ def dashboard_stats(user):
         "total_attendance": attendance_col.count_documents({}),
         "total_audit_logs": audit_col.count_documents({}),
         "app_started_at": app_started_at,
-        "system_uptime_seconds": max(int((datetime.now(timezone.utc).replace(tzinfo=None) - started_at).total_seconds()), 0) if started_at else 0,
+        "system_uptime_seconds": max(int((datetime.now(timezone.utc) - started_at).total_seconds()), 0) if started_at else 0,
         "system_uptime": system_uptime,
         "students_by_course": by_course,
         "students_by_year": by_year,

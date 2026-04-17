@@ -21,8 +21,12 @@ def validate_password_strength(password):
     - At least one digit
     - At least one special character
     """
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters"
+    from flask import current_app, has_app_context
+    min_len = 8
+    if has_app_context():
+        min_len = int(current_app.config.get("PASSWORD_MIN_LENGTH", 8))
+    if len(password) < min_len:
+        return False, f"Password must be at least {min_len} characters"
     
     if not re.search(r'[A-Z]', password):
         return False, "Password must contain at least one uppercase letter"
@@ -115,19 +119,15 @@ def validate_attendance_percentage(percentage):
         return False
 
 
+import ipaddress
+
 def validate_ip_address(ip):
-    """Validate IPv4 or IPv6 address format."""
-    # Simple validation for IPv4
-    if ':' not in ip:  # IPv4
-        parts = ip.split('.')
-        if len(parts) != 4:
-            return False
-        try:
-            return all(0 <= int(part) <= 255 for part in parts)
-        except ValueError:
-            return False
-    else:  # IPv6 (simplified check)
-        return ':' in ip and len(ip) > 5
+    """Validate IPv4 or IPv6 address format using ipaddress module."""
+    try:
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
 
 
 class ValidationError(Exception):
