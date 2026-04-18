@@ -42,6 +42,7 @@ export default function AuditTrail() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [deptFilter, setDeptFilter] = useState('');
   const [departments, setDepartments] = useState([]);
 
@@ -131,6 +132,41 @@ export default function AuditTrail() {
     fetchLogs(1);
   };
 
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const params = { tz_offset_minutes: getIndiaTimezoneOffsetMinutes() };
+      if (keyword) params.action = keyword;
+      if (dateFrom) params.from = dateFrom;
+      if (dateTo) params.to = dateTo;
+      if (deptFilter && isSuperAdmin) params.department_id = deptFilter;
+
+      const res = await api.get('/admin/audit-logs/export', { params, responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      const contentDisposition = res.headers['content-disposition'];
+      let fileName = 'Audit_Trail_Export.xlsx';
+      if (contentDisposition) {
+        const fileNameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (fileNameMatch && fileNameMatch.length === 2) {
+          fileName = fileNameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error('Failed to export audit logs');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleReset = () => {
     setKeyword('');
     setDateFrom('');
@@ -202,7 +238,17 @@ export default function AuditTrail() {
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>Rollback available for eligible create/update/delete actions within 1 day.</p>
           </div>
         </div>
-        <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{total} total entries</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+          <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{total} total entries</span>
+          <button 
+            className="btn-secondary" 
+            style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}
+            onClick={handleExport}
+            disabled={exporting || total === 0}
+          >
+            {exporting ? 'Exporting...' : 'Export to Excel'}
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
