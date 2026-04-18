@@ -18,6 +18,8 @@ const ExamEligibility = lazy(() => import('./pages/admin/ExamEligibility'));
 const AttendanceMatrix = lazy(() => import('./pages/admin/AttendanceMatrix'));
 const AuditTrail = lazy(() => import('./pages/admin/AuditTrail'));
 const DeadLetterJobs = lazy(() => import('./pages/admin/DeadLetterJobs'));
+const ManageDepartments = lazy(() => import('./pages/admin/ManageDepartments'));
+const ManageDepartmentAdmins = lazy(() => import('./pages/admin/ManageDepartmentAdmins'));
 const LecturerDashboard = lazy(() => import('./pages/lecturer/LecturerDashboard'));
 const AttendanceSession = lazy(() => import('./pages/lecturer/AttendanceSession'));
 const LecturerProgress = lazy(() => import('./pages/lecturer/LecturerProgress'));
@@ -39,20 +41,62 @@ function LazyPage({ children }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
+/**
+ * Determine the home path for a given role.
+ */
+function roleHomePath(role) {
+  if (role === 'super_admin' || role === 'department_admin' || role === 'admin') return '/admin';
+  if (role === 'lecturer') return '/lecturer';
+  return '/student';
+}
+
+/**
+ * Expand allowedRoles to include inherited roles.
+ * If "department_admin" is allowed → "super_admin" is also allowed.
+ * Legacy "admin" alias is transparently handled.
+ */
+function expandRoles(allowedRoles) {
+  const roles = new Set(allowedRoles || []);
+
+  // Legacy compat: treat "admin" as "department_admin"
+  if (roles.has('admin')) {
+    roles.delete('admin');
+    roles.add('department_admin');
+  }
+
+  // Role inheritance: super_admin inherits all admin-level access
+  if (roles.has('department_admin')) {
+    roles.add('super_admin');
+  }
+
+  return roles;
+}
+
 function ProtectedRoute({ children, allowedRoles }) {
-  const { isAuthenticated, user, loading, mustChangePassword } = useAuth();
+  const { user, loading } = useAuth();
+  const isAuthenticated = !!user;
+  const mustChangePassword = user?.must_change_password;
+
   if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><StatePanel variant="loading" title="Loading session" description="Checking access rights." compact /></div>;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (mustChangePassword) return <Navigate to="/change-password" replace />;
-  if (allowedRoles && !allowedRoles.includes(user?.role)) {
-    const dest = user?.role === 'admin' ? '/admin' : user?.role === 'lecturer' ? '/lecturer' : '/student';
-    return <Navigate to={dest} replace />;
+
+  if (allowedRoles) {
+    const effective = expandRoles(allowedRoles);
+    // Normalize legacy "admin" → "super_admin" for cached session data
+    const userRole = user?.role === 'admin' ? 'super_admin' : user?.role;
+    if (!effective.has(userRole)) {
+      return <Navigate to={roleHomePath(user?.role)} replace />;
+    }
   }
   return children;
 }
 
 function RootRedirect() {
-  const { isAuthenticated, user, mustChangePassword, loading } = useAuth();
+  const { user, loading } = useAuth();
+  const isAuthenticated = !!user;
+  const mustChangePassword = user?.must_change_password;
+
   if (loading) {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><StatePanel variant="loading" title="Loading session" description="Checking access rights." compact /></div>;
   }
@@ -68,8 +112,7 @@ function RootRedirect() {
   }
   
   // Redirect to role-based dashboard
-  const dest = user?.role === 'admin' ? '/admin' : user?.role === 'lecturer' ? '/lecturer' : '/student';
-  return <Navigate to={dest} replace />;
+  return <Navigate to={roleHomePath(user?.role)} replace />;
 }
 
 export default function App() {
@@ -82,8 +125,8 @@ export default function App() {
             <Route path="/change-password" element={<LazyPage><ChangePassword /></LazyPage>} />
             <Route path="/" element={<RootRedirect />} />
 
-            {/* Admin */}
-            <Route element={<ProtectedRoute allowedRoles={['admin']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+            {/* Admin — both super_admin and department_admin */}
+            <Route element={<ProtectedRoute allowedRoles={['department_admin']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
               <Route path="/admin" element={<LazyPage><AdminDashboard /></LazyPage>} />
               <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
               <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
@@ -94,6 +137,9 @@ export default function App() {
               <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
               <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
               <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
+              {/* Super Admin only routes */}
+              <Route path="/admin/departments" element={<LazyPage><ManageDepartments /></LazyPage>} />
+              <Route path="/admin/department-admins" element={<LazyPage><ManageDepartmentAdmins /></LazyPage>} />
               {/* <Route path="/admin/leaves" element={<LazyPage><ManageLeaves /></LazyPage>} /> */}
             </Route>
 

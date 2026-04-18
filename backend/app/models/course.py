@@ -3,14 +3,23 @@
 from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
 from bson import ObjectId
+from bson.errors import InvalidId
 from app.extensions import get_collection
 
-def create_course(name: str, code: str, department: str, course_duration: Any) -> dict:
+def create_course(name: str, code: str, department: str, course_duration: Any, department_id: Any = None) -> dict:
     courses = get_collection("academic", "courses")
+    # Coerce department_id to ObjectId
+    dept_oid = None
+    if department_id is not None and str(department_id).strip():
+        try:
+            dept_oid = ObjectId(str(department_id))
+        except (InvalidId, Exception):
+            dept_oid = None
     doc = {
         "name": name,
         "code": code,
         "department": department,
+        "department_id": dept_oid,
         "course_duration": course_duration,
         "status": "active",
         "created_at": datetime.now(timezone.utc),
@@ -20,13 +29,20 @@ def create_course(name: str, code: str, department: str, course_duration: Any) -
     return doc
 
 
-def get_all_courses(fields: Optional[List[str]] = None) -> List[dict]:
+def get_all_courses(fields: Optional[List[str]] = None, department_id: Any = None) -> List[dict]:
+    """Return all courses, optionally filtered by department_id."""
     courses = get_collection("academic", "courses")
     projection = None
     if fields:
         projection = {field: 1 for field in fields}
         projection["_id"] = 1
-    cursor = courses.find({}, projection) if projection else courses.find()
+    query: dict = {}
+    if department_id is not None:
+        try:
+            query["department_id"] = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+        except (InvalidId, Exception):
+            pass
+    cursor = courses.find(query, projection) if projection else courses.find(query)
     return list(cursor)
 
 

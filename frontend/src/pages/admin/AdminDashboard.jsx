@@ -1,4 +1,5 @@
 import { Suspense, lazy, useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/axios';
 import StatsCard from '../../components/ui/StatsCard';
 import { motion } from 'framer-motion';
@@ -39,6 +40,7 @@ function parseUtcTimestamp(value) {
 }
 
 export default function AdminDashboard() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
   const [stats, setStats] = useState({});
   const [loadingStats, setLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState('');
@@ -49,13 +51,28 @@ export default function AdminDashboard() {
   const [queueActionMessage, setQueueActionMessage] = useState('');
   const [eligibility, setEligibility] = useState({ total: 0, eligible_count: 0, ineligible_count: 0, items: [] });
   const [loadingEligibility, setLoadingEligibility] = useState(false);
-  const [filters, setFilters] = useState({ academic_session: '', course_id: '', semester: '' });
+  const [trendDepartment, setTrendDepartment] = useState('');
+  const [trendPoints, setTrendPoints] = useState([]);
+  const [loadingTrend, setLoadingTrend] = useState(false);
+  const [filters, setFilters] = useState(() => ({
+    department: isDepartmentAdmin && departmentName ? departmentName : '',
+    academic_session: '',
+    course_id: '',
+    semester: ''
+  }));
+  const [departmentsList, setDepartmentsList] = useState([]);
+  const [allCourses, setAllCourses] = useState([]);
   const debouncedFilters = useDebouncedValue(filters, 300);
 
   const fetchStats = () => {
     setLoadingStats(true);
     setStatsError('');
-    api.get('/admin/stats')
+    const params = {};
+    if (isDepartmentAdmin && departmentId) {
+      params.department_id = departmentId;
+    }
+
+    api.get('/admin/stats', { params })
       .then((r) => setStats(r.data || {}))
       .catch((err) => {
         setStats({});
@@ -65,6 +82,7 @@ export default function AdminDashboard() {
   };
 
   const fetchQueueMetrics = () => {
+    if (!isSuperAdmin) return;
     setLoadingQueueMetrics(true);
     api.get('/admin/jobs/metrics')
       .then((r) => setQueueMetrics(r.data || null))
@@ -107,7 +125,29 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchStats();
     fetchQueueMetrics();
-  }, []);
+    // Fetch departments for the cascade filter
+    api.get('/admin/departments')
+      .then((r) => setDepartmentsList(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setDepartmentsList([]));
+      
+    const courseParams = {};
+    if (isDepartmentAdmin && departmentId) {
+      courseParams.department_id = departmentId;
+    }
+    api.get('/admin/courses', { params: courseParams })
+      .then((r) => setAllCourses(r.data || []))
+      .catch(() => setAllCourses([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDepartmentAdmin, departmentId]);
+
+  useEffect(() => {
+    setLoadingTrend(true);
+    const params = trendDepartment ? { department: trendDepartment } : {};
+    api.get('/admin/stats/monthly-attendance', { params })
+      .then(r => setTrendPoints(r.data || []))
+      .catch(() => setTrendPoints([]))
+      .finally(() => setLoadingTrend(false));
+  }, [trendDepartment]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -123,6 +163,12 @@ export default function AdminDashboard() {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (isDepartmentAdmin && departmentName) {
+      setFilters(prev => ({ ...prev, department: departmentName }));
+    }
+  }, [isDepartmentAdmin, departmentName]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -148,6 +194,7 @@ export default function AdminDashboard() {
         course_name: row.course_name || 'N/A',
         course_status: row.course_status,
         is_course_inactive: row.is_course_inactive,
+        course_department: row.course_department || '',
         students: new Map(),
       };
 
@@ -171,6 +218,7 @@ export default function AdminDashboard() {
         course_name: entry.course_name,
         course_status: entry.course_status,
         is_course_inactive: entry.is_course_inactive,
+        course_department: entry.course_department,
         total_students: students.length,
         eligible_count: students.filter((s) => s.final_eligible).length,
         ineligible_count: students.filter((s) => !s.final_eligible).length,
@@ -179,13 +227,23 @@ export default function AdminDashboard() {
   }, [eligibilityRows]);
 
   const courseOptions = useMemo(
-    () => courseSummary.map((course) => ({
-      course_id: course.course_id || '',
-      course_name: course.course_name,
-      course_status: course.course_status,
-      is_course_inactive: course.is_course_inactive,
-    })).sort((a, b) => a.course_name.localeCompare(b.course_name)),
-    [courseSummary]
+    () => {
+      let options = allCourses.map((course) => ({
+        course_id: course._id || '',
+        course_name: course.name,
+        course_status: course.status,
+        is_course_inactive: String(course.status || 'active').toLowerCase() !== 'active',
+        course_department: course.department || '',
+      }));
+      // If a department is selected, filter courses to that department
+      if (filters.department) {
+        options = options.filter(
+          (c) => (c.course_department || '').toLowerCase() === filters.department.toLowerCase()
+        );
+      }
+      return options.sort((a, b) => a.course_name.localeCompare(b.course_name));
+    },
+    [allCourses, filters.department]
   );
 
   const semesterSummary = useMemo(() => {
@@ -280,13 +338,14 @@ export default function AdminDashboard() {
   }, [filters.academic_session, filters.course_id, courseSummary, semesterSummary]);
 
   const monthlyAttendance = useMemo(() => {
-    const rows = Array.isArray(stats.monthly_attendance) ? stats.monthly_attendance : [];
+    const rows = Array.isArray(trendPoints) ? trendPoints : [];
+      
     return rows.map((row, index) => ({
       key: row.key || `m-${index}`,
-      label: row.label || row.month || `M${index + 1}`,
+      label: row.label || `M${index + 1}`,
       total: Number(row.total) || 0,
     }));
-  }, [stats.monthly_attendance]);
+  }, [trendPoints]);
 
   const liveSystemUptime = useMemo(() => {
     const startedAt = parseUtcTimestamp(stats.app_started_at);
@@ -300,12 +359,36 @@ export default function AdminDashboard() {
     return stats.system_uptime || '0m';
   }, [stats.app_started_at, stats.system_uptime_seconds, stats.system_uptime, uptimeTick]);
 
-  const handleAcademicSessionChange = (value) => {
-    setFilters({ academic_session: value, course_id: '', semester: '' });
+  // Derive department options from fetched departments list or eligibility data
+  const departmentOptions = useMemo(() => {
+    if (isDepartmentAdmin && departmentName) {
+      return [departmentName];
+    }
+    if (departmentsList.length > 0) {
+      return departmentsList
+        .filter((d) => d.status === 'active')
+        .map((d) => d.name)
+        .filter(Boolean)
+        .sort();
+    }
+    // Fallback: extract unique department names from eligibility items
+    const names = new Set(
+      eligibilityRows.map((r) => r.course_department).filter(Boolean)
+    );
+    return Array.from(names).sort();
+  }, [departmentsList, eligibilityRows, isDepartmentAdmin, departmentName]);
+
+  const handleDepartmentChange = (value) => {
+    if (isDepartmentAdmin) return;
+    setFilters({ department: value, course_id: '', academic_session: '', semester: '' });
   };
 
   const handleCourseChange = (value) => {
-    setFilters((prev) => ({ ...prev, course_id: value, semester: '' }));
+    setFilters((prev) => ({ ...prev, course_id: value, academic_session: '', semester: '' }));
+  };
+
+  const handleAcademicSessionChange = (value) => {
+    setFilters((prev) => ({ ...prev, academic_session: value, semester: '' }));
   };
 
   const handleSemesterChange = (value) => {
@@ -361,9 +444,40 @@ export default function AdminDashboard() {
         <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
       </div>
 
-      <div className="admin-charts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+      {/* ─── Attendance Summary (primary focus) ─── */}
+      <Suspense fallback={<div className="glass-card" style={{ padding: 18, marginTop: 10, minHeight: 460 }} />}>
+        <DashboardInsightsPanel
+          eligibilitySnapshot={eligibilitySnapshot}
+          filters={filters}
+          departmentOptions={departmentOptions}
+          academicSessionOptions={academicSessionOptions}
+          courseOptions={courseOptions}
+          semesterOptions={semesterOptions}
+          courseSummary={courseSummary}
+          semesterSummary={semesterSummary}
+          chartRows={chartRows}
+          studentBuckets={studentBuckets}
+          loadingEligibility={loadingEligibility}
+          departmentsSummary={stats.departments_summary || {}}
+          isSuperAdmin={isSuperAdmin}
+          onDepartmentChange={handleDepartmentChange}
+          onAcademicSessionChange={handleAcademicSessionChange}
+          onCourseChange={handleCourseChange}
+          onSemesterChange={handleSemesterChange}
+        />
+      </Suspense>
+
+      {/* ─── Secondary panels: Trend, Eligibility Snapshot, Queue Health ─── */}
+      <div className="admin-charts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginTop: 20 }}>
         <Suspense fallback={<div className="glass-card" style={{ padding: 20, minHeight: 220 }} />}>
-          <MonthlyAttendanceTrend points={monthlyAttendance} />
+          <MonthlyAttendanceTrend 
+            points={monthlyAttendance} 
+            isSuperAdmin={isSuperAdmin}
+            departmentsList={departmentsList || []}
+            trendDepartment={trendDepartment}
+            onTrendDepartmentChange={setTrendDepartment}
+            loading={loadingTrend}
+          />
         </Suspense>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
@@ -379,77 +493,70 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="glass-card" style={{ padding: 20, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Queue Health</h3>
-              <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.72rem' }} onClick={fetchQueueMetrics}>
-                {loadingQueueMetrics ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queue Depth</span><b>{queueMetrics?.queue?.depth ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Delayed</span><b>{queueMetrics?.queue?.delayed_depth ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queued Retries</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.queued_retries ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ flexShrink: 0 }}>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem', wordBreak: 'break-word', minWidth: 0 }}>{formatDateTimeIndia(queueMetrics?.jobs?.next_retry_job?.next_attempt_at, { dateStyle: 'short', timeStyle: 'medium' })}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
-            </div>
-
-            {queueActionMessage && (
-              <p style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{queueActionMessage}</p>
-            )}
-
-            <div style={{ marginTop: 14 }}>
-              <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: 8 }}>Recent Dead-Letter Jobs</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).map((job) => (
-                  <div key={job.job_id} className="glass-card" style={{ padding: 10, overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <p style={{ fontSize: '0.76rem', fontWeight: 700 }}>{job.job_type || 'unknown'}</p>
-                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{job.job_id}</p>
-                        <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Attempts: {job.attempts || 0}/{job.max_attempts || 0}</p>
-                      </div>
-                      <button
-                        className="btn-secondary"
-                        style={{ padding: '4px 10px', fontSize: '0.72rem', alignSelf: 'flex-start' }}
-                        disabled={replayingJobId === job.job_id}
-                        onClick={() => replayDeadLetterJob(job.job_id)}
-                      >
-                        {replayingJobId === job.job_id ? 'Replaying...' : 'Replay'}
-                      </button>
-                    </div>
-                    {job.error && <p style={{ marginTop: 6, fontSize: '0.7rem', color: 'var(--accent-rose)', wordBreak: 'break-word' }}>{job.error}</p>}
-                  </div>
-                ))}
-                {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 && (
-                  <StatePanel variant="empty" title="No dead-letter jobs" description="Queue replay is healthy for the current monitoring window." compact />
-                )}
+          {isSuperAdmin && (
+            <div className="glass-card" style={{ padding: 20, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Queue Health</h3>
+                <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.72rem' }} onClick={fetchQueueMetrics}>
+                  {loadingQueueMetrics ? 'Refreshing...' : 'Refresh'}
+                </button>
               </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queue Depth</span><b>{queueMetrics?.queue?.depth ?? 'N/A'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Delayed</span><b>{queueMetrics?.queue?.delayed_depth ?? 'N/A'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queued Retries</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.queued_retries ?? 'N/A'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ flexShrink: 0 }}>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem', wordBreak: 'break-word', minWidth: 0 }}>{formatDateTimeIndia(queueMetrics?.jobs?.next_retry_job?.next_attempt_at, { dateStyle: 'short', timeStyle: 'medium' })}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
+              </div>
+
+              {queueActionMessage && (
+                <p style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{queueActionMessage}</p>
+              )}
+
+
             </div>
-          </div>
+          )}
         </div>
       </div>
 
-      <Suspense fallback={<div className="glass-card" style={{ padding: 18, marginTop: 10, minHeight: 460 }} />}>
-        <DashboardInsightsPanel
-          eligibilitySnapshot={eligibilitySnapshot}
-          filters={filters}
-          academicSessionOptions={academicSessionOptions}
-          courseOptions={courseOptions}
-          semesterOptions={semesterOptions}
-          courseSummary={courseSummary}
-          semesterSummary={semesterSummary}
-          chartRows={chartRows}
-          studentBuckets={studentBuckets}
-          loadingEligibility={loadingEligibility}
-          onAcademicSessionChange={handleAcademicSessionChange}
-          onCourseChange={handleCourseChange}
-          onSemesterChange={handleSemesterChange}
-        />
-      </Suspense>
+      {/* ─── Bottom Panel: Recent Dead-Letter Jobs ─── */}
+      {isSuperAdmin && (
+        <div style={{ marginTop: 24 }}>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Recent Dead-Letter Jobs</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
+            {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).slice(0, 3).map((job) => (
+              <div key={job.job_id} className="glass-card" style={{ padding: 16, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 4 }}>{job.job_type || 'unknown'}</p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all', marginBottom: 4 }}>{job.job_id}</p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Attempts: {job.attempts || 0}/{job.max_attempts || 0}</p>
+                  </div>
+                  <button
+                    className="btn-secondary"
+                    style={{ padding: '6px 12px', fontSize: '0.75rem', height: 'fit-content' }}
+                    disabled={replayingJobId === job.job_id}
+                    onClick={() => replayDeadLetterJob(job.job_id)}
+                  >
+                    {replayingJobId === job.job_id ? 'Replaying...' : 'Replay'}
+                  </button>
+                </div>
+                {job.error && (
+                  <div style={{ marginTop: 12, padding: 8, background: 'var(--bg-card-alt)', borderRadius: 6, border: '1px solid var(--border-glass)' }}>
+                    <p style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', wordBreak: 'break-word', margin: 0 }}>{job.error}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+            {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 && (
+              <StatePanel variant="empty" title="No dead-letter jobs" description="Queue replay is healthy for the current monitoring window." compact />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from bson import ObjectId
+from flask import g, has_request_context
 from pymongo import ReturnDocument
 from app.extensions import get_collection
 
@@ -18,6 +19,7 @@ def log_action(
     details: str = "",
     rollback: Any = None,
     rollback_until: Any = None,
+    department_id: Any = None,
     **kwargs,
 ) -> dict:
     logs = get_collection("audit", "audit_logs")
@@ -28,6 +30,13 @@ def log_action(
     performed_by = performed_by or kwargs.get("performed_by") or kwargs.get("user_id") or "system"
     target_user = target_user if target_user is not None else kwargs.get("target_user")
     details = details or kwargs.get("details") or kwargs.get("description", "")
+
+    # Auto-resolve department_id from current request context if not provided
+    if department_id is None and has_request_context():
+        current_user = getattr(g, "current_user", None) or {}
+        raw_dept = current_user.get("department_id")
+        if raw_dept is not None:
+            department_id = raw_dept
 
     dedupe_seconds = int(kwargs.get("dedupe_seconds") or 0)
     dedupe_key = str(kwargs.get("dedupe_key") or "").strip()
@@ -40,6 +49,7 @@ def log_action(
         "performed_by": performed_by,
         "target_user": target_user,
         "details": details,
+        "department_id": department_id,
         "timestamp": ts,
     }
     if kwargs.get("resource_type"):
@@ -77,11 +87,26 @@ def log_action(
     return doc
 
 
-def get_audit_logs(page: int = 1, per_page: int = 50, filters: Optional[dict] = None) -> Tuple[list, int]:
-    """Return paginated audit logs, newest first, with optional filters."""
+def get_audit_logs(
+    page: int = 1,
+    per_page: int = 50,
+    filters: Optional[dict] = None,
+    department_id: Any = None,
+) -> Tuple[list, int]:
+    """Return paginated audit logs, newest first, with optional filters.
+
+    When *department_id* is provided, only logs for that department are
+    returned (used by department_admin).  When None, all logs are returned
+    (used by super_admin).
+    """
     skip = (page - 1) * per_page
     logs_col = get_collection("audit", "audit_logs")
-    query = filters or {}
+    query = dict(filters or {})
+    if department_id is not None:
+        try:
+            query["department_id"] = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+        except Exception:
+            pass
     logs = list(
         logs_col.find(query)
         .sort("timestamp", -1)

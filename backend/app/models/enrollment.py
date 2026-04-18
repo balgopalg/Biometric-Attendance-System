@@ -194,9 +194,27 @@ def create_student_profile(
     user_id: str,
     reg_number: str,
     course_id: str,
-    academic_year: Optional[Any] = None
+    academic_year: Optional[Any] = None,
+    department_id: Optional[Any] = None,
 ) -> dict:
     profiles = get_collection("academic", "student_profiles")
+
+    # Auto-resolve department_id from course if not provided
+    dept_oid = None
+    if department_id is not None:
+        try:
+            dept_oid = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+        except Exception:
+            dept_oid = None
+    elif course_id:
+        try:
+            courses = get_collection("academic", "courses")
+            course_doc = courses.find_one({"_id": ObjectId(course_id)}, {"department_id": 1})
+            if course_doc:
+                dept_oid = course_doc.get("department_id")
+        except Exception:
+            pass
+
     doc = {
         "user_id": user_id,
         "reg_number": reg_number,
@@ -205,6 +223,7 @@ def create_student_profile(
         "academic_session": academic_year,
         "year": academic_year,
         "current_semester": 1,
+        "department_id": dept_oid,
         "face_embeddings": [],
         "photo_urls": [],
         "enrolled_papers": [],

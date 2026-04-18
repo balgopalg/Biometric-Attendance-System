@@ -9,13 +9,16 @@ import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil } from 'react-icons/hi';
+import { useAuth } from '../../hooks/useAuth';
 
 const EMPTY_FORM = { name: '', code: '', course_id: '', lecturer_id: '', semester: '' };
 const PAGE_SIZE = 10;
 
 const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
-
 export default function ManagePapers() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+  const [departments, setDepartments] = useState([]);
+
   const [papers, setPapers] = useState([]);
   const [totalPapers, setTotalPapers] = useState(0);
   const [page, setPage] = useState(1);
@@ -27,16 +30,24 @@ export default function ManagePapers() {
   const [editingPaper, setEditingPaper] = useState(null);
 
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ course_id: '', lecturer_id: '', semester: '' });
+  const [filters, setFilters] = useState({ department_id: '', course_id: '', lecturer_id: '', semester: '' });
   const [showInactiveRows, setShowInactiveRows] = useAdminPreference('show_inactive_faded_rows', true);
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [loadingPapers, setLoadingPapers] = useState(false);
   const [papersError, setPapersError] = useState('');
 
+  // Fetch departments for Super Admin
+  const fetchDepartments = () => {
+    api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => setDepartments([]));
+  };
+
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setCourses(extractItems(r.data))).catch(() => {});
-    api.get('/admin/lecturers').then((r) => setLecturers(extractItems(r.data))).catch(() => {});
+    const params = {};
+    if (isSuperAdmin && filters.department_id) params.department_id = filters.department_id;
+    if (isDepartmentAdmin) params.department_id = departmentId;
+    api.get('/admin/courses', { params }).then((r) => setCourses(extractItems(r.data))).catch(() => {});
+    api.get('/admin/lecturers', { params }).then((r) => setLecturers(extractItems(r.data))).catch(() => {});
   };
 
   const fetchPapers = (nextPage = 1) => {
@@ -46,6 +57,7 @@ export default function ManagePapers() {
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
     if (search) params.q = search;
+    if (filters.department_id) params.department_id = filters.department_id;
     if (filters.course_id) params.course_id = filters.course_id;
     if (filters.lecturer_id) params.lecturer_id = filters.lecturer_id;
     if (filters.semester) params.semester = filters.semester;
@@ -68,12 +80,22 @@ export default function ManagePapers() {
   };
 
   useEffect(() => {
+    if (isSuperAdmin) fetchDepartments();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (isDepartmentAdmin && departmentId) {
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
+  }, [isDepartmentAdmin, departmentId]);
+
+  useEffect(() => {
     fetchMetadata();
-  }, []);
+  }, [filters.department_id]);
 
   useEffect(() => {
     fetchPapers(1);
-  }, [filters.course_id, filters.lecturer_id, filters.semester, search]);
+  }, [filters.department_id, filters.course_id, filters.lecturer_id, filters.semester, search]);
 
   const selectedCourse = useMemo(
     () => courses.find((c) => c._id === form.course_id) || null,
@@ -177,7 +199,7 @@ export default function ManagePapers() {
       await api.post('/admin/papers', form);
       toast.success('Subject created');
       setShowAdd(false);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       fetchPapers(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed');
@@ -203,7 +225,7 @@ export default function ManagePapers() {
       toast.success('Subject updated');
       setShowEdit(false);
       setEditingPaper(null);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       fetchPapers(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update subject');
@@ -294,25 +316,36 @@ export default function ManagePapers() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Papers</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalPapers} papers in current filter</p>
         </div>
-        <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
+        <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
           <HiOutlinePlus size={16} /> Add Subject
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input className="search-input" placeholder="Search by name/code/course/lecturer..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
+
+        {/* Department Filter */}
+        <select
+          className="input-field"
+          value={filters.department_id}
+          onChange={(e) => {
+            setFilters({ department_id: e.target.value, course_id: '', lecturer_id: '', semester: '' });
+          }}
+          disabled={isDepartmentAdmin}
+        >
+          <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}</option>
+          {departments.map((d) => (
+            <option key={d._id} value={d._id}>{d.name}</option>
+          ))}
+        </select>
+
         <select
           className="input-field"
           value={filters.course_id}
-          onChange={(e) => setFilters({
-            ...filters,
-            course_id: e.target.value,
-            semester: '',
-            lecturer_id: '',
-          })}
+          onChange={(e) => setFilters({ ...filters, course_id: e.target.value, semester: '', lecturer_id: '' })}
         >
           <option value="">All Courses</option>
           {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}

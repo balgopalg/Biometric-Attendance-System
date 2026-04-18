@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from typing import Any, Optional, List, Dict
 from bson import ObjectId
+from bson.errors import InvalidId
 from app.extensions import get_collection
 
 def create_paper(
@@ -11,9 +12,17 @@ def create_paper(
     course_id: str,
     lecturer_id: Optional[str] = None,
     semester: Optional[Any] = None,
-    total_classes: int = 0
+    total_classes: int = 0,
+    department_id: Any = None,
 ) -> dict:
     papers = get_collection("academic", "papers")
+    # Coerce department_id to ObjectId
+    dept_oid = None
+    if department_id is not None and str(department_id).strip():
+        try:
+            dept_oid = ObjectId(str(department_id))
+        except (InvalidId, Exception):
+            dept_oid = None
     doc = {
         "name": name,
         "code": code,
@@ -21,6 +30,7 @@ def create_paper(
         "lecturer_id": lecturer_id,
         "semester": semester,
         "total_classes": total_classes,
+        "department_id": dept_oid,
         "created_at": datetime.now(timezone.utc),
     }
     result = papers.insert_one(doc)
@@ -28,13 +38,20 @@ def create_paper(
     return doc
 
 
-def get_all_papers(fields: Optional[List[str]] = None) -> List[dict]:
+def get_all_papers(fields: Optional[List[str]] = None, department_id: Any = None) -> List[dict]:
+    """Return all papers, optionally filtered by department_id."""
     papers = get_collection("academic", "papers")
     projection = None
     if fields:
         projection = {field: 1 for field in fields}
         projection["_id"] = 1
-    cursor = papers.find({}, projection) if projection else papers.find()
+    query: dict = {}
+    if department_id is not None:
+        try:
+            query["department_id"] = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+        except (InvalidId, Exception):
+            pass
+    cursor = papers.find(query, projection) if projection else papers.find(query)
     return list(cursor)
 
 

@@ -198,9 +198,11 @@ def _ensure_indexes(mongo, config):
     auth_users = client[config["MONGO_DB_AUTH"]]["users"]
     _create_index_safe(auth_users, [("email", ASCENDING)], unique=True, name="uq_users_email")
     _create_index_safe(auth_users, [("role", ASCENDING)], name="ix_users_role")
+    _create_index_safe(auth_users, [("department_id", ASCENDING)], name="ix_users_department")
 
     courses = client[config["MONGO_DB_ACADEMIC"]]["courses"]
     _create_index_safe(courses, [("code", ASCENDING)], unique=True, name="uq_courses_code")
+    _create_index_safe(courses, [("department_id", ASCENDING)], name="ix_courses_department")
 
     papers = client[config["MONGO_DB_ACADEMIC"]]["papers"]
     _create_index_safe(papers, [("code", ASCENDING)], unique=True, name="uq_papers_code")
@@ -212,6 +214,12 @@ def _ensure_indexes(mongo, config):
     _create_index_safe(profiles, [("reg_number", ASCENDING)], unique=True, name="uq_profiles_reg")
     _create_index_safe(profiles, [("course_id", ASCENDING)], name="ix_profiles_course")
     _create_index_safe(profiles, [("academic_year", ASCENDING)], name="ix_profiles_year")
+    _create_index_safe(profiles, [("department_id", ASCENDING)], name="ix_profiles_department")
+
+    # Department collection indexes
+    departments = client[config["MONGO_DB_ACADEMIC"]]["departments"]
+    _create_index_safe(departments, [("code", ASCENDING)], unique=True, name="uq_departments_code")
+    _create_index_safe(departments, [("name", ASCENDING)], name="ix_departments_name")
 
     attendance_logs = client[config["MONGO_DB_ATTENDANCE"]]["attendance_logs"]
     _create_index_safe(
@@ -266,6 +274,7 @@ def _ensure_indexes(mongo, config):
         name="uq_audit_dedupe_bucket",
         partialFilterExpression={"dedupe_key": {"$exists": True}, "dedupe_bucket": {"$exists": True}},
     )
+    _create_index_safe(audits, [("department_id", ASCENDING), ("timestamp", DESCENDING)], name="ix_audit_department_timestamp")
 
     failed_login_attempts = client[config["MONGO_DB_AUTH"]]["failed_login_attempts"]
     _create_index_safe(failed_login_attempts, [("ttl", ASCENDING)], name="ix_failed_logins_ttl", expireAfterSeconds=0)
@@ -281,25 +290,27 @@ def _ensure_indexes(mongo, config):
 
 
 def _seed_admin(mongo):
-    """Create a default admin account only when explicit seed credentials are provided."""
+    """Create a default super admin account only when explicit seed credentials are provided."""
     import bcrypt
 
-    admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "").strip().lower()
-    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
+    admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "superadmin@system.com").strip().lower()
+    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")
     if not admin_email or not admin_password:
         return
 
     users = get_collection("auth", "users")
-    if users.count_documents({"role": "admin"}) == 0:
+    # Check for any existing super_admin or legacy admin
+    if users.count_documents({"role": {"$in": ["admin", "super_admin"]}}) == 0:
         users.insert_one(
             {
-                "name": "System Admin",
+                "name": "Super Admin",
                 "email": admin_email,
                 "password_hash": bcrypt.hashpw(
                     admin_password.encode(), bcrypt.gensalt()
                 ).decode(),
-                "role": "admin",
+                "role": "super_admin",
                 "department": "Administration",
+                "department_id": None,
                 "session_version": 1,
                 "created_at": __import__("datetime").datetime.now(timezone.utc),
             }
@@ -318,9 +329,11 @@ def _run_startup_health_checks(app):
         return
 
     required_indexes = {
-        (app.config["MONGO_DB_AUTH"], "users"): {"uq_users_email", "ix_users_role"},
+        (app.config["MONGO_DB_AUTH"], "users"): {"uq_users_email", "ix_users_role", "ix_users_department"},
         (app.config["MONGO_DB_ACADEMIC"], "papers"): {"uq_papers_code", "ix_papers_course", "ix_papers_lecturers"},
-        (app.config["MONGO_DB_ACADEMIC"], "student_profiles"): {"uq_profiles_user", "uq_profiles_reg", "ix_profiles_course", "ix_profiles_year"},
+        (app.config["MONGO_DB_ACADEMIC"], "student_profiles"): {"uq_profiles_user", "uq_profiles_reg", "ix_profiles_course", "ix_profiles_year", "ix_profiles_department"},
+        (app.config["MONGO_DB_ACADEMIC"], "departments"): {"uq_departments_code"},
+        (app.config["MONGO_DB_ACADEMIC"], "courses"): {"uq_courses_code", "ix_courses_department"},
         (app.config["MONGO_DB_ATTENDANCE"], "attendance_logs"): {"uq_attendance_session_paper_student", "ix_attendance_timestamp", "ix_attendance_paper_student"},
         (app.config["MONGO_DB_ATTENDANCE"], "attendance_sessions"): {"uq_sessions_id", "ix_sessions_lecturer_created", "ix_sessions_rollback_until"},
         (app.config["MONGO_DB_ATTENDANCE"], "exam_eligibility_overrides"): {"uq_overrides_student_paper"},

@@ -4,9 +4,37 @@ import {
   HiOutlineAcademicCap, HiOutlineUsers, HiOutlineBookOpen,
   HiOutlineClipboardList, HiOutlineShieldCheck, HiOutlineLogout,
   HiOutlineHome, HiOutlineCamera, HiOutlineChartBar, HiOutlineDocumentText, HiOutlineCheckCircle, HiOutlineExclamationCircle,
+  HiOutlineOfficeBuilding, HiOutlineUserGroup,
 } from 'react-icons/hi';
 
 const navMap = {
+  super_admin: [
+    { to: '/admin', icon: HiOutlineHome, label: 'Dashboard' },
+    { to: '/admin/departments', icon: HiOutlineOfficeBuilding, label: 'Departments' },
+    { to: '/admin/department-admins', icon: HiOutlineUserGroup, label: 'Dept. Admins' },
+    { to: '/admin/students', icon: HiOutlineUsers, label: 'Students' },
+    { to: '/admin/lecturers', icon: HiOutlineAcademicCap, label: 'Lecturers' },
+    { to: '/admin/courses', icon: HiOutlineBookOpen, label: 'Courses' },
+    { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
+    { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
+    { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
+    { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
+    { to: '/admin/audit', icon: HiOutlineClipboardList, label: 'Global Audit Log' },
+    { to: '/admin/dead-letter', icon: HiOutlineExclamationCircle, label: 'Dead-Letter Jobs' },
+  ],
+  department_admin: [
+    { to: '/admin', icon: HiOutlineHome, label: 'Dashboard' },
+    { to: '/admin/students', icon: HiOutlineUsers, label: 'Students' },
+    { to: '/admin/lecturers', icon: HiOutlineAcademicCap, label: 'Lecturers' },
+    { to: '/admin/courses', icon: HiOutlineBookOpen, label: 'Courses' },
+    { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
+    { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
+    { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
+    { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
+    { to: '/admin/audit', icon: HiOutlineClipboardList, label: 'Audit Log' },
+    { to: '/admin/dead-letter', icon: HiOutlineExclamationCircle, label: 'Dead-Letter Jobs' },
+  ],
+  // Legacy "admin" role fallback — uses same nav as department_admin
   admin: [
     { to: '/admin', icon: HiOutlineHome, label: 'Dashboard' },
     { to: '/admin/students', icon: HiOutlineUsers, label: 'Students' },
@@ -18,7 +46,6 @@ const navMap = {
     { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
     { to: '/admin/audit', icon: HiOutlineClipboardList, label: 'Audit Log' },
     { to: '/admin/dead-letter', icon: HiOutlineExclamationCircle, label: 'Dead-Letter Jobs' },
-    // { to: '/admin/leaves', icon: HiOutlineClipboardList, label: 'Manage Leaves' },
   ],
   lecturer: [
     { to: '/lecturer', icon: HiOutlineHome, label: 'Dashboard' },
@@ -29,15 +56,20 @@ const navMap = {
     { to: '/student', icon: HiOutlineHome, label: 'Dashboard' },
     { to: '/student/attendance', icon: HiOutlineChartBar, label: 'Attendance' },
     { to: '/student/exams', icon: HiOutlineDocumentText, label: 'Exam Portal' },
-    // { to: '/student/leaves', icon: HiOutlineClipboardList, label: 'Leave Requests' },
   ],
 };
 
+// Determine the admin-level base path for sidebar "end" matching
+function getAdminBasePath(role) {
+  if (role === 'super_admin' || role === 'department_admin' || role === 'admin') return '/admin';
+  return `/${role}`;
+}
+
 export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen = true, onNavigate = () => {} }) {
-  const { user, logout } = useAuth();
+  const { user, logout, isSuperAdmin, isDepartmentAdmin, departmentName } = useAuth();
   const navigate = useNavigate();
   const role = user?.role || 'student';
-  const links = navMap[role] || [];
+  const links = navMap[role] || navMap['student'];
 
   const handleLogout = () => {
     logout();
@@ -49,6 +81,13 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
     ? safeName.split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
     : 'U';
   const textVisible = isMobile ? true : !isCollapsed;
+
+  // Build role display label
+  const roleLabel = (() => {
+    if (isSuperAdmin) return 'Super Admin';
+    if (isDepartmentAdmin) return 'Dept. Admin';
+    return role;
+  })();
 
   return (
     <aside
@@ -133,12 +172,17 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
               display: 'inline-block', marginTop: 6,
               fontSize: '0.65rem', fontWeight: 600,
               padding: '2px 10px', borderRadius: 999,
-              background: 'rgba(255,255,255,0.15)',
-              color: 'rgba(255,255,255,0.9)',
+              background: isSuperAdmin ? 'rgba(250,204,21,0.25)' : 'rgba(255,255,255,0.15)',
+              color: isSuperAdmin ? 'rgba(250,204,21,0.95)' : 'rgba(255,255,255,0.9)',
               textTransform: 'capitalize',
             }}>
-              {role}
+              {roleLabel}
             </span>
+            {isDepartmentAdmin && departmentName && (
+              <p style={{ fontSize: '0.62rem', color: 'var(--sidebar-text-muted)', marginTop: 4 }}>
+                {departmentName}
+              </p>
+            )}
         </div>
       </div>
 
@@ -148,7 +192,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
           <NavLink
             key={link.to}
             to={link.to}
-            end={link.to === `/${role}`}
+            end={link.to === getAdminBasePath(role)}
             onClick={onNavigate}
             title={isCollapsed ? link.label : undefined}
             style={({ isActive }) => ({

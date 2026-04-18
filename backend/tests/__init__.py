@@ -251,20 +251,33 @@ class BaseApiFlowTestCase(unittest.TestCase):
     def _build_seeded_client(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         admin_id = ObjectId()
+        dept_admin_id = ObjectId()
         lecturer_id = ObjectId()
         user_id = ObjectId()
         course_id = ObjectId()
         paper_id = ObjectId()
         audit_id = ObjectId()
+        dept_id = ObjectId()
 
         users = FakeCollection([
             {
                 "_id": admin_id,
-                "name": "System Admin",
+                "name": "Super Admin",
                 "email": "admin@system.com",
                 "password_hash": self._hash_password("admin123"),
-                "role": "admin",
+                "role": "super_admin",
                 "department": "Administration",
+                "department_id": None,
+                "must_change_password": False,
+            },
+            {
+                "_id": dept_admin_id,
+                "name": "Dept Admin",
+                "email": "deptadmin@system.com",
+                "password_hash": self._hash_password("deptadmin123"),
+                "role": "department_admin",
+                "department": "Computing",
+                "department_id": dept_id,
                 "must_change_password": False,
             },
             {
@@ -274,6 +287,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "password_hash": self._hash_password("lecturer123"),
                 "role": "lecturer",
                 "department": "Computing",
+                "department_id": dept_id,
                 "pin": "1234",
                 "must_change_password": False,
             },
@@ -284,6 +298,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "password_hash": self._hash_password("student123"),
                 "role": "student",
                 "department": "Computing",
+                "department_id": dept_id,
                 "must_change_password": False,
             },
         ])
@@ -294,9 +309,19 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "name": "Master of Computer Applications",
                 "code": "MCA",
                 "department": "Computing",
+                "department_id": dept_id,
                 "course_duration": 2,
                 "status": "active",
                 "year": "2026",
+            }
+        ])
+
+        departments_col = FakeCollection([
+            {
+                "_id": dept_id,
+                "name": "Computing",
+                "code": "COMP",
+                "status": "active",
             }
         ])
 
@@ -309,6 +334,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "lecturer_id": str(lecturer_id),
                 "semester": 1,
                 "total_classes": 2,
+                "department_id": dept_id,
             }
         ])
 
@@ -394,17 +420,19 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "exam_eligibility_overrides": FakeCollection([]),
             }
         )
-        academic = FakeDatabase({"student_profiles": student_profiles, "courses": courses, "papers": papers})
+        academic = FakeDatabase({"student_profiles": student_profiles, "courses": courses, "papers": papers, "departments": departments_col})
         auth = FakeDatabase({"users": users})
         audit = FakeDatabase({"audit_logs": audit_logs})
 
         return FakeMongoClient({"biometric_auth": auth, "biometric_academic": academic, "biometric_attendance_ops": attendance, "biometric_audit": audit}), {
             "admin_id": str(admin_id),
+            "dept_admin_id": str(dept_admin_id),
             "lecturer_id": str(lecturer_id),
             "user_id": str(user_id),
             "course_id": str(course_id),
             "paper_id": str(paper_id),
             "audit_id": str(audit_id),
+            "dept_id": str(dept_id),
         }
 
     def login(self, email, password):
@@ -422,7 +450,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
 class AuthFlowTests(BaseApiFlowTestCase):
     def test_login_me_and_change_password(self):
         login_payload = self.login("admin@system.com", "admin123")
-        self.assertEqual(login_payload["user"]["role"], "admin")
+        self.assertEqual(login_payload["user"]["role"], "super_admin")
         self.assertEqual(login_payload["user"]["email"], "admin@system.com")
 
         me_response = self.client.get("/api/auth/me")

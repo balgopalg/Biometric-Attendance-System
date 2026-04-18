@@ -6,6 +6,7 @@ import api from '../../api/axios';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
 import { getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
+import { useAuth } from '../../hooks/useAuth';
 
 const STICKY_ROLL_LEFT = 0;
 const STICKY_NAME_LEFT = 148;
@@ -64,13 +65,17 @@ function formatSubjectHeader(subject) {
 }
 
 export default function AttendanceMatrix() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+
   const [loading, setLoading] = useState(false);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [downloadingCsv, setDownloadingCsv] = useState(false);
+  const [departments, setDepartments] = useState([]);
   const [courses, setCourses] = useState([]);
   const [payload, setPayload] = useState({ dates: [], rows: [], meta: {}, options: {} });
   const [matrixError, setMatrixError] = useState('');
   const [filters, setFilters] = useState({
+    department_id: '',
     course_id: '',
     academic_session: '',
     semester: '',
@@ -96,11 +101,20 @@ export default function AttendanceMatrix() {
 
   const safeDates = useMemo(() => (Array.isArray(payload.dates) ? payload.dates : []), [payload.dates]);
   const safeRows = useMemo(() => (Array.isArray(payload.rows) ? payload.rows : []), [payload.rows]);
-  const isFilterComplete = Boolean(filters.course_id && filters.academic_session && filters.semester);
+  // Matrix renders as soon as dept+course are chosen; session/semester narrow it further
+  const isFilterComplete = Boolean(filters.course_id);
+  // Exports remain gated on full filter selection for meaningful data
+  const isExportReady = Boolean(filters.department_id && filters.course_id && filters.academic_session && filters.semester);
   const visibleDates = isFilterComplete ? safeDates : [];
   const visibleRows = isFilterComplete ? safeRows : [];
 
   const fetchMatrix = async (signal) => {
+    // For dept admins, always have department_id; super admins can browse all
+    if (!filters.course_id) {
+       setPayload({ dates: [], rows: [], meta: {}, options: {} });
+       setMatrixError('');
+       return;
+    }
     if (filters.from_date && filters.to_date && filters.from_date > filters.to_date) {
       const message = 'From date must be before or equal to To date';
       setMatrixError(message);
@@ -126,8 +140,19 @@ export default function AttendanceMatrix() {
   };
 
   useEffect(() => {
+    if (isSuperAdmin) {
+      api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    } else if (isDepartmentAdmin && departmentId && departmentName) {
+      setDepartments([{ _id: departmentId, name: departmentName }]);
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
+  }, [isSuperAdmin, isDepartmentAdmin, departmentId, departmentName]);
+
+  useEffect(() => {
     const controller = new AbortController();
-    api.get('/admin/courses', { signal: controller.signal })
+    const params = {};
+    if (filters.department_id) params.department_id = filters.department_id;
+    api.get('/admin/courses', { params, signal: controller.signal })
       .then((res) => {
         const items = Array.isArray(res.data?.items) ? res.data.items : (Array.isArray(res.data) ? res.data : []);
         setCourses(items);
@@ -139,7 +164,7 @@ export default function AttendanceMatrix() {
       });
 
     return () => controller.abort();
-  }, []);
+  }, [filters.department_id]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -255,15 +280,31 @@ export default function AttendanceMatrix() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <select
             className="input-field"
-            value={filters.course_id}
-            onChange={(e) => setFilters((prev) => ({ ...prev, course_id: e.target.value, semester: '' }))}
-            style={{ flex: '1 1 220px', maxWidth: 260 }}
+            value={filters.department_id}
+            onChange={(e) => setFilters((prev) => ({ ...prev, department_id: e.target.value, course_id: '', semester: '' }))}
+            style={{ flex: '1 1 200px', maxWidth: 240 }}
+            disabled={isDepartmentAdmin}
           >
-            <option value="">All Courses</option>
-            {activeCourses.map((c) => (
-              <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>
+            <option value="">
+              {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+            </option>
+            {departments.map((d) => (
+              <option key={d._id} value={d._id}>{d.name}</option>
             ))}
           </select>
+
+          <select
+             className="input-field"
+             value={filters.course_id}
+             onChange={(e) => setFilters((prev) => ({ ...prev, course_id: e.target.value, semester: '' }))}
+             style={{ flex: '1 1 220px', maxWidth: 260 }}
+             disabled={!filters.department_id}
+           >
+             <option value="">Select Course...</option>
+             {activeCourses.map((c) => (
+               <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>
+             ))}
+           </select>
 
           <select
             className="input-field"
@@ -308,7 +349,7 @@ export default function AttendanceMatrix() {
           <button
             className="btn-secondary"
             onClick={handleExportCsv}
-            disabled={downloadingCsv || !isFilterComplete}
+            disabled={downloadingCsv || !isExportReady}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
           >
             <HiOutlineDocumentDownload size={16} />
@@ -317,7 +358,7 @@ export default function AttendanceMatrix() {
           <button
             className="btn-primary"
             onClick={handleExportExcel}
-            disabled={downloadingExcel || !isFilterComplete}
+            disabled={downloadingExcel || !isExportReady}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
           >
             <HiOutlineDocumentDownload size={16} />
@@ -335,15 +376,15 @@ export default function AttendanceMatrix() {
           <StatePanel variant="error" title="Unable to load attendance matrix" description={matrixError} actionLabel="Retry" onAction={() => fetchMatrix()} compact />
         ) : null}
 
-        {isFilterComplete && !loading && !matrixError && visibleRows.length === 0 ? (
-          <StatePanel variant="empty" title="No attendance records found" description="No sessions match this course/session/semester combination." compact />
+        {!loading && !matrixError && isFilterComplete && visibleRows.length === 0 ? (
+          <StatePanel variant="empty" title="No attendance records found" description="No sessions match the selected filters." compact />
         ) : null}
 
         {!isFilterComplete ? (
           <StatePanel
             variant="empty"
-            title="Select required filters"
-            description="Choose course, academic session, and semester to display the matrix."
+            title="Select a Course"
+            description="Choose a course (and optionally session/semester) to display the attendance matrix."
             compact
           />
         ) : null}

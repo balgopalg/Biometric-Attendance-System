@@ -6,8 +6,11 @@ import { HiOutlineShieldCheck } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { useAuth } from '../../hooks/useAuth';
 
 export default function ExamEligibility() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+
   const [courses, setCourses] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -15,7 +18,9 @@ export default function ExamEligibility() {
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [search, setSearch] = useState('');
+  const [departments, setDepartments] = useState([]);
   const [filters, setFilters] = useState({
+    department_id: '',
     course_id: '',
     academic_session: '',
     semester: '',
@@ -30,10 +35,27 @@ export default function ExamEligibility() {
   );
 
   const fetchMeta = () => {
-    api.get('/admin/courses').then((r) => setCourses(r.data || [])).catch(() => setCourses([]));
+    if (isSuperAdmin) {
+      api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    } else if (isDepartmentAdmin && departmentId && departmentName) {
+      setDepartments([{ _id: departmentId, name: departmentName }]);
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
   };
 
+  useEffect(() => {
+    const params = {};
+    if (filters.department_id) params.department_id = filters.department_id;
+    api.get('/admin/courses', { params }).then((r) => setCourses(r.data || [])).catch(() => setCourses([]));
+  }, [filters.department_id]);
+
   const fetchEligibility = (signal, activeFilters = filters, activeSearch = search) => {
+    // Dept admins always have department_id set; super admins fetch all by default
+    if (isDepartmentAdmin && !activeFilters.department_id) {
+      setRows([]);
+      setEligibilityError('');
+      return;
+    }
     setLoading(true);
     setEligibilityError('');
     const params = { ...activeFilters };
@@ -307,6 +329,49 @@ export default function ExamEligibility() {
     );
   }
 
+  if (!loading && !eligibilityError && rows.length === 0 && isDepartmentAdmin && !filters.department_id) {
+    return (
+      <div className="admin-page">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Exam Eligibility</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 3 }}>
+              Filter and manage exam eligibility overrides.
+            </p>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: 18, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+            <select
+              className="input-field"
+              value={filters.department_id}
+              onChange={(e) => setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '', final_eligible: '' })}
+              disabled={isDepartmentAdmin}
+            >
+              <option value="">
+                {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+              </option>
+              {departments.map((d) => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </select>
+            <select
+              className="input-field"
+              value={filters.course_id}
+              onChange={(e) => setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '', final_eligible: '' })}
+              disabled={!filters.department_id}
+            >
+              <option value="">Select Course...</option>
+              {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
+            </select>
+          </div>
+        </div>
+        <StatePanel variant="empty" title="No Records" description="No exam eligibility records found. Adjust filters or add students." compact />
+      </div>
+    );
+  }
+
   return (
     <div className="admin-page">
 
@@ -344,13 +409,26 @@ export default function ExamEligibility() {
 
           <select
             className="input-field"
+            value={filters.department_id}
+            onChange={(e) => setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '', final_eligible: '' })}
+            disabled={isDepartmentAdmin}
+          >
+            <option value="">
+              {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+            </option>
+            {departments.map((d) => (
+              <option key={d._id} value={d._id}>{d.name}</option>
+            ))}
+          </select>
+
+          <select
+            className="input-field"
             value={filters.course_id}
-            onChange={(e) => setFilters({
-              ...filters,
-              course_id: e.target.value,
-              academic_session: '',
-              semester: '',
-            })}
+            onChange={(e) => {
+              setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '' });
+              setSelectedStudentIds([]);
+            }}
+            disabled={!filters.department_id}
           >
             <option value="">All Courses</option>
             {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}

@@ -70,7 +70,25 @@ from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, normalize_embedding
 from app.services.capture_upload import capture_faces_for_user, save_student_upload, save_cropped_face_dataset
 from utilities.train_model import train_and_save_face_model
-from app.utils.auth_decorators import role_required, validate_ids
+from app.utils.auth_decorators import role_required, super_admin_required, validate_ids
+from app.security.rbac import (
+    dept_scope_filter,
+    is_super_admin,
+    is_any_admin,
+    validate_department_access,
+    validate_role_assignment,
+    get_user_department_id,
+    ADMIN_ROLES,
+)
+from app.models.department import (
+    create_department,
+    get_all_departments,
+    get_department_by_id,
+    get_department_by_code,
+    update_department,
+    delete_department as soft_delete_department,
+    hard_delete_department,
+)
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
 from app.utils.timezone import india_timestamp_token
 from app.utils.validation import validate_password_strength
@@ -99,6 +117,23 @@ _AUDIT_EXCLUDED_ACTIONS = [
     "student_profiles_bulk_read",
 ]
 
+
+# ---------------------------------------------------------------------------
+# Department scoping helpers
+# ---------------------------------------------------------------------------
+
+def _dept_filter(user):
+    """Build a MongoDB query filter for department-level data isolation.
+
+    • super_admin → {} (all data) unless they pass ?department_id=…
+    • department_admin / lecturer → {department_id: <their dept>}
+    """
+    return dept_scope_filter(user)
+
+
+def _user_dept_id(user):
+    """Return the user's department_id as ObjectId (or None for super_admin)."""
+    return get_user_department_id(user)
 
 def _get_paginated_data(collection, filter_query, page=1, per_page=10, sort=None, project=None):
     """Refactored pagination helper to ensure consistency across all admin routes."""
@@ -1033,10 +1068,17 @@ def _paginate_items(items):
 
 # ─── Courses ────────────────────────────────────────────────────────────────
 
+
 @admin_bp.route("/courses", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def list_courses(user):
-    courses = sanitise_many(get_all_courses(["name", "code", "department", "course_duration", "status"]))
+    # Unified department filter logic
+    dept_id = None
+    if is_super_admin(user):
+        dept_id = _as_text(request.args.get("department_id", "")).strip() or None
+    else:
+        dept_id = _user_dept_id(user)
+    courses = sanitise_many(get_all_courses(["name", "code", "department", "course_duration", "status", "department_id"], department_id=dept_id))
     q = _as_text(request.args.get("q", "")).lower()
     course_duration = _as_text(request.args.get("course_duration", ""))
     status = _as_text(request.args.get("status", "")).lower()
@@ -1060,16 +1102,24 @@ def list_courses(user):
 
 
 @admin_bp.route("/courses", methods=["POST"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def add_course(user):
     d = request.get_json(silent=True) or {}
     if not d.get("name") or not d.get("code") or not d.get("course_duration"):
         return jsonify({"error": "name, code and course_duration are required"}), 400
+    # Resolve department_id: dept admins use their own, super admins may pass in body
+    dept_id = None
+    body_dept_id = _as_text(d.get("department_id", "")).strip()
+    if is_super_admin(user):
+        dept_id = body_dept_id or None
+    else:
+        dept_id = _user_dept_id(user)
     course = create_course(
         d["name"],
         d["code"],
         d.get("department", ""),
         _to_int(d.get("course_duration"), 0),
+        department_id=dept_id,
     )
     log_action(
         "CREATE_COURSE",
@@ -1082,7 +1132,7 @@ def add_course(user):
 
 
 @admin_bp.route("/courses/<cid>/semesters", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def list_course_semesters(user, cid):
     """Return available semesters for a course (duration-derived + paper-derived)."""
     course = _safe_get_course(cid)
@@ -1105,7 +1155,7 @@ def list_course_semesters(user, cid):
 
 
 @admin_bp.route("/courses/<cid>", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("cid")
 def get_course_details(user, cid):
     course = get_course_by_id(cid)
@@ -1115,7 +1165,7 @@ def get_course_details(user, cid):
 
 
 @admin_bp.route("/courses/<cid>/sessions", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def list_course_sessions(user, cid):
     """Return distinct academic sessions for a course."""
     course = _safe_get_course(cid)
@@ -1184,7 +1234,7 @@ def _normalise_course_semester(course_id, semester):
 
 
 @admin_bp.route("/courses/<cid>", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("cid")
 def edit_course(user, cid):
     d = request.get_json(silent=True) or {}
@@ -1233,7 +1283,7 @@ def edit_course(user, cid):
 
 
 @admin_bp.route("/courses/<cid>", methods=["DELETE"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("cid")
 def remove_course(user, cid):
     previous = get_course_by_id(cid)
@@ -1267,19 +1317,35 @@ def remove_course(user, cid):
 # ─── Papers ─────────────────────────────────────────────────────────────────
 
 @admin_bp.route("/papers", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def list_papers(user):
-    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at"])
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
-    lecturers = sanitise_many(get_users_by_role("lecturer"))
+    dept_id = None
+    if is_super_admin(user):
+        dept_id = _as_text(request.args.get("department_id", "")).strip() or None
+    else:
+        dept_id = _user_dept_id(user)
+    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at", "department_id"], department_id=dept_id)
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year", "department_id"], department_id=dept_id))
+    lecturers = sanitise_many(get_users_by_role("lecturer", department_id=dept_id))
     course_map = {c["_id"]: c for c in courses}
     lecturer_map = {l["_id"]: l for l in lecturers}
 
+    department_filter = _as_text(request.args.get("department", ""))
     q = _as_text(request.args.get("q", "")).lower()
     course_id = _as_text(request.args.get("course_id", ""))
     lecturer_id = _as_text(request.args.get("lecturer_id", ""))
     semester = _as_text(request.args.get("semester", ""))
     academic_year = _normalise_year(request.args.get("academic_year", ""))
+
+    # Filter by department name on the associated course
+    if department_filter:
+        dept_course_ids = {
+            c["_id"] for c in courses
+            if _as_text(c.get("department") or "").lower() == department_filter.lower()
+        }
+        # Restrict course_map and papers to matching department courses
+        course_map = {cid: c for cid, c in course_map.items() if cid in dept_course_ids}
+        papers = [p for p in papers if p.get("course_id") in dept_course_ids]
 
     result = []
     for paper in papers:
@@ -1305,7 +1371,7 @@ def list_papers(user):
 
 
 @admin_bp.route("/papers/<pid>", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("pid")
 def get_paper_details(user, pid):
     paper = get_paper_by_id(pid)
@@ -1315,7 +1381,7 @@ def get_paper_details(user, pid):
 
 
 @admin_bp.route("/papers", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def add_paper(user):
     d = request.get_json(silent=True) or {}
     if not d.get("name") or not d.get("code") or not d.get("course_id") or not d.get("lecturer_id") or not d.get("semester"):
@@ -1332,6 +1398,7 @@ def add_paper(user):
         d.get("lecturer_id") or None,
         semester,
         d.get("total_classes", 0),
+        department_id=_user_dept_id(user),
     )
     log_action(
         "CREATE_PAPER",
@@ -1344,7 +1411,7 @@ def add_paper(user):
 
 
 @admin_bp.route("/papers/<pid>", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("pid")
 def edit_paper(user, pid):
     d = request.get_json(silent=True) or {}
@@ -1381,7 +1448,7 @@ def edit_paper(user, pid):
 
 
 @admin_bp.route("/papers/<pid>", methods=["DELETE"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("pid")
 def remove_paper(user, pid):
     previous = get_paper_by_id(pid)
@@ -1404,7 +1471,7 @@ def remove_paper(user, pid):
 
 
 @admin_bp.route("/papers/bulk-assign", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def bulk_assign(user):
     """Assign multiple papers to a lecturer or course in one click."""
     d = request.get_json(silent=True) or {}
@@ -1491,7 +1558,7 @@ def bulk_assign(user):
 
 
 @admin_bp.route("/lecturers/<lid>/papers", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def get_lecturer_papers(user, lid):
     papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at"])
     courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
@@ -1505,7 +1572,7 @@ def get_lecturer_papers(user, lid):
 
 
 @admin_bp.route("/lecturers/<lid>/papers", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 def set_lecturer_papers(user, lid):
     d = request.get_json(silent=True) or {}
     paper_ids = set(d.get("paper_ids") or [])
@@ -1543,17 +1610,31 @@ def set_lecturer_papers(user, lid):
 # ─── Lecturers ──────────────────────────────────────────────────────────────
 
 @admin_bp.route("/lecturers", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def list_lecturers(user):
-    lecturers = sanitise_many(get_users_by_role("lecturer"))
+    dept_id = None
+    if is_super_admin(user):
+        dept_id = _as_text(request.args.get("department_id", "")).strip() or None
+    else:
+        dept_id = _user_dept_id(user)
+    lecturers = sanitise_many(get_users_by_role("lecturer", department_id=dept_id))
     papers = sanitise_many(get_all_papers(["name", "code", "lecturer_id", "course_id", "semester", "total_classes", "created_at"]))
     courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
     course_map = {c["_id"]: c for c in courses}
 
+    department_filter = _as_text(request.args.get("department", ""))
     q = _as_text(request.args.get("q", "")).lower()
     course_id = _as_text(request.args.get("course_id", ""))
     semester = _as_text(request.args.get("semester", ""))
     paper_id = _as_text(request.args.get("paper_id", ""))
+
+    # Filter by department name on courses assigned to the lecturer
+    if department_filter:
+        dept_course_ids = {
+            c["_id"] for c in courses
+            if _as_text(c.get("department") or "").lower() == department_filter.lower()
+        }
+        papers = [p for p in papers if p.get("course_id") in dept_course_ids]
     academic_year = _normalise_year(request.args.get("academic_year", ""))
 
     result = []
@@ -1599,7 +1680,7 @@ def list_lecturers(user):
 
 
 @admin_bp.route("/lecturers", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def add_lecturer(user):
     d = request.get_json(silent=True) or {}
     initial_password = str(d.get("initial_password", "")).strip()
@@ -1612,7 +1693,8 @@ def add_lecturer(user):
 
     lec = create_user(d["name"], d["email"], initial_password,
                       "lecturer", d.get("department", ""),
-                      must_change_password=True)
+                      must_change_password=True,
+                      department_id=_user_dept_id(user))
     log_action(
         "CREATE_LECTURER",
         str(user["_id"]),
@@ -1649,7 +1731,7 @@ def add_lecturer(user):
 
 
 @admin_bp.route("/lecturers/<lid>", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("lid")
 def edit_lecturer(user, lid):
     d = request.get_json(silent=True) or {}
@@ -1666,7 +1748,7 @@ def edit_lecturer(user, lid):
 
 
 @admin_bp.route("/lecturers/<lid>", methods=["DELETE"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("lid")
 def remove_lecturer(user, lid):
     previous = find_user_by_id(lid)
@@ -1682,7 +1764,7 @@ def remove_lecturer(user, lid):
 
 
 @admin_bp.route("/lecturers/<lid>/reset-password", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def reset_lecturer_password(user, lid):
     d = request.get_json(silent=True) or {}
     temp_password = reset_user_password(lid, temp_password=str(d.get("temp_password", "")).strip() or None)
@@ -1718,7 +1800,7 @@ def reset_lecturer_password(user, lid):
 
 
 @admin_bp.route("/lecturers/<lid>/reset-pin", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("lid")
 def reset_lecturer_pin(user, lid):
     new_pin = f"{secrets.randbelow(10000):04d}"
@@ -1729,7 +1811,7 @@ def reset_lecturer_pin(user, lid):
 
 
 @admin_bp.route("/lecturers/<lid>/pin", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("lid")
 def update_lecturer_pin(user, lid):
     return jsonify({"error": "Admins cannot set lecturer PIN. Lecturer must manage PIN from dashboard."}), 403
@@ -1738,17 +1820,30 @@ def update_lecturer_pin(user, lid):
 # ─── Students ───────────────────────────────────────────────────────────────
 
 @admin_bp.route("/students", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
+
 def list_students(user):
     page = max(1, _to_int(request.args.get("page", 1), 1))
     per_page = max(1, min(_to_int(request.args.get("per_page", 20), 20), 100))
     skip = (page - 1) * per_page
 
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
+    # Scope courses to department for department admins
+    dept_id = None
+    dept_filter_id = _as_text(request.args.get("department_id", ""))  # from super admin filter
+    if is_super_admin(user):
+        dept_id = dept_filter_id or None
+    else:
+        dept_id = _user_dept_id(user)
+
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year", "department_id"], department_id=dept_id))
     papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id"]))
     course_map = {c.get("_id"): c for c in courses}
     paper_map = {p.get("_id"): p for p in papers}
 
+    # Set of course IDs visible to this user (enforces dept isolation)
+    visible_course_ids = set(course_map.keys())
+
+    department_filter = _as_text(request.args.get("department", ""))
     q = _as_text(request.args.get("q", "")).lower()
     course_id = _as_text(request.args.get("course_id", ""))
     paper_id = _as_text(request.args.get("paper_id", ""))
@@ -1760,6 +1855,21 @@ def list_students(user):
     users_col = get_collection("auth", "users")
 
     filters = []
+
+    # Always restrict to courses visible to this user (dept admin isolation)
+    filters.append({"course_id": {"$in": list(visible_course_ids)}})
+
+    # Filter by department name (super admin picks a specific dept from the dropdown)
+    if department_filter:
+        dept_course_ids = [
+            _as_text(c.get("_id"))
+            for c in courses
+            if _as_text(c.get("department") or "").lower() == department_filter.lower()
+        ]
+        if dept_course_ids:
+            filters.append({"course_id": {"$in": dept_course_ids}})
+        else:
+            filters.append({"course_id": "never_match"})
     if course_id:
         filters.append({"course_id": course_id})
     if paper_id:
@@ -1843,8 +1953,8 @@ def list_students(user):
             item["name"] = u["name"]
             item["email"] = u["email"]
 
-        item["reg_number"] = item.get("reg_number") or item.get("roll_number")
-        enrollment_year = item.get("enrollment_year") or (item.get("created_at") or datetime.now(timezone.utc)).year
+        item["reg_number"] = item.get("reg_number") or item.get("roll_number") or item.get("reg_number")
+        enrollment_year = item.get("enrollment_year") or (p.get("created_at") or datetime.now(timezone.utc)).year
         duration_years = _to_int((course or {}).get("course_duration"), 1)
         item["academic_session"] = (
             _as_text(item.get("academic_session"))
@@ -1872,7 +1982,6 @@ def list_students(user):
             for pid in enrolled_papers
         ]
 
-
         # Don't send raw embeddings to the frontend
         item.pop("face_embeddings", None)
         result.append(item)
@@ -1888,20 +1997,49 @@ def list_students(user):
 
 
 @admin_bp.route("/students/options", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def student_options(user):
     """Return a lightweight student list for select inputs and lookups."""
     course_id = _as_text(request.args.get("course_id", ""))
+    department_filter = _as_text(request.args.get("department", ""))
+    department_id_filter = _as_text(request.args.get("department_id", ""))
     academic_session = _as_text(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
     semester = _as_text(request.args.get("semester", ""))
     q = _as_text(request.args.get("q", "")).lower()
     limit = max(1, min(_to_int(request.args.get("limit", 200), 200), 500))
     include_inactive = _to_bool(request.args.get("include_inactive", False))
 
+    # Build dept scope for isolation
+    if is_super_admin(user):
+        dept_scope_id = department_id_filter or None
+    else:
+        dept_scope_id = _user_dept_id(user)
+
+    scoped_courses = sanitise_many(get_all_courses(["department"], department_id=dept_scope_id))
+    visible_course_ids = [_as_text(c.get("_id")) for c in scoped_courses]
+
     profiles_col = get_collection("academic", "student_profiles")
     query = {}
+
+    # Always restrict to visible courses (enforces dept isolation)
+    query["course_id"] = {"$in": visible_course_ids}
+    
+    if department_filter:
+        dept_course_ids = [
+            _as_text(c.get("_id"))
+            for c in scoped_courses
+            if _as_text(c.get("department") or "").lower() == department_filter.lower()
+        ]
+        query["course_id"] = {"$in": dept_course_ids} if dept_course_ids else "never_match"
+        
     if course_id:
-        query["course_id"] = course_id
+        if "course_id" in query and isinstance(query["course_id"], dict) and "$in" in query["course_id"]:
+            if course_id in query["course_id"]["$in"]:
+                query["course_id"] = course_id
+            else:
+                query["course_id"] = "never_match"
+        else:
+            query["course_id"] = course_id
     if academic_session:
         query["$or"] = [
             {"academic_session": academic_session},
@@ -1986,7 +2124,7 @@ def student_options(user):
 
 
 @admin_bp.route("/students", methods=["POST"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def add_student(user):
     d = request.get_json(silent=True) or {}
     required_fields = ["name", "email", "course_id"]
@@ -2026,6 +2164,7 @@ def add_student(user):
             "student",
             d.get("department", (course or {}).get("department", "")),
             must_change_password=True,
+            department_id=_user_dept_id(user) or (course or {}).get("department_id"),
         )
     except Exception as exc:
         current_app.logger.exception("User creation failed")
@@ -2123,7 +2262,7 @@ def add_student(user):
 
 
 @admin_bp.route("/students/<sid>", methods=["PUT"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 @validate_ids("sid")
 def edit_student(user, sid):
     d = request.get_json(silent=True) or {}
@@ -2222,7 +2361,7 @@ def edit_student(user, sid):
 
 
 @admin_bp.route("/students/<sid>", methods=["DELETE"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 @validate_ids("sid")
 def remove_student(user, sid):
     user_id, _ = _resolve_user_identity(sid)
@@ -2259,7 +2398,7 @@ def remove_student(user, sid):
 
 @admin_bp.route("/students/bulk-promote", methods=["POST"])
 @admin_bp.route("/student-bulk-promote", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def bulk_promote_students(user):
     """Promote selected students to the next semester."""
     d = request.get_json(silent=True) or {}
@@ -2338,7 +2477,7 @@ def bulk_promote_students(user):
 # ─── Excel Import ────────────────────────────────────────────────────────────
 
 @admin_bp.route("/students/import-excel", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def import_students_excel(user):
     """Bulk-import students from an uploaded Excel file.
 
@@ -2522,7 +2661,7 @@ def import_students_excel(user):
 
 
 @admin_bp.route("/lecturers/import-excel", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def import_lecturers_excel(user):
     """Bulk-import lecturers from an uploaded Excel file.
 
@@ -2642,7 +2781,7 @@ def _generate_import_temp_password(length=14):
 
 
 @admin_bp.route("/students/<sid>/reset-password", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("sid")
 def reset_student_password(user, sid):
     user_id, _ = _resolve_user_identity(sid)
@@ -2685,7 +2824,7 @@ def reset_student_password(user, sid):
 # ─── Student Enrollment (Photo → Embedding) ────────────────────────────────
 
 @admin_bp.route("/students/enroll", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def enroll_student_face(user):
     """Accept a student photo, extract FaceNet embedding, and store it."""
     d = request.get_json(silent=True) or {}
@@ -2789,7 +2928,7 @@ def enroll_student_face(user):
 
 
 @admin_bp.route("/students/upload-photo", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def upload_student_photo(user):
     """Upload and store a single student photo in uploads folder."""
     student_name = _as_text(request.form.get("student_name", ""))
@@ -3081,7 +3220,7 @@ def _rebuild_all_faces_job(actor_id, job_id=None):
 @admin_bp.route("/students/<sid>/train-face", methods=["POST"])
 @admin_bp.route("/students/<sid>/train", methods=["POST"])
 @admin_bp.route("/student/<sid>/train-face", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 @validate_ids("sid")
 def train_face_from_dataset(user, sid):
     """Train student face embeddings from dataset/<user_id> images and save to DB."""
@@ -3132,7 +3271,7 @@ def train_face_from_dataset(user, sid):
 
 @admin_bp.route("/students/train-face/bulk", methods=["POST"])
 @admin_bp.route("/students/bulk-train-face", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def bulk_train_face_from_dataset(user):
     """Train face embeddings in bulk for selected students from their dataset folders."""
     d = request.get_json(silent=True) or {}
@@ -3174,7 +3313,7 @@ def bulk_train_face_from_dataset(user):
 
 
 @admin_bp.route("/students/train-face/rebuild-all", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def rebuild_all_face_embeddings(user):
     """Rebuild face embeddings for every student profile from their dataset folders."""
     d = request.get_json(silent=True) or {}
@@ -3211,7 +3350,7 @@ def rebuild_all_face_embeddings(user):
 
 
 @admin_bp.route("/jobs/<job_id>", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def get_job_status(user, job_id):
     job = _get_background_job(job_id)
     if not job:
@@ -3219,7 +3358,7 @@ def get_job_status(user, job_id):
     return jsonify(sanitise_mongo_doc(job))
 
 @admin_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def cancel_background_job(user, job_id):
     job = _get_background_job(job_id)
     if not job:
@@ -3264,7 +3403,7 @@ def cancel_background_job(user, job_id):
 
 
 @admin_bp.route("/jobs/<job_id>/replay", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def replay_dead_letter_job(user, job_id):
     jobs = get_collection("attendance", "background_jobs")
     job = jobs.find_one({"job_id": job_id})
@@ -3411,7 +3550,7 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
 
 
 @admin_bp.route("/jobs/dead-letter", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def list_dead_letter_jobs(user):
     filters = {
         "q": request.args.get("q", ""),
@@ -3442,7 +3581,7 @@ def list_dead_letter_jobs(user):
 
 
 @admin_bp.route("/jobs/dead-letter/replay-bulk", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def replay_dead_letter_jobs_bulk(user):
     d = request.get_json(silent=True) or {}
     raw_ids = d.get("job_ids") or []
@@ -3475,7 +3614,7 @@ def replay_dead_letter_jobs_bulk(user):
 
 
 @admin_bp.route("/jobs/dead-letter/replay-filtered", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def replay_dead_letter_jobs_filtered(user):
     d = request.get_json(silent=True) or {}
     filters = {
@@ -3529,7 +3668,7 @@ def replay_dead_letter_jobs_filtered(user):
 
 
 @admin_bp.route("/jobs/metrics", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def get_job_metrics(user):
     jobs = get_collection("attendance", "background_jobs")
     summary = {
@@ -3635,7 +3774,7 @@ def get_job_metrics(user):
 
 
 @admin_bp.route("/capture-faces", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def capture_faces_dataset(user):
     """Capture webcam dataset images for a named user into dataset/<user_name>."""
     d = request.get_json(silent=True) or {}
@@ -3672,7 +3811,7 @@ def capture_faces_dataset(user):
 
 
 @admin_bp.route("/courses/reassign", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def reassign_course_entities(user):
     """Batch move students/papers from one course to another active course."""
     d = request.get_json(silent=True) or {}
@@ -3731,8 +3870,10 @@ def reassign_course_entities(user):
 
 # ─── Audit Trail ────────────────────────────────────────────────────────────
 
+_AUDIT_EXCLUDED_ACTIONS = ["HEARTBEAT", "QUEUE_CHECK", "STATUS_CHECK"]
+
 @admin_bp.route("/audit-logs", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def list_audit_logs(user):
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 50, type=int)
@@ -3769,7 +3910,60 @@ def list_audit_logs(user):
     else:
         filters = {"action": {"$nin": _AUDIT_EXCLUDED_ACTIONS}}
 
-    logs, total = get_audit_logs(page, per_page, filters)
+    dept_id_param = _as_text(request.args.get("department_id", ""))
+
+    if is_super_admin(user):
+        # Super admin: optionally scope to a department by ID
+        dept_filter_id = None
+        if dept_id_param:
+            try:
+                dept_filter_id = ObjectId(dept_id_param)
+            except Exception:
+                pass
+        if dept_filter_id:
+            # Get all user IDs in this department to filter logs
+            users_col = get_collection("auth", "users")
+            dept_user_ids = [
+                str(u["_id"])
+                for u in users_col.find({"department_id": dept_filter_id}, {"_id": 1})
+            ]
+            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
+            all_user_id_variants = dept_user_ids + dept_user_ids_oids  # type: ignore[operator]
+            dept_user_filter = {"$or": [
+                {"performed_by": {"$in": all_user_id_variants}},
+                {"target_user": {"$in": all_user_id_variants}},
+                {"department_id": dept_filter_id},
+            ]}
+            if "$and" in filters:
+                filters["$and"].append(dept_user_filter)
+            elif filters:
+                filters = {"$and": [filters, dept_user_filter]}
+            else:
+                filters = dept_user_filter
+        logs, total = get_audit_logs(page, per_page, filters, department_id=None)
+    else:
+        # Department admin: locked to their own department — fetch dept user IDs
+        user_dept_id = _user_dept_id(user)
+        if user_dept_id:
+            users_col = get_collection("auth", "users")
+            dept_user_ids = [
+                str(u["_id"])
+                for u in users_col.find({"department_id": user_dept_id}, {"_id": 1})
+            ]
+            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
+            all_user_id_variants = dept_user_ids + dept_user_ids_oids  # type: ignore[operator]
+            dept_user_filter = {"$or": [
+                {"performed_by": {"$in": all_user_id_variants}},
+                {"target_user": {"$in": all_user_id_variants}},
+                {"department_id": user_dept_id},
+            ]}
+            if "$and" in filters:
+                filters["$and"].append(dept_user_filter)
+            elif filters:
+                filters = {"$and": [filters, dept_user_filter]}
+            else:
+                filters = dept_user_filter
+        logs, total = get_audit_logs(page, per_page, filters, department_id=None)
     audit_user_ids = [
         item.get("performed_by") or item.get("actor_user_id")
         for item in logs
@@ -3785,18 +3979,25 @@ def list_audit_logs(user):
 
     enriched = []
     for raw in logs:
+        # We start with a copy for serialisation
         item = sanitise_mongo_doc(raw)
 
-        actor_id = item.get("performed_by") or item.get("actor_user_id")
-        details_user_id = (item.get("details") or {}).get("user_id") if isinstance(item.get("details"), dict) else None
-        target_user_id = item.get("target_user") or details_user_id
+        # Re-fetch raw versions for local logic that requires datetime objects
+        raw_ts = raw.get("timestamp")
+        raw_rollback_until = raw.get("rollback_until")
+        raw_rollback_payload = raw.get("rollback")
+        raw_rolled_back = bool(raw.get("rolled_back"))
+
+        actor_id = raw.get("performed_by") or raw.get("actor_user_id")
+        details_user_id = (raw.get("details") or {}).get("user_id") if isinstance(raw.get("details"), dict) else None
+        target_user_id = raw.get("target_user") or details_user_id
 
         actor = user_map.get(_as_text(actor_id)) if actor_id else None
         target_user = user_map.get(_as_text(target_user_id)) if target_user_id else None
 
         item["actor_name"] = (actor or {}).get("name") or ("System" if str(actor_id).lower() == "system" else "Unknown User")
         item["actor_email"] = (actor or {}).get("email") or ""
-        item["role"] = (actor or {}).get("role") or item.get("role") or "unknown"
+        item["role"] = (actor or {}).get("role") or raw.get("role") or "unknown"
 
         if target_user:
             item["target_type"] = f"{target_user.get('name', 'Unknown')} ({target_user.get('role', 'user')})"
@@ -3806,43 +4007,33 @@ def list_audit_logs(user):
         elif target_user_id:
             item["target_type"] = f"User {target_user_id}"
         else:
-            item["target_type"] = item.get("details") or "System"
+            item["target_type"] = _as_text(raw.get("details")) or "System"
 
-        item["ip"] = item.get("ip") or item.get("ip_address") or ""
+        item["ip"] = raw.get("ip") or raw.get("ip_address") or ""
 
-        rollback_payload = item.get("rollback")
-        ts = item.get("timestamp")
-        rollback_until = item.get("rollback_until")
+        # Handle time-sensitive rollback logic on raw datetime objects
+        if raw_ts and raw_ts.tzinfo is None:
+            raw_ts = raw_ts.replace(tzinfo=timezone.utc)
+        
+        if raw_rollback_payload and not raw_rollback_until and raw_ts:
+            raw_rollback_until = raw_ts + timedelta(days=1)
+        
+        if raw_rollback_until and raw_rollback_until.tzinfo is None:
+            raw_rollback_until = raw_rollback_until.replace(tzinfo=timezone.utc)
 
-        # Ensure ts is timezone-aware if present
-        if ts and ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-
-        if rollback_payload and not rollback_until and ts:
-            rollback_until = ts + timedelta(days=1)
-            item["rollback_until"] = rollback_until
-
-        rolled_back = bool(item.get("rolled_back"))
         now = datetime.now(timezone.utc)
+        eligible = bool(raw_rollback_payload) and not raw_rolled_back and bool(raw_rollback_until) and now <= raw_rollback_until
 
-        # Ensure rollback_until is timezone-aware for comparison with 'now'
-        if rollback_until and rollback_until.tzinfo is None:
-            rollback_until = rollback_until.replace(tzinfo=timezone.utc)
-
-        eligible = bool(rollback_payload) and not rolled_back and bool(rollback_until) and now <= rollback_until
         item["rollback_available"] = eligible
-        item["rolled_back"] = rolled_back
+        item["rolled_back"] = raw_rolled_back
+        if raw_rollback_until:
+            item["rollback_until"] = raw_rollback_until.isoformat()
 
-        # Ensure IDs are stringified for JSON serialization
-        if "performed_by" in item:
-            item["performed_by"] = _as_text(item["performed_by"])
-        if "target_user" in item:
-            item["target_user"] = _as_text(item["target_user"])
+        # Ensure IDs are stringified
+        item["performed_by"] = _as_text(actor_id) if actor_id else None
+        item["target_user"] = _as_text(target_user_id) if target_user_id else None
 
-        # Raw rollback payload may contain nested ObjectIds/documents used internally
-        # for rollback execution and is not needed by UI list rendering.
         item.pop("rollback", None)
-
         enriched.append(item)
 
     return jsonify({
@@ -3854,7 +4045,7 @@ def list_audit_logs(user):
 
 
 @admin_bp.route("/audit-logs/<log_id>/rollback", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def rollback_audit_action(user, log_id):
     audit_log = get_audit_log_by_id(log_id)
     if not audit_log:
@@ -3868,8 +4059,18 @@ def rollback_audit_action(user, log_id):
         return jsonify({"error": "Rollback not available for this action"}), 400
 
     rollback_until = audit_log.get("rollback_until")
+    raw_ts = audit_log.get("timestamp")
+
+    # Normalize timestamp for derivation if needed
+    if raw_ts and raw_ts.tzinfo is None:
+        raw_ts = raw_ts.replace(tzinfo=timezone.utc)
+
     if not rollback_until:
-        rollback_until = (audit_log.get("timestamp") or datetime.now(timezone.utc)) + timedelta(days=1)
+        rollback_until = (raw_ts or datetime.now(timezone.utc)) + timedelta(days=1)
+
+    # Normalize rollback_until for comparison
+    if rollback_until and rollback_until.tzinfo is None:
+        rollback_until = rollback_until.replace(tzinfo=timezone.utc)
 
     if datetime.now(timezone.utc) > rollback_until:
         return jsonify({"error": "Rollback window expired (1 day)"}), 403
@@ -3892,7 +4093,7 @@ def rollback_audit_action(user, log_id):
 # ─── Attendance Override ────────────────────────────────────────────────────
 
 @admin_bp.route("/attendance/override", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def override_attendance(user):
     """Manually add or remove an attendance record (Special Exam Access)."""
     d = request.get_json(silent=True) or {}
@@ -3918,7 +4119,7 @@ def override_attendance(user):
 
 
 @admin_bp.route("/exam-eligibility-summary", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def exam_eligibility_summary(user):
     """Admin view of exam eligibility with filters and override states."""
     cache_key = (
@@ -3929,6 +4130,8 @@ def exam_eligibility_summary(user):
     if cached_payload is not None:
         return jsonify(cached_payload)
 
+    department_filter = _as_text(request.args.get("department", ""))
+    department_id_filter = _as_text(request.args.get("department_id", ""))
     course_id = _as_text(request.args.get("course_id", ""))
     paper_id = _as_text(request.args.get("paper_id", ""))
     academic_session = _normalise_year(request.args.get("academic_session", "")) or _normalise_year(request.args.get("academic_year", ""))
@@ -3938,9 +4141,25 @@ def exam_eligibility_summary(user):
     include_inactive = _to_bool(request.args.get("include_inactive", False))
 
     profiles_col = get_collection("academic", "student_profiles")
+
+    # Build dept scope: dept admins are always scoped; super admins may filter by department_id
+    if is_super_admin(user):
+        dept_scope_id = department_id_filter or None
+    else:
+        dept_scope_id = _user_dept_id(user)
+
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"], department_id=dept_scope_id))
+    papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id", "created_at"]))
+    course_map = {c["_id"]: c for c in courses}
+    paper_map = {p["_id"]: p for p in papers}
+
+    # Restrict profiles to only courses visible to this admin
+    visible_course_ids = list(course_map.keys())
+    base_profile_query = {"course_id": {"$in": visible_course_ids}} if visible_course_ids else {"course_id": "never_match"}
+
     profiles = list(
         profiles_col.find(
-            {},
+            base_profile_query,
             {
                 "user_id": 1,
                 "course_id": 1,
@@ -3955,10 +4174,6 @@ def exam_eligibility_summary(user):
             },
         )
     )
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
-    papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id", "created_at"]))
-    course_map = {c["_id"]: c for c in courses}
-    paper_map = {p["_id"]: p for p in papers}
     user_map = get_users_by_ids(profile.get("user_id") for profile in profiles)
     overrides_col = get_collection("attendance", "exam_eligibility_overrides")
     sessions_col = get_collection("attendance", "attendance_sessions")
@@ -3999,6 +4214,11 @@ def exam_eligibility_summary(user):
         course_status = _as_text((course_doc or {}).get("status") or "active").lower() or "active"
         if course_status != "active" and not include_inactive:
             continue
+        # Department filter – match on course's department name
+        if department_filter:
+            course_department = _as_text((course_doc or {}).get("department") or "")
+            if course_department.lower() != department_filter.lower():
+                continue
         stu_year = _as_text(profile.get("academic_session") or profile.get("academic_year") or profile.get("year"))
         enrolled = profile.get("enrolled_papers", []) or []
         stu_semester = _to_int(profile.get("current_semester"), 0) or None
@@ -4155,6 +4375,7 @@ def exam_eligibility_summary(user):
                 "reg_number": profile.get("reg_number") or profile.get("roll_number"),
                 "course_id": stu_course_id,
                 "course_name": (course or {}).get("name"),
+                "course_department": (course or {}).get("department") or "",
                 "student_semester": stu_semester,
                 "paper_id": pid_text,
                 "paper_name": paper.get("name", ""),
@@ -4209,7 +4430,7 @@ def exam_eligibility_summary(user):
 
 
 @admin_bp.route("/exam-eligibility-override", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 def set_exam_eligibility_override(user):
     """Override final exam eligibility status for a student-paper pair."""
     d = request.get_json(silent=True) or {}
@@ -4260,7 +4481,7 @@ def set_exam_eligibility_override(user):
 
 
 @admin_bp.route("/exam-eligibility-override/bulk", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 def set_exam_eligibility_override_bulk(user):
     """Bulk override final exam eligibility for multiple student-paper pairs."""
     d = request.get_json(silent=True) or {}
@@ -4335,7 +4556,7 @@ def set_exam_eligibility_override_bulk(user):
 # ─── Leave Requests (Feature 3) ──────────────────────────────────────────────
 
 @admin_bp.route("/leave-requests", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def list_leave_requests(user):
     """List all leave requests, optionally filtered by status or student."""
     leaves_col = get_collection("academic", "leave_requests")
@@ -4373,7 +4594,7 @@ def list_leave_requests(user):
 
 
 @admin_bp.route("/leave-requests/<leave_id>/approve", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 def approve_leave_request(user, leave_id):
     """Approve a leave request (marks as approved; attendance team can exclude those dates)."""
     leaves_col = get_collection("academic", "leave_requests")
@@ -4400,7 +4621,7 @@ def approve_leave_request(user, leave_id):
 
 
 @admin_bp.route("/leave-requests/<leave_id>/reject", methods=["PUT"])
-@role_required("admin")
+@role_required("department_admin")
 def reject_leave_request(user, leave_id):
     """Reject a leave request with an optional reason."""
     leaves_col = get_collection("academic", "leave_requests")
@@ -4447,6 +4668,7 @@ def _local_midnight_to_utc(local_midnight, tz_offset_minutes):
 
 
 def _build_attendance_matrix_payload(args):
+    department_filter = _as_text(args.get("department", ""))
     course_id = _as_text(args.get("course_id", ""))
     academic_session = _normalise_year(args.get("academic_session", "")) or _normalise_year(args.get("academic_year", ""))
     semester_filter = _as_text(args.get("semester", ""))
@@ -4469,14 +4691,22 @@ def _build_attendance_matrix_payload(args):
         to_local_exclusive = to_date + timedelta(days=1)
         range_end_utc = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
 
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "course_duration"]))
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "course_duration", "department"]))
     papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id"]))
     paper_map = {p["_id"]: p for p in papers}
+
+    dept_course_ids = set()
+    if department_filter:
+        for c in courses:
+            if _as_text(c.get("department", "")).lower() == department_filter.lower():
+                dept_course_ids.add(_as_text(c.get("_id")))
 
     allowed_papers = []
     for paper in papers:
         pid = _as_text(paper.get("_id"))
         if not pid:
+            continue
+        if department_filter and _as_text(paper.get("course_id")) not in dept_course_ids:
             continue
         if course_id and _as_text(paper.get("course_id")) != course_id:
             continue
@@ -4508,6 +4738,8 @@ def _build_attendance_matrix_payload(args):
     available_sessions = set()
     for profile in profiles:
         profile_course_id = _as_text(profile.get("course_id"))
+        if department_filter and profile_course_id not in dept_course_ids:
+            continue
         if course_id and profile_course_id != course_id:
             continue
         profile_session = _as_text(profile.get("academic_session") or profile.get("academic_year") or profile.get("year"))
@@ -4521,6 +4753,8 @@ def _build_attendance_matrix_payload(args):
             continue
 
         stu_course_id = _as_text(profile.get("course_id"))
+        if department_filter and stu_course_id not in dept_course_ids:
+            continue
         if course_id and stu_course_id != course_id:
             continue
 
@@ -4769,7 +5003,7 @@ def _build_attendance_matrix_payload(args):
 
 
 @admin_bp.route("/attendance-matrix", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def attendance_matrix(user):
     cache_key = (
         "attendance_matrix",
@@ -4785,7 +5019,7 @@ def attendance_matrix(user):
 
 
 @admin_bp.route("/attendance-matrix/export", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def attendance_matrix_export(user):
     payload = _build_attendance_matrix_payload(request.args)
     tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
@@ -4901,7 +5135,7 @@ def attendance_matrix_export(user):
 
 
 @admin_bp.route("/attendance-matrix/export-csv", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def attendance_matrix_export_csv(user):
     payload = _build_attendance_matrix_payload(request.args)
     tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
@@ -4949,7 +5183,7 @@ def attendance_matrix_export_csv(user):
 
 
 @admin_bp.route("/attendance-matrix/export-pdf", methods=["GET"])
-@role_required("admin")
+@role_required("department_admin")
 def attendance_matrix_export_pdf(user):
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import landscape, letter
@@ -5032,9 +5266,17 @@ def attendance_matrix_export_pdf(user):
 # ─── Dashboard Stats ────────────────────────────────────────────────────────
 
 @admin_bp.route("/stats", methods=["GET"])
-@role_required("admin")
+@role_required("super_admin", "department_admin")
 def dashboard_stats(user):
-    cache_key = ("dashboard_stats",)
+    dept_filter_id = _as_text(request.args.get("department_id", ""))
+    
+    user_dept = None
+    if is_super_admin(user):
+        user_dept = dept_filter_id or None
+    else:
+        user_dept = _user_dept_id(user)
+        
+    cache_key = ("dashboard_stats", user_dept)
     cached_payload = _cache_get(cache_key)
     if cached_payload is not None:
         return jsonify(cached_payload)
@@ -5053,58 +5295,18 @@ def dashboard_stats(user):
     uptime_parts.append(f"{uptime_minutes}m")
     system_uptime = " ".join(uptime_parts)
 
-    def _month_start(dt):
-        return datetime(dt.year, dt.month, 1)
-
-    def _shift_month(dt, delta):
-        year = dt.year + ((dt.month - 1 + delta) // 12)
-        month = ((dt.month - 1 + delta) % 12) + 1
-        return datetime(year, month, 1)
-
-    def _monthly_attendance(attendance_col, months=6):
-        now = datetime.now(timezone.utc)
-        current_month = _month_start(now)
-        start_month = _shift_month(current_month, -(months - 1))
-
-        # Use Python-side aggregation for resilience against legacy/mixed timestamp types.
-        # Some old records may contain string timestamps, which can break Mongo $year/$month.
-        docs = attendance_col.find({}, {"timestamp": 1})
-        count_map = {}
-        for doc in docs:
-            ts = doc.get("timestamp")
-            if isinstance(ts, str):
-                try:
-                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                except Exception:
-                    continue  # nosec B112
-
-            if not isinstance(ts, datetime):
-                continue
-            if ts < start_month:
-                continue
-
-            key = f"{ts.year}-{ts.month:02d}"
-            count_map[key] = count_map.get(key, 0) + 1
-
-        points = []
-        for i in range(months):
-            month_dt = _shift_month(start_month, i)
-            key = f"{month_dt.year}-{month_dt.month:02d}"
-            points.append(
-                {
-                    "key": key,
-                    "label": month_dt.strftime("%b"),
-                    "total": count_map.get(key, 0),
-                }
-            )
-
-        return points
-
     profiles_col = get_collection("academic", "student_profiles")
+    users_col = get_collection("auth", "users")
+    courses_col = get_collection("academic", "courses")
+    papers_col = get_collection("academic", "papers")
+    attendance_col = get_collection("attendance", "attendance_logs")
+    audit_col = get_collection("audit", "audit_logs")
     by_course = {}
     by_year = {}
-    courses = sanitise_many(get_all_courses(["name", "code", "year", "status"]))
+    by_department = {}
+    courses = sanitise_many(get_all_courses(["name", "code", "year", "status", "department"], department_id=user_dept))
     course_map = {c["_id"]: c for c in courses}
+    course_ids = list(course_map.keys())
 
     active_course_ids = {
         c.get("_id")
@@ -5112,11 +5314,21 @@ def dashboard_stats(user):
         if _as_text(c.get("status") or "active").lower() == "active"
     }
 
+    # course_ids from sanitise_many are strings; profiles may store course_id as ObjectId or string
+    course_ids_with_oids = []
+    for cid in course_ids:
+        course_ids_with_oids.append(cid)  # string
+        if ObjectId.is_valid(cid):
+            course_ids_with_oids.append(ObjectId(cid))  # ObjectId variant
+
+    # Scope profiles to department's courses when filtering
+    profile_query = {"course_id": {"$in": course_ids_with_oids}} if (user_dept and course_ids_with_oids) else {}
     profiles = list(
         profiles_col.find(
-            {},
+            profile_query,
             {
                 "course_id": 1,
+                "user_id": 1,
                 "academic_session": 1,
                 "academic_year": 1,
                 "year": 1,
@@ -5133,6 +5345,12 @@ def dashboard_stats(user):
         course_key = course.get("name") if course else "Unassigned"
         by_course[course_key] = by_course.get(course_key, 0) + 1
 
+        dept_key = _as_text(course.get("department")) if course else ""
+        if dept_key:
+            if dept_key not in by_department:
+                by_department[dept_key] = {"students": 0, "lecturers": 0}
+            by_department[dept_key]["students"] += 1
+
         year_key = _normalise_year(
             profile.get("academic_session")
             or profile.get("academic_year")
@@ -5140,31 +5358,73 @@ def dashboard_stats(user):
         ) or "Unknown"
         by_year[year_key] = by_year.get(year_key, 0) + 1
 
-    users_col = get_collection("auth", "users")
-    courses_col = get_collection("academic", "courses")
-    papers_col = get_collection("academic", "papers")
-    attendance_col = get_collection("attendance", "attendance_logs")
-    audit_col = get_collection("audit", "audit_logs")
-
-    active_courses_count = courses_col.count_documents({
-        "$or": [
-            {"status": "active"},
-            {"status": {"$exists": False}},
-            {"status": ""},
-            {"status": None},
+    student_query = {"role": "student"}
+    lecturer_query = {"role": "lecturer"}
+    
+    if user_dept:
+        student_user_ids = [_as_text(p.get("user_id")) for p in profiles if p.get("user_id")]
+        valid_oids = [ObjectId(u) for u in student_user_ids if ObjectId.is_valid(u)]
+        student_query["$or"] = [
+            {"_id": {"$in": valid_oids}},
+            {"_id": {"$in": student_user_ids}},
         ]
-    })
-    inactive_courses_count = courses_col.count_documents({"status": "inactive"})
+        lecturer_query["department_id"] = user_dept
+
+    for usr in users_col.find(lecturer_query, {"department": 1}):
+        dept_key = _as_text(usr.get("department"))
+        if dept_key:
+            if dept_key not in by_department:
+                by_department[dept_key] = {"students": 0, "lecturers": 0}
+            by_department[dept_key]["lecturers"] += 1
+
+    # Count queries - department_id must be sibling to $or, not inside it
+    if user_dept:
+        active_courses_count = courses_col.count_documents({
+            "department_id": user_dept,
+            "$or": [{"status": "active"}, {"status": {"$exists": False}}, {"status": ""}, {"status": None}],
+        })
+        inactive_courses_count = courses_col.count_documents({"department_id": user_dept, "status": "inactive"})
+    else:
+        active_courses_count = courses_col.count_documents({
+            "$or": [{"status": "active"}, {"status": {"$exists": False}}, {"status": ""}, {"status": None}],
+        })
+        inactive_courses_count = courses_col.count_documents({"status": "inactive"})
     total_courses_count = active_courses_count + inactive_courses_count
 
     active_paper_count = 0
     inactive_paper_count = 0
-    for paper in papers_col.find({}, {"course_id": 1}):
+    
+    paper_query = {}
+    if user_dept:
+        paper_query["course_id"] = {"$in": course_ids}
+
+    all_paper_ids = []
+    for paper in papers_col.find(paper_query, {"course_id": 1}):
+        if paper.get("_id"):
+            all_paper_ids.append(paper["_id"])
+            all_paper_ids.append(str(paper["_id"]))
         paper_course_id = _as_text(paper.get("course_id"))
         if not paper_course_id or paper_course_id in active_course_ids:
             active_paper_count += 1
         else:
             inactive_paper_count += 1
+
+    audit_count = 0
+    if not user_dept:
+        audit_count = audit_col.count_documents({})
+    else:
+        dept_u_ids = [str(u["_id"]) for u in users_col.find({"department_id": user_dept}, {"_id": 1})]
+        dept_oids = [ObjectId(u) for u in dept_u_ids if ObjectId.is_valid(u)]
+        all_uid_variants = dept_u_ids + dept_oids
+        audit_count = audit_col.count_documents({
+            "$or": [
+                {"performed_by": {"$in": all_uid_variants}},
+                {"target_user": {"$in": all_uid_variants}},
+                {"department_id": user_dept},
+            ]
+        })
+        
+    attendance_count = attendance_col.count_documents({"paper_id": {"$in": all_paper_ids}} if user_dept and all_paper_ids else {}) if not (user_dept and not all_paper_ids) else 0
 
     app_started_at = None
     if started_at:
@@ -5174,28 +5434,143 @@ def dashboard_stats(user):
         app_started_at = iso_started_at if has_tz else f"{iso_started_at}Z"
 
     payload = {
-        "total_students": users_col.count_documents({"role": "student"}),
-        "total_lecturers": users_col.count_documents({"role": "lecturer"}),
+        "total_students": users_col.count_documents(student_query),
+        "total_lecturers": users_col.count_documents(lecturer_query),
         "total_courses": total_courses_count,
         "active_courses": active_courses_count,
         "inactive_courses": inactive_courses_count,
         "total_papers": active_paper_count,
         "inactive_papers": inactive_paper_count,
-        "total_attendance": attendance_col.count_documents({}),
-        "total_audit_logs": audit_col.count_documents({}),
+        "total_attendance": attendance_count,
+        "total_audit_logs": audit_count,
         "app_started_at": app_started_at,
         "system_uptime_seconds": max(int((datetime.now(timezone.utc) - started_at).total_seconds()), 0) if started_at else 0,
         "system_uptime": system_uptime,
         "students_by_course": by_course,
         "students_by_year": by_year,
-        "monthly_attendance": _monthly_attendance(attendance_col, months=6),
+        "departments_summary": by_department,
     }
     _cache_set(cache_key, payload, _QUERY_CACHE_TTL_SECONDS)
     return jsonify(payload)
 
 
+@admin_bp.route("/stats/monthly-attendance", methods=["GET"])
+@role_required("super_admin", "department_admin")
+def monthly_attendance_trend_api(user):
+    # Resolve which department_id to scope to
+    if is_super_admin(user):
+        # Super admin: optionally filter by department name param
+        dept_name_filter = _as_text(request.args.get("department", ""))
+        if dept_name_filter:
+            dept_doc = get_collection("academic", "departments").find_one(
+                {"name": {"$regex": f"^{dept_name_filter}$", "$options": "i"}}
+            )
+            scope_dept_id = dept_doc.get("_id") if dept_doc else None
+        else:
+            scope_dept_id = None  # No filter = global
+    else:
+        # Department admin: always locked to their own department_id
+        scope_dept_id = _user_dept_id(user)
+
+    attendance_col = get_collection("attendance", "attendance_logs")
+    query = {}
+
+    if scope_dept_id:
+        # Filter by department_id (ObjectId) directly — reliable, no name mismatch
+        dept_oid = ObjectId(str(scope_dept_id)) if not isinstance(scope_dept_id, ObjectId) else scope_dept_id
+        dept_id_variants = [dept_oid, str(dept_oid)]
+
+        courses = list(get_collection("academic", "courses").find(
+            {"department_id": {"$in": dept_id_variants}}, {"_id": 1}
+        ))
+        course_ids = []
+        for c in courses:
+            course_ids.append(c["_id"])
+            course_ids.append(str(c["_id"]))
+
+        if not course_ids:
+            # No courses for this department → return all-zero trend
+            def _ms(dt): return datetime(dt.year, dt.month, 1)
+            def _sm(dt, d):
+                y = dt.year + ((dt.month - 1 + d) // 12)
+                m = ((dt.month - 1 + d) % 12) + 1
+                return datetime(y, m, 1)
+            now = datetime.now(timezone.utc)
+            sm = _sm(_ms(now), -5)
+            return jsonify([
+                {"key": f"{_sm(sm,i).year}-{_sm(sm,i).month:02d}",
+                 "label": _sm(sm, i).strftime("%b"), "total": 0}
+                for i in range(6)
+            ])
+
+        papers = list(get_collection("academic", "papers").find(
+            {"course_id": {"$in": course_ids}}, {"_id": 1}
+        ))
+        paper_ids = []
+        for p in papers:
+            paper_ids.append(p["_id"])
+            paper_ids.append(str(p["_id"]))
+
+        if not paper_ids:
+            # No papers → zero trend
+            def _ms(dt): return datetime(dt.year, dt.month, 1)
+            def _sm(dt, d):
+                y = dt.year + ((dt.month - 1 + d) // 12)
+                m = ((dt.month - 1 + d) % 12) + 1
+                return datetime(y, m, 1)
+            now = datetime.now(timezone.utc)
+            sm = _sm(_ms(now), -5)
+            return jsonify([
+                {"key": f"{_sm(sm,i).year}-{_sm(sm,i).month:02d}",
+                 "label": _sm(sm, i).strftime("%b"), "total": 0}
+                for i in range(6)
+            ])
+
+        query["paper_id"] = {"$in": paper_ids}
+
+    def _month_start(dt):
+        return datetime(dt.year, dt.month, 1)
+
+    def _shift_month(dt, delta):
+        year = dt.year + ((dt.month - 1 + delta) // 12)
+        month = ((dt.month - 1 + delta) % 12) + 1
+        return datetime(year, month, 1)
+
+    now = datetime.now(timezone.utc)
+    current_month = _month_start(now)
+    start_month = _shift_month(current_month, -5)
+
+    query["timestamp"] = {"$gte": start_month}
+
+    docs = attendance_col.find(query, {"timestamp": 1})
+    count_map = {}
+    for doc in docs:
+        ts = doc.get("timestamp")
+        if isinstance(ts, str):
+            try:
+                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except Exception:
+                continue
+        if not isinstance(ts, datetime):
+            continue
+        key = f"{ts.year}-{ts.month:02d}"
+        count_map[key] = count_map.get(key, 0) + 1
+
+    points = []
+    for i in range(6):
+        month_dt = _shift_month(start_month, i)
+        key = f"{month_dt.year}-{month_dt.month:02d}"
+        points.append({
+            "key": key,
+            "label": month_dt.strftime("%b"),
+            "total": count_map.get(key, 0),
+        })
+
+    return jsonify(points)
+
+
 @admin_bp.route("/attendance/send-shortage-alerts", methods=["POST"])
-@role_required("admin")
+@role_required("department_admin")
 def send_shortage_alerts(user):
     """Scan all students and send shortage alert emails to those < 75% attendance."""
     if not is_email_delivery_enabled():
@@ -5296,3 +5671,285 @@ def send_shortage_alerts(user):
         "message": f"Alert scan completed. {checked_count} students checked.",
         "alerts_queued": alerts_sent
     })
+
+
+# ─── Department Management (Super Admin only) ─────────────────────────────
+
+
+@admin_bp.route("/departments", methods=["GET"])
+@super_admin_required
+def list_departments(user):
+    """Return all departments."""
+    include_inactive = _as_text(request.args.get("include_inactive", "")).lower() in ("1", "true", "yes")
+    depts = get_all_departments(include_inactive=include_inactive)
+
+    # Enrich with user counts
+    users_col = get_collection("auth", "users")
+    for dept in depts:
+        dept["_id"] = str(dept["_id"])
+        dept_oid = ObjectId(dept["_id"]) if dept["_id"] else None
+        dept["admin_count"] = users_col.count_documents({"role": "department_admin", "department_id": dept_oid}) if dept_oid else 0
+        dept["lecturer_count"] = users_col.count_documents({"role": "lecturer", "department_id": dept_oid}) if dept_oid else 0
+        dept["student_count"] = users_col.count_documents({"role": "student", "department_id": dept_oid}) if dept_oid else 0
+        dept["created_at"] = str(dept.get("created_at") or "")
+        dept["updated_at"] = str(dept.get("updated_at") or "")
+
+    return jsonify(depts)
+
+
+@admin_bp.route("/departments", methods=["POST"])
+@super_admin_required
+def add_department(user):
+    """Create a new department."""
+    d = request.get_json(silent=True) or {}
+    name = _as_text(d.get("name", "")).strip()
+    code = _as_text(d.get("code", "")).strip().upper()
+
+    if not name or not code:
+        return jsonify({"error": "name and code are required"}), 400
+
+    # Check uniqueness
+    if get_department_by_code(code):
+        return jsonify({"error": f"Department code '{code}' already exists"}), 409
+
+    dept = create_department(name, code)
+    log_action(
+        "CREATE_DEPARTMENT",
+        str(user["_id"]),
+        details=f"Department {code} — {name}",
+    )
+    return jsonify(sanitise_mongo_doc(dept)), 201
+
+
+@admin_bp.route("/departments/<dept_id>", methods=["GET"])
+@super_admin_required
+@validate_ids("dept_id")
+def get_department(user, dept_id):
+    """Return a single department."""
+    dept = get_department_by_id(dept_id)
+    if not dept:
+        return jsonify({"error": "Department not found"}), 404
+    return jsonify(sanitise_mongo_doc(dept))
+
+
+@admin_bp.route("/departments/<dept_id>", methods=["PUT"])
+@super_admin_required
+@validate_ids("dept_id")
+def edit_department(user, dept_id):
+    """Update a department's name, code, or status."""
+    d = request.get_json(silent=True) or {}
+    fields = {}
+    if "name" in d:
+        fields["name"] = _as_text(d["name"]).strip()
+    if "code" in d:
+        new_code = _as_text(d["code"]).strip().upper()
+        existing = get_department_by_code(new_code)
+        if existing and str(existing["_id"]) != dept_id:
+            return jsonify({"error": f"Department code '{new_code}' already in use"}), 409
+        fields["code"] = new_code
+    if "status" in d and d["status"] in ("active", "inactive"):
+        fields["status"] = d["status"]
+
+    if not fields:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    updated = update_department(dept_id, fields)
+    if not updated:
+        return jsonify({"error": "Department not found"}), 404
+
+    log_action(
+        "UPDATE_DEPARTMENT",
+        str(user["_id"]),
+        details=f"Department {dept_id}: {fields}",
+    )
+    return jsonify(sanitise_mongo_doc(updated))
+
+
+@admin_bp.route("/departments/<dept_id>", methods=["DELETE"])
+@super_admin_required
+@validate_ids("dept_id")
+def remove_department(user, dept_id):
+    """Soft-delete a department (set status=inactive)."""
+    dept = get_department_by_id(dept_id)
+    if not dept:
+        return jsonify({"error": "Department not found"}), 404
+
+    # Prevent deletion if department has active users
+    users_col = get_collection("auth", "users")
+    active_users = users_col.count_documents({"department_id": ObjectId(dept_id)})
+    if active_users > 0:
+        return jsonify({
+            "error": f"Cannot delete department with {active_users} active users. Reassign them first."
+        }), 409
+
+    soft_delete_department(dept_id)
+    log_action(
+        "DELETE_DEPARTMENT",
+        str(user["_id"]),
+        details=f"Department {dept.get('code')} deactivated",
+    )
+    return jsonify({"message": "Department deactivated successfully"})
+
+
+# ─── Department Admin Management (Super Admin only) ────────────────────────
+
+
+@admin_bp.route("/department-admins", methods=["GET"])
+@super_admin_required
+def list_department_admins(user):
+    """List all department admin users with their department info."""
+    dept_admins = sanitise_many(get_users_by_role("department_admin"))
+
+    # Enrich with department info
+    for admin in dept_admins:
+        dept_id = admin.get("department_id")
+        if dept_id:
+            dept = get_department_by_id(str(dept_id))
+            admin["department_name"] = dept.get("name") if dept else "Unknown"
+            admin["department_code"] = dept.get("code") if dept else "?"
+        else:
+            admin["department_name"] = "Unassigned"
+            admin["department_code"] = "—"
+        # Remove sensitive fields
+        admin.pop("password_hash", None)
+        admin.pop("session_version", None)
+
+    return jsonify(dept_admins)
+
+
+@admin_bp.route("/department-admins", methods=["POST"])
+@super_admin_required
+def add_department_admin(user):
+    """Create a new department admin user."""
+    d = request.get_json(silent=True) or {}
+    name = _as_text(d.get("name", "")).strip()
+    email = _as_text(d.get("email", "")).strip().lower()
+    department_id = _as_text(d.get("department_id", "")).strip()
+    initial_password = _as_text(d.get("initial_password", "")).strip()
+
+    if not name or not email or not department_id:
+        return jsonify({"error": "name, email, and department_id are required"}), 400
+
+    # Validate department exists
+    dept = get_department_by_id(department_id)
+    if not dept:
+        return jsonify({"error": "Department not found"}), 404
+
+    # Check email uniqueness
+    if find_user_by_email(email):
+        return jsonify({"error": "A user with this email already exists"}), 409
+
+    # Generate temp password if not provided
+    if not initial_password:
+        initial_password = f"DeptAdmin{secrets.randbelow(90000) + 10000}!"
+
+    # Validate password strength
+    is_strong, pw_error = validate_password_strength(initial_password)
+    if not is_strong:
+        return jsonify({"error": pw_error}), 400
+
+    new_admin = create_user(
+        name=name,
+        email=email,
+        password=initial_password,
+        role="department_admin",
+        department=dept.get("name", ""),
+        department_id=department_id,
+        must_change_password=True,
+    )
+
+    log_action(
+        "CREATE_DEPARTMENT_ADMIN",
+        str(user["_id"]),
+        target_user=str(new_admin.get("_id", "")),
+        details=f"Dept admin {email} for {dept.get('code')}",
+    )
+
+    return jsonify({
+        "message": f"Department admin created. Temp password: {initial_password}",
+        "user": sanitise_mongo_doc(new_admin),
+        "temp_password": initial_password,
+    }), 201
+
+
+@admin_bp.route("/department-admins/<uid>", methods=["PUT"])
+@super_admin_required
+@validate_ids("uid")
+def edit_department_admin(user, uid):
+    """Update a department admin's basic info or reassign their department."""
+    d = request.get_json(silent=True) or {}
+    target = find_user_by_id(uid)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if target.get("role") != "department_admin":
+        return jsonify({"error": "User is not a department admin"}), 400
+
+    update_fields = {}
+    if "name" in d:
+        update_fields["name"] = _as_text(d["name"]).strip()
+    if "department_id" in d:
+        new_dept_id = _as_text(d["department_id"]).strip()
+        dept = get_department_by_id(new_dept_id)
+        if not dept:
+            return jsonify({"error": "Target department not found"}), 404
+        update_fields["department_id"] = ObjectId(new_dept_id)
+        update_fields["department"] = dept.get("name", "")
+
+    if not update_fields:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    users_col = get_collection("auth", "users")
+    users_col.update_one({"_id": ObjectId(uid)}, {"$set": update_fields})
+
+    log_action(
+        "UPDATE_DEPARTMENT_ADMIN",
+        str(user["_id"]),
+        target_user=uid,
+        details=f"Updated dept admin {uid}: {update_fields}",
+    )
+    updated = find_user_by_id(uid)
+    return jsonify(sanitise_mongo_doc(updated))
+
+
+@admin_bp.route("/department-admins/<uid>", methods=["DELETE"])
+@super_admin_required
+@validate_ids("uid")
+def remove_department_admin(user, uid):
+    """Delete a department admin user."""
+    target = find_user_by_id(uid)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if target.get("role") != "department_admin":
+        return jsonify({"error": "User is not a department admin"}), 400
+
+    delete_user(uid)
+    log_action(
+        "DELETE_DEPARTMENT_ADMIN",
+        str(user["_id"]),
+        target_user=uid,
+        details=f"Deleted dept admin {target.get('email')}",
+    )
+    return jsonify({"message": "Department admin deleted"})
+
+
+@admin_bp.route("/department-admins/<uid>/reset-password", methods=["POST"])
+@super_admin_required
+@validate_ids("uid")
+def reset_department_admin_password(user, uid):
+    """Reset a department admin's password."""
+    target = find_user_by_id(uid)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if target.get("role") != "department_admin":
+        return jsonify({"error": "User is not a department admin"}), 400
+
+    d = request.get_json(silent=True) or {}
+    temp_password = reset_user_password(uid, temp_password=_as_text(d.get("temp_password", "")).strip() or None)
+
+    log_action(
+        "RESET_PASSWORD",
+        str(user["_id"]),
+        target_user=uid,
+        details=f"Password reset for dept admin {target.get('email')}",
+    )
+    return jsonify({"message": "Password reset", "temp_password": temp_password})

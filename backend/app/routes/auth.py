@@ -101,6 +101,11 @@ def health():
     return jsonify({"status": status, "checks": checks})
 
 
+def _normalize_role(role):
+    """Map legacy 'admin' role to 'super_admin' for backward compatibility."""
+    return "super_admin" if role == "admin" else role
+
+
 @auth_bp.route("/login", methods=["POST"])
 @limiter.limit("20 per minute")
 def login():
@@ -168,19 +173,41 @@ def login():
                 user_agent=request.headers.get("User-Agent", ""),
             )
 
-        sv_claim = {"sv": int(user.get("session_version", 1) or 1)}
+        # Normalize legacy "admin" → "super_admin" for backward compatibility
+        effective_role = user["role"]
+        if effective_role == "admin":
+            effective_role = "super_admin"
+
+        sv_claim = {
+            "sv": int(user.get("session_version", 1) or 1),
+            "role": effective_role,
+            "dept": str(user.get("department_id") or ""),
+        }
         
         # Issue both access and refresh tokens
         access_token = create_access_token(identity=user["email"], additional_claims=sv_claim)
         refresh_token = create_refresh_token(identity=user["email"], additional_claims=sv_claim)
-        
+
+        # Resolve department name for display
+        dept_name = user.get("department", "")
+        if user.get("department_id"):
+            try:
+                from app.models.department import get_department_by_id
+                dept_doc = get_department_by_id(str(user["department_id"]))
+                if dept_doc:
+                    dept_name = dept_doc.get("name", dept_name)
+            except Exception:
+                pass
+
         response = jsonify({
             "user": {
                 "_id": str(user["_id"]),
                 "name": user["name"],
                 "email": user["email"],
-                "role": user["role"],
+                "role": effective_role,
                 "department": user.get("department", ""),
+                "department_id": str(user.get("department_id") or ""),
+                "department_name": dept_name,
                 "must_change_password": user.get("must_change_password", False),
             },
         })
@@ -233,13 +260,29 @@ def me():
     # Security Fix: Ensure the user exists AND their session hasn't been forcefully invalidated
     if not user or int(user.get("session_version", 1)) != claims.get("sv"):
         return jsonify({"error": "Session expired or invalidated"}), 401
-        
+
+    # Resolve department name for display
+    dept_name = user.get("department", "")
+    if user.get("department_id"):
+        try:
+            from app.models.department import get_department_by_id
+            dept_doc = get_department_by_id(str(user["department_id"]))
+            if dept_doc:
+                dept_name = dept_doc.get("name", dept_name)
+        except Exception:
+            pass
+
+    # Normalize legacy role
+    effective_role = _normalize_role(user["role"])
+
     return jsonify({
         "_id": str(user["_id"]),
         "name": user["name"],
         "email": user["email"],
-        "role": user["role"],
+        "role": effective_role,
         "department": user.get("department", ""),
+        "department_id": str(user.get("department_id") or ""),
+        "department_name": dept_name,
         "must_change_password": user.get("must_change_password", False),
     })
 
@@ -257,19 +300,39 @@ def refresh_token():
     if not user or int(user.get("session_version", 1)) != claims.get("sv"):
         return jsonify({"error": "Session expired or invalidated. Please log in again."}), 401
 
+    # Normalize legacy role
+    effective_role = _normalize_role(user["role"])
+
     access_token = create_access_token(
         identity=user["email"],
-        additional_claims={"sv": int(user.get("session_version", 1) or 1)},
+        additional_claims={
+            "sv": int(user.get("session_version", 1) or 1),
+            "role": effective_role,
+            "dept": str(user.get("department_id") or ""),
+        },
     )
-    
+
+    # Resolve department name for display
+    dept_name = user.get("department", "")
+    if user.get("department_id"):
+        try:
+            from app.models.department import get_department_by_id
+            dept_doc = get_department_by_id(str(user["department_id"]))
+            if dept_doc:
+                dept_name = dept_doc.get("name", dept_name)
+        except Exception:
+            pass
+
     response = jsonify({
         "message": "Token refreshed",
         "user": {
             "_id": str(user["_id"]),
             "name": user["name"],
             "email": user["email"],
-            "role": user["role"],
+            "role": effective_role,
             "department": user.get("department", ""),
+            "department_id": str(user.get("department_id") or ""),
+            "department_name": dept_name,
             "must_change_password": user.get("must_change_password", False),
         },
     })
@@ -350,8 +413,13 @@ def change_password():
     _revoke_current_token()
 
     refreshed_user = find_user_by_email(email)
-    sv_claim = {"sv": int((refreshed_user or {}).get("session_version", 1) or 1)}
-    
+    effective_role = _normalize_role(refreshed_user.get("role"))
+    sv_claim = {
+        "sv": int(refreshed_user.get("session_version", 1) or 1),
+        "role": effective_role,
+        "dept": str(refreshed_user.get("department_id") or ""),
+    }
+
     # Re-issue both tokens so they don't get logged out immediately
     new_access_token = create_access_token(identity=email, additional_claims=sv_claim)
     new_refresh_token = create_refresh_token(identity=email, additional_claims=sv_claim)
