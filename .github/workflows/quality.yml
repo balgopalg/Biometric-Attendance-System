@@ -40,6 +40,10 @@ jobs:
 
       - name: Build
         run: npm run build
+        working-directory: ./frontend
+        env:
+          VITE_API_PROXY_URL: "http://localhost:5000" 
+
 
   frontend-e2e:
     name: Frontend E2E Tests
