@@ -33,9 +33,9 @@ Production-ready full stack attendance platform for classroom operations using f
 - Automated welcome and password-reset credential emails (Yagmail-backed, optional)
 - Automated attendance shortage warnings (email alerts for students below threshold)
 - Medical leave management (approve/reject student appeals)
+- Multi-tenant architecture with robust Role-Based Access Control (RBAC) enabling isolated "Department Admin" views and global "Super Admin" controls.
 - Attendance matrix and exports (Excel/PDF)
-- Audit trail with rollback support for eligible operations
-
+- Comprehensive Audit Trail logging system with filterable global/departmental interfaces, Excel report exporting, and action rollback support.
 ### Lecturer
 
 - Attendance session lifecycle: start, pause, resume, stop

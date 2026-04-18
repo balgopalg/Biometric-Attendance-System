@@ -4044,6 +4044,163 @@ def list_audit_logs(user):
     })
 
 
+@admin_bp.route("/audit-logs/export", methods=["GET"])
+@role_required("department_admin")
+def export_audit_logs(user):
+    """Export the filtered audit logs to an Excel file."""
+    action = _as_text(request.args.get("action", "")).upper()
+    date_from = _as_text(request.args.get("from", ""))
+    date_to = _as_text(request.args.get("to", ""))
+    tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
+
+    filters = {}
+    if action:
+        filters["action"] = {"$regex": re.escape(action), "$options": "i"}
+
+    ts_filter = {}
+    parsed_from = _parse_iso_date(date_from)
+    parsed_to = _parse_iso_date(date_to)
+
+    if parsed_from:
+        ts_filter["$gte"] = _local_midnight_to_utc(parsed_from, tz_offset_minutes)
+    if parsed_to:
+        parsed_to_exclusive = parsed_to + timedelta(days=1)
+        ts_filter["$lt"] = _local_midnight_to_utc(parsed_to_exclusive, tz_offset_minutes)
+
+    if ts_filter:
+        filters["timestamp"] = ts_filter
+
+    if filters:
+        filters = {
+            "$and": [
+                filters,
+                {"action": {"$nin": _AUDIT_EXCLUDED_ACTIONS}},
+            ]
+        }
+    else:
+        filters = {"action": {"$nin": _AUDIT_EXCLUDED_ACTIONS}}
+
+    dept_id_param = _as_text(request.args.get("department_id", ""))
+
+    if is_super_admin(user):
+        dept_filter_id = None
+        if dept_id_param:
+            try:
+                dept_filter_id = ObjectId(dept_id_param)
+            except Exception:
+                pass
+        if dept_filter_id:
+            users_col = get_collection("auth", "users")
+            dept_user_ids = [str(u["_id"]) for u in users_col.find({"department_id": dept_filter_id}, {"_id": 1})]
+            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
+            all_user_id_variants = dept_user_ids + dept_user_ids_oids
+            dept_user_filter = {"$or": [
+                {"performed_by": {"$in": all_user_id_variants}},
+                {"target_user": {"$in": all_user_id_variants}},
+                {"department_id": dept_filter_id},
+            ]}
+            if "$and" in filters:
+                filters["$and"].append(dept_user_filter)
+            elif filters:
+                filters = {"$and": [filters, dept_user_filter]}
+            else:
+                filters = dept_user_filter
+    else:
+        user_dept_id = _user_dept_id(user)
+        if user_dept_id:
+            users_col = get_collection("auth", "users")
+            dept_user_ids = [str(u["_id"]) for u in users_col.find({"department_id": user_dept_id}, {"_id": 1})]
+            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
+            all_user_id_variants = dept_user_ids + dept_user_ids_oids
+            dept_user_filter = {"$or": [
+                {"performed_by": {"$in": all_user_id_variants}},
+                {"target_user": {"$in": all_user_id_variants}},
+                {"department_id": user_dept_id},
+            ]}
+            if "$and" in filters:
+                filters["$and"].append(dept_user_filter)
+            elif filters:
+                filters = {"$and": [filters, dept_user_filter]}
+            else:
+                filters = dept_user_filter
+
+    # Fetch up to 10,000 logs for export to protect memory
+    logs, _ = get_audit_logs(1, 10000, filters, department_id=None)
+    
+    audit_user_ids = [
+        item.get("performed_by") or item.get("actor_user_id")
+        for item in logs
+        if item.get("performed_by") or item.get("actor_user_id")
+    ] + [
+        item.get("target_user") or ((item.get("details") or {}).get("user_id") if isinstance(item.get("details"), dict) else None)
+        for item in logs
+        if item.get("target_user") or (isinstance(item.get("details"), dict) and (item.get("details") or {}).get("user_id"))
+    ]
+    user_map = get_users_by_ids(audit_user_ids)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Audit Trail"
+
+    headers = ["Timestamp", "Actor Name", "Actor Email", "Role", "Action", "Target", "IP Address", "Details"]
+    ws.append(headers)
+
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = openpyxl.styles.Font(bold=True)
+
+    def _safe_str(v):
+        if not v:
+            return ""
+        try:
+            return str(v)
+        except Exception:
+            return ""
+
+    for raw in logs:
+        raw_ts = raw.get("timestamp")
+        if raw_ts and raw_ts.tzinfo is None:
+            raw_ts = raw_ts.replace(tzinfo=timezone.utc)
+            
+        ts_str = raw_ts.isoformat() if raw_ts else ""
+        
+        actor_id = raw.get("performed_by") or raw.get("actor_user_id")
+        details_user_id = (raw.get("details") or {}).get("user_id") if isinstance(raw.get("details"), dict) else None
+        target_user_id = raw.get("target_user") or details_user_id
+
+        actor = user_map.get(_as_text(actor_id)) if actor_id else None
+        target_user = user_map.get(_as_text(target_user_id)) if target_user_id else None
+
+        a_name = (actor or {}).get("name") or ("System" if str(actor_id).lower() == "system" else "Unknown User")
+        a_mail = (actor or {}).get("email") or ""
+        a_role = (actor or {}).get("role") or raw.get("role") or "unknown"
+        action_name = raw.get("action", "")
+        
+        if target_user:
+            t_type = f"{target_user.get('name', 'Unknown')} ({target_user.get('role', 'user')})"
+        elif target_user_id:
+            t_type = f"User {target_user_id}"
+        else:
+            t_type = _as_text(raw.get("details")) or "System"
+
+        ip_addr = raw.get("ip") or raw.get("ip_address") or ""
+        details = _safe_str(raw.get("details"))
+
+        ws.append([ts_str, a_name, a_mail, a_role, action_name, t_type, ip_addr, details])
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = f"Audit_Trail_Export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return send_file(
+        buf,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=filename,
+    )
+
+
 @admin_bp.route("/audit-logs/<log_id>/rollback", methods=["POST"])
 @role_required("department_admin")
 def rollback_audit_action(user, log_id):
