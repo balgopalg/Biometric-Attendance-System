@@ -171,12 +171,18 @@ export default function AttendanceSession() {
       setSessionStartedAt(res.data.started_at || new Date().toISOString());
       setRecognized([]);
       setReview(null);
-      await startCamera();
-      setScanning(true);
-      toast.success('Session started');
+
+      try {
+        await startCamera();
+        setScanning(true);
+        toast.success('Session started');
+      } catch (camErr) {
+        setScanning(false);
+        toast.success('Session started without camera');
+        toast.error('Webcam undetected or blocked. You may upload a picture manually instead.', { duration: 6000 });
+      }
     } catch (err) {
       if (createdSessionId) {
-        // Rollback the backend session
         await api.post('/lecturer/session/stop', { session_id: createdSessionId }).catch(() => {});
         setSessionId(null);
       }

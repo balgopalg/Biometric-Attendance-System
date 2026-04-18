@@ -7,13 +7,16 @@ import { formatCourseName } from '../../utils/courseDisplay';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlus, HiOutlineSearch, HiOutlinePencil, HiOutlineTrash } from 'react-icons/hi';
+import { useAuth } from '../../hooks/useAuth';
 
 const EMPTY_FORM = { name: '', code: '', department: '', course_duration: '' };
 const PAGE_SIZE = 10;
 
 const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
-
 export default function ManageCourses() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+  const [departments, setDepartments] = useState([]);
+
   const [courses, setCourses] = useState([]);
   const [allCourses, setAllCourses] = useState([]);
   const [totalCourses, setTotalCourses] = useState(0);
@@ -23,8 +26,7 @@ export default function ManageCourses() {
   const [showReassign, setShowReassign] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
   const [search, setSearch] = useState('');
-  const [durationFilter, setDurationFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [filters, setFilters] = useState({ department_id: '', duration: '', status: '' });
   const [form, setForm] = useState(EMPTY_FORM);
   const [reassignForm, setReassignForm] = useState({
     from_course_id: '',
@@ -35,8 +37,16 @@ export default function ManageCourses() {
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [coursesError, setCoursesError] = useState('');
 
+  // Fetch departments for Super Admin
+  const fetchDepartments = () => {
+    api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => setDepartments([]));
+  };
+
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setAllCourses(extractItems(r.data))).catch(() => {});
+    const params = {};
+    if (isSuperAdmin && filters.department_id) params.department_id = filters.department_id;
+    if (isDepartmentAdmin) params.department_id = departmentId;
+    api.get('/admin/courses', { params }).then((r) => setAllCourses(extractItems(r.data))).catch(() => {});
   };
 
   const fetchCourses = async (nextPage = 1) => {
@@ -46,8 +56,9 @@ export default function ManageCourses() {
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
     if (search) params.q = search;
-    if (durationFilter) params.course_duration = durationFilter;
-    if (statusFilter) params.status = statusFilter;
+    if (filters.department_id) params.department_id = filters.department_id;
+    if (filters.duration) params.course_duration = filters.duration;
+    if (filters.status) params.status = filters.status;
     try {
       const r = await api.get('/admin/courses', { params });
       const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
@@ -70,12 +81,22 @@ export default function ManageCourses() {
   };
 
   useEffect(() => {
+    if (isSuperAdmin) fetchDepartments();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (isDepartmentAdmin && departmentId) {
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
+  }, [isDepartmentAdmin, departmentId]);
+
+  useEffect(() => {
     fetchMetadata();
-  }, []);
+  }, [filters.department_id]);
 
   useEffect(() => {
     fetchCourses(1);
-  }, [durationFilter, statusFilter, search]);
+  }, [filters.department_id, filters.duration, filters.status, search]);
 
   const filtered = courses;
 
@@ -99,7 +120,7 @@ export default function ManageCourses() {
       await api.post('/admin/courses', form);
       toast.success('Course created');
       setShowAdd(false);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       fetchMetadata();
       fetchCourses(1);
     } catch (err) {
@@ -125,7 +146,7 @@ export default function ManageCourses() {
       toast.success('Course updated');
       setShowEdit(false);
       setEditingCourse(null);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       fetchMetadata();
       fetchCourses(1);
     } catch (err) {
@@ -230,6 +251,12 @@ export default function ManageCourses() {
     );
   }
 
+
+  // Department options for filter
+  const departmentOptions = useMemo(() => {
+    return departments.map((d) => ({ value: d._id, label: d.name }));
+  }, [departments]);
+
   return (
     <div className="admin-page">
 
@@ -238,7 +265,7 @@ export default function ManageCourses() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Courses</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalCourses} courses in current filter</p>
         </div>
-        <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
+        <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
           <HiOutlinePlus size={16} /> Add Course
         </button>
       </div>
@@ -251,7 +278,7 @@ export default function ManageCourses() {
         </div>
       )}
 
-      <div className="courses-filter-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className="courses-filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -261,11 +288,27 @@ export default function ManageCourses() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select className="input-field" value={durationFilter} onChange={(e) => setDurationFilter(e.target.value)}>
+
+        {/* Department Filter */}
+        <select
+          className="input-field"
+          value={filters.department_id}
+          onChange={(e) => {
+            setFilters({ department_id: e.target.value, duration: '', status: '' });
+          }}
+          disabled={isDepartmentAdmin}
+        >
+          <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}</option>
+          {departmentOptions.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
+
+        <select className="input-field" value={filters.duration} onChange={(e) => setFilters({ ...filters, duration: e.target.value })}>
           <option value="">All Durations</option>
           {[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>{y} year{y > 1 ? 's' : ''}</option>)}
         </select>
-        <select className="input-field" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select className="input-field" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
           <option value="">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>

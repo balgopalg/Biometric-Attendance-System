@@ -6,6 +6,7 @@ import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle } from 'react-ic
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { useAuth } from '../../hooks/useAuth';
 
 function normalizeSearchText(value) {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -40,9 +41,12 @@ function studentOptionLabel(student) {
 }
 
 export default function StudentEnrollment() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+
   const [students, setStudents] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [courses, setCourses] = useState([]);
-  const [filters, setFilters] = useState({ course_id: '', academic_session: '', semester: '' });
+  const [filters, setFilters] = useState({ department_id: '', course_id: '', academic_session: '', semester: '' });
   const [sessionOptions, setSessionOptions] = useState([]);
   const [semesterOptions, setSemesterOptions] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState('');
@@ -63,16 +67,37 @@ export default function StudentEnrollment() {
   );
 
   useEffect(() => {
-    api.get('/admin/courses').then((r) => setCourses(r.data)).catch(() => {});
-  }, []);
+    if (isSuperAdmin) {
+      api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    } else if (isDepartmentAdmin && departmentId && departmentName) {
+      setDepartments([{ _id: departmentId, name: departmentName }]);
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
+  }, [isSuperAdmin, isDepartmentAdmin, departmentId, departmentName]);
+
+  useEffect(() => {
+    const params = {};
+    if (filters.department_id) params.department_id = filters.department_id;
+    api.get('/admin/courses', { params }).then((r) => setCourses(r.data)).catch(() => {});
+  }, [filters.department_id]);
 
   useEffect(() => {
     const controller = new AbortController();
 
     const fetchStudents = async () => {
+      // Dept admins always have department_id set; super admins fetch all by default
+      if (isDepartmentAdmin && !debouncedFilters.department_id) {
+        setStudents([]);
+        setStudentsError('');
+        return;
+      }
       setLoadingStudents(true);
       setStudentsError('');
       const baseParams = { limit: 500, include_inactive: true };
+      if (debouncedFilters.department_id) {
+        const dept = departments.find((d) => d._id === debouncedFilters.department_id);
+        if (dept) baseParams.department = dept.name;
+      }
       if (debouncedFilters.course_id) baseParams.course_id = debouncedFilters.course_id;
       if (debouncedFilters.academic_session) baseParams.academic_session = debouncedFilters.academic_session;
       if (debouncedFilters.semester) baseParams.semester = debouncedFilters.semester;
@@ -112,7 +137,7 @@ export default function StudentEnrollment() {
     fetchStudents();
 
     return () => controller.abort();
-  }, [debouncedFilters]);
+  }, [debouncedFilters, isDepartmentAdmin]);
 
   useEffect(() => {
     if (!filters.course_id) {
@@ -249,14 +274,32 @@ export default function StudentEnrollment() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Upload a student photo to extract and store their face embedding.</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <select
+          className="input-field"
+          value={filters.department_id}
+          onChange={(e) => {
+            setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '' });
+            setSelectedStudent('');
+          }}
+          disabled={isDepartmentAdmin}
+        >
+          <option value="">
+            {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+          </option>
+          {departments.map((d) => (
+            <option key={d._id} value={d._id}>{d.name}</option>
+          ))}
+        </select>
+
         <select
           className="input-field"
           value={filters.course_id}
           onChange={(e) => {
-            setFilters({ course_id: e.target.value, academic_session: '', semester: '' });
+            setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '' });
             setSelectedStudent('');
           }}
+          disabled={!filters.department_id}
         >
           <option value="">All Courses</option>
           {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
@@ -297,6 +340,8 @@ export default function StudentEnrollment() {
         {!loadingStudents && studentsError ? (
           <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => setFilters({ ...filters })} compact />
         ) : null}
+
+
 
         {/* Upload Panel */}
         <div className="glass-card" style={{ padding: 24 }}>

@@ -2,9 +2,9 @@ name: Quality Checks
 
 on:
   push:
-    branches: [main, develop, ProductionReady, testing]
+    branches: [main, develop, ProductionReady, testing, dev-features]
   pull_request:
-    branches: [main, develop, ProductionReady, testing]
+    branches: [main, develop, ProductionReady, testing, dev-features]
 
 permissions:
   contents: read

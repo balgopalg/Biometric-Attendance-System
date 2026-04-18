@@ -199,10 +199,13 @@ def _get_active_session(session_id):
         return None
 
     expires_at = session.get("expires_at")
-    if isinstance(expires_at, datetime) and expires_at <= datetime.now(timezone.utc):
-        _active_sessions_collection().delete_one({"session_id": str(session_id)})
-        _clear_cached_session_candidates(session_id)
-        return None
+    if isinstance(expires_at, datetime):
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            _active_sessions_collection().delete_one({"session_id": str(session_id)})
+            _clear_cached_session_candidates(session_id)
+            return None
 
     return session
 
@@ -242,6 +245,8 @@ def _within_rollback(session_doc):
     rollback_until = session_doc.get("rollback_until")
     if not rollback_until:
         return False
+    if isinstance(rollback_until, datetime) and rollback_until.tzinfo is None:
+        rollback_until = rollback_until.replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) <= rollback_until
 
 
@@ -279,13 +284,15 @@ def _session_review_payload(session_doc):
             })
 
     paper = get_paper_by_id(session_doc.get("paper_id"))
+    committed_at = session_doc.get("committed_at")
+    rollback_until = session_doc.get("rollback_until")
     return {
         "session_id": session_doc.get("session_id"),
         "paper": _enrich_paper(paper) if paper else None,
         "present_students": present_students,
         "candidates": candidates,
-        "committed_at": session_doc.get("committed_at"),
-        "rollback_until": session_doc.get("rollback_until"),
+        "committed_at": committed_at.isoformat() if hasattr(committed_at, "isoformat") else committed_at,
+        "rollback_until": rollback_until.isoformat() if hasattr(rollback_until, "isoformat") else rollback_until,
         "editable": _within_rollback(session_doc) and not session_doc.get("finalized", False),
         "students_marked": len(present_ids),
     }
@@ -499,10 +506,14 @@ def start_session(user):
     _create_active_session(session_id, paper_id=paper_id, lecturer_id=str(user["_id"]))
     active = _get_active_session(session_id) or {}
 
+    started_at = active.get("started_at")
+    if started_at and hasattr(started_at, "isoformat"):
+        started_at = started_at.isoformat()
+
     return jsonify({
         "session_id": session_id,
         "paper": _enrich_paper(paper),
-        "started_at": active.get("started_at"),
+        "started_at": started_at,
     })
 
 
@@ -920,7 +931,7 @@ def commit_session(user):
         "message": "Attendance committed successfully",
         "students_marked": len(present_user_ids),
         "session_id": session_id,
-        "rollback_until": rollback_until,
+        "rollback_until": rollback_until.isoformat() if rollback_until else None,
     })
 
 
@@ -1130,11 +1141,11 @@ def lecturer_progress(user):
             "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
             "course_name": (paper or {}).get("course_name"),
             "academic_year": session_doc.get("academic_year") or (paper or {}).get("academic_year"),
-            "timestamp": first_ts,
+            "timestamp": first_ts.isoformat() if hasattr(first_ts, "isoformat") else first_ts,
             "students_count": len(students),
             "total_students": enrolled_totals_by_paper.get(pid, 0),
             "students": students,
-            "rollback_until": rollback_until,
+            "rollback_until": rollback_until.isoformat() if hasattr(rollback_until, "isoformat") else rollback_until,
             "editable": editable,
         })
 
@@ -1169,7 +1180,7 @@ def lecturer_progress(user):
             "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
             "course_name": (paper or {}).get("course_name"),
             "academic_year": (paper or {}).get("academic_year"),
-            "timestamp": first_ts,
+            "timestamp": first_ts.isoformat() if hasattr(first_ts, "isoformat") else first_ts,
             "students_count": len(students),
             "total_students": enrolled_totals_by_paper.get(pid, 0),
             "students": students,
@@ -1177,7 +1188,7 @@ def lecturer_progress(user):
             "editable": False,
         })
 
-    sessions.sort(key=lambda x: x.get("timestamp") or datetime.min, reverse=True)
+    sessions.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
 
     # Per-paper aggregate.
     paper_stats = defaultdict(lambda: {"classes_taken": 0, "attendance_marks": 0})
@@ -1226,7 +1237,7 @@ def lecturer_progress(user):
 
 @lecturer_bp.route('/capabilities', methods=['GET'])
 @role_required('lecturer')
-def get_lecturer_capabilities():
+def get_lecturer_capabilities(user):
     """Return a JSON object describing enabled lecturer features."""
     # Example: add more features as needed
     return jsonify({

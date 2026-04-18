@@ -16,6 +16,11 @@ from app.utils.helpers import sanitise_mongo_doc
 from app.utils.validation import validate_password_strength
 import re
 
+# Valid role values for the 4-tier RBAC model
+VALID_ROLES = {"super_admin", "department_admin", "lecturer", "student"}
+# Legacy alias kept to avoid breaking old code paths
+LEGACY_ROLE_MAP = {"admin": "super_admin"}
+
 
 def normalize_email(email: Any) -> str:
     return str(email or "").strip().lower()
@@ -90,25 +95,38 @@ def create_user(
     role: str,
     department: str = "",
     pin: Optional[Any] = None,
-    must_change_password: bool = False
+    must_change_password: bool = False,
+    department_id: Optional[Any] = None,
 ) -> dict:
     """Insert a new user and return the inserted document."""
+    # Normalise legacy role aliases
+    effective_role = LEGACY_ROLE_MAP.get(role, role)
     normalized_email = normalize_email(email)
+
+    # Coerce department_id to ObjectId when provided
+    dept_oid = None
+    if department_id is not None and str(department_id).strip():
+        try:
+            dept_oid = ObjectId(str(department_id))
+        except (InvalidId, Exception):
+            dept_oid = None
+
     doc = {
         "name": name,
         "email": normalized_email,
         "password_hash": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
-        "role": role,
+        "role": effective_role,
         "department": department,
+        "department_id": dept_oid,
         "must_change_password": must_change_password,
         "session_version": 1,
         "created_at": datetime.now(timezone.utc),
     }
-    if role == "lecturer" and pin:
+    if effective_role == "lecturer" and pin:
         doc["pin_hash"] = hash_pin(pin)
         doc["pin_last_set"] = datetime.now(timezone.utc)
         doc["pin"] = ""
-        
+
     users = get_collection("auth", "users")
     result = users.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
@@ -140,9 +158,16 @@ def find_user_by_id(user_id: str) -> Optional[dict]:
     return users.find_one({"_id": oid})
 
 
-def get_users_by_role(role: str) -> List[dict]:
+def get_users_by_role(role: str, department_id: Optional[Any] = None) -> List[dict]:
+    """Return users by role, optionally filtered by department_id."""
     users = get_collection("auth", "users")
-    return list(users.find({"role": role}))
+    query: Dict[str, Any] = {"role": role}
+    if department_id is not None:
+        try:
+            query["department_id"] = ObjectId(str(department_id))
+        except (InvalidId, Exception):
+            pass
+    return list(users.find(query))
 
 
 def get_users_by_ids(user_ids: List[str]) -> Dict[str, dict]:

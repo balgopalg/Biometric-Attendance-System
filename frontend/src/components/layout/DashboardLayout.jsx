@@ -8,6 +8,8 @@ const SIDEBAR_COLLAPSED = 76;
 
 const titleMap = {
   '/admin': 'Admin Dashboard',
+  '/admin/departments': 'Manage Departments',
+  '/admin/department-admins': 'Manage Dept. Admins',
   '/admin/courses': 'Manage Courses',
   '/admin/papers': 'Manage Papers',
   '/admin/lecturers': 'Manage Lecturers',

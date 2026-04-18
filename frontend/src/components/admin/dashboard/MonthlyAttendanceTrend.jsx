@@ -51,7 +51,14 @@ function AttendanceBars({ points, maxValue, width, height }) {
   );
 }
 
-export default function MonthlyAttendanceTrend({ points }) {
+export default function MonthlyAttendanceTrend({ 
+  points, 
+  isSuperAdmin, 
+  departmentsList = [], 
+  trendDepartment, 
+  onTrendDepartmentChange,
+  loading 
+}) {
   const width = 620;
   const height = 210;
   const padding = { top: 16, right: 16, bottom: 26, left: 16 };
@@ -83,7 +90,24 @@ export default function MonthlyAttendanceTrend({ points }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <div>
           <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>Monthly Attendance Trend</p>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.76rem', marginTop: 3 }}>Last {points.length} months attendance logs</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>Last {points.length || 6} months attendance</p>
+            {isSuperAdmin && (
+              <select
+                className="input-field"
+                style={{ padding: '2px 8px', fontSize: '0.75rem', height: 'auto', minWidth: 120, background: 'var(--bg-card-alt)' }}
+                value={trendDepartment}
+                onChange={(e) => onTrendDepartmentChange?.(e.target.value)}
+                disabled={loading}
+              >
+                <option value="">All Departments</option>
+                {departmentsList.map(d => (
+                  <option key={d._id} value={d.name}>{d.name}</option>
+                ))}
+              </select>
+            )}
+            {loading && <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Updating...</span>}
+          </div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <p style={{ fontSize: '1.1rem', fontWeight: 800, lineHeight: 1 }}>{totalAttendance}</p>

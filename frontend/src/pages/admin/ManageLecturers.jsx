@@ -6,6 +6,7 @@ import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlinePlus,
   HiOutlineSearch,
@@ -47,8 +48,10 @@ const buildTempPassword = (length = 14) => {
   }
   return chars.join('');
 };
-
 export default function ManageLecturers() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+  const [departments, setDepartments] = useState([]);
+
   const [lecturers, setLecturers] = useState([]);
   const [totalLecturers, setTotalLecturers] = useState(0);
   const [page, setPage] = useState(1);
@@ -64,7 +67,7 @@ export default function ManageLecturers() {
   const [assignedPaperIds, setAssignedPaperIds] = useState([]);
 
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ course_id: '', semester: '', paper_id: '' });
+  const [filters, setFilters] = useState({ department_id: '', course_id: '', semester: '', paper_id: '' });
   const [form, setForm] = useState(EMPTY_FORM);
   const [loadingLecturers, setLoadingLecturers] = useState(false);
   const [lecturersError, setLecturersError] = useState('');
@@ -74,9 +77,17 @@ export default function ManageLecturers() {
   const [excelResults, setExcelResults] = useState(null);
   const excelFileInputRef = useRef(null);
 
+  // Fetch departments for Super Admin
+  const fetchDepartments = () => {
+    api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => setDepartments([]));
+  };
+
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setCourses(extractItems(r.data))).catch(() => {});
-    api.get('/admin/papers').then((r) => setPapers(extractItems(r.data))).catch(() => {});
+    const params = {};
+    if (isSuperAdmin && filters.department_id) params.department_id = filters.department_id;
+    if (isDepartmentAdmin) params.department_id = departmentId;
+    api.get('/admin/courses', { params }).then((r) => setCourses(extractItems(r.data))).catch(() => {});
+    api.get('/admin/papers', { params }).then((r) => setPapers(extractItems(r.data))).catch(() => {});
   };
 
   const fetchLecturers = (nextPage = 1) => {
@@ -86,6 +97,7 @@ export default function ManageLecturers() {
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
     if (search) params.q = search;
+    if (filters.department_id) params.department_id = filters.department_id;
     if (filters.course_id) params.course_id = filters.course_id;
     if (filters.semester) params.semester = filters.semester;
     if (filters.paper_id) params.paper_id = filters.paper_id;
@@ -108,12 +120,22 @@ export default function ManageLecturers() {
   };
 
   useEffect(() => {
+    if (isSuperAdmin) fetchDepartments();
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    if (isDepartmentAdmin && departmentId) {
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
+  }, [isDepartmentAdmin, departmentId]);
+
+  useEffect(() => {
     fetchMetadata();
-  }, []);
+  }, [filters.department_id]);
 
   useEffect(() => {
     fetchLecturers(1);
-  }, [filters.course_id, filters.semester, filters.paper_id, search]);
+  }, [filters.department_id, filters.course_id, filters.semester, filters.paper_id, search]);
 
   const semesterOptions = useMemo(() => {
     const values = new Set();
@@ -134,12 +156,21 @@ export default function ManageLecturers() {
   }, [papers, filters.course_id, filters.semester]);
 
   const handleAdd = async () => {
+    if (!form.name?.trim() || !form.email?.trim()) {
+      toast.error('Name and Email are required');
+      return;
+    }
+    if (!form.department?.trim()) {
+      toast.error('Primary Department is required');
+      return;
+    }
+
     try {
       const initialPassword = buildTempPassword();
       const res = await api.post('/admin/lecturers', { ...form, role: 'lecturer', initial_password: initialPassword });
       const data = res.data;
       setShowAdd(false);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       if (data?.temp_password) {
         setCreatedCreds({
           name: data.name,
@@ -272,18 +303,34 @@ export default function ManageLecturers() {
           }}>
             <HiOutlineDocumentAdd size={16} /> Import Excel
           </button>
-          <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
+          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
             <HiOutlinePlus size={16} /> Add Lecturer
           </button>
         </div>
       </div>
 
-      <div className="lecturers-filter-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className="lecturers-filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input className="search-input" placeholder="Search by name, email or subject..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <select className="input-field" value={filters.course_id} onChange={(e) => setFilters({ course_id: e.target.value, semester: '', paper_id: '' })}>
+
+        {/* Department Filter */}
+        <select
+          className="input-field"
+          value={filters.department_id}
+          onChange={(e) => {
+            setFilters({ department_id: e.target.value, course_id: '', semester: '', paper_id: '' });
+          }}
+          disabled={isDepartmentAdmin}
+        >
+          <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}</option>
+          {departments.map((d) => (
+            <option key={d._id} value={d._id}>{d.name}</option>
+          ))}
+        </select>
+
+        <select className="input-field" value={filters.course_id} onChange={(e) => setFilters({ ...filters, course_id: e.target.value, semester: '', paper_id: '' })}>
           <option value="">All Courses</option>
           {courses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
         </select>
@@ -392,6 +439,22 @@ export default function ManageLecturers() {
         <div style={{ marginBottom: 14 }}>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Email</label>
           <input className="input-field" placeholder="lecturer@email.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Primary Department</label>
+          <select
+            className="input-field"
+            value={form.department}
+            onChange={(e) => setForm({ ...form, department: e.target.value })}
+            disabled={isDepartmentAdmin}
+          >
+            <option value="" disabled={isSuperAdmin}>
+              {isDepartmentAdmin ? (departmentName || 'Department') : 'Select Primary Department...'}
+            </option>
+            {departments.map((d) => (
+              <option key={d._id} value={d.name}>{d.name}</option>
+            ))}
+          </select>
         </div>
         <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 16 }}>
           A temporary password will be generated automatically. Lecturers will create or update their own PIN from their dashboard.

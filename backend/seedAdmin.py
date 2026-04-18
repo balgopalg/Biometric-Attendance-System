@@ -1,4 +1,4 @@
-"""Interactive admin seeding script.
+"""Interactive super admin seeding script.
 
 Usage:
     python seedAdmin.py
@@ -20,7 +20,7 @@ def _prompt_non_empty(label):
 
 def _prompt_email():
     while True:
-        email = _prompt_non_empty("Admin email: ").lower()
+        email = _prompt_non_empty("Super Admin email: ").lower()
         if "@" in email and "." in email.split("@")[-1]:
             return email
         print("Please enter a valid email address.")
@@ -28,7 +28,7 @@ def _prompt_email():
 
 def _prompt_password():
     while True:
-        password = getpass("Admin password (min 8 chars, include 1 number): ")
+        password = getpass("Super Admin password (min 8 chars, include 1 number): ")
         if len(password) < 8:
             print("Password must be at least 8 characters.")
             continue
@@ -48,9 +48,11 @@ def main():
     app = create_app(seed_default_admin=False)
 
     with app.app_context():
-        existing_admins = get_users_by_role("admin")
-        if existing_admins:
-            print("An admin already exists. Seed cancelled to avoid duplicates.")
+        # Check for existing super_admin or legacy admin
+        existing_super_admins = get_users_by_role("super_admin")
+        existing_legacy_admins = get_users_by_role("admin")
+        if existing_super_admins or existing_legacy_admins:
+            print("A super admin already exists. Seed cancelled to avoid duplicates.")
             return
 
         email = _prompt_email()
@@ -60,15 +62,16 @@ def main():
 
         password = _prompt_password()
         admin = create_user(
-            name="System Admin",
+            name="Super Admin",
             email=email,
             password=password,
-            role="admin",
+            role="super_admin",
             department="Administration",
+            department_id=None,
             must_change_password=False,
         )
 
-        print(f"Admin created successfully: {admin['email']}")
+        print(f"Super Admin created successfully: {admin['email']}")
 
 
 if __name__ == "__main__":

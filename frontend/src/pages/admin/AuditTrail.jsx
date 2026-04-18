@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineShieldCheck, HiOutlineRefresh } from 'react-icons/hi';
 import { formatDateTimeIndia, getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
+import { useAuth } from '../../hooks/useAuth';
 
 const PER_PAGE = 20;
 
@@ -30,6 +31,8 @@ function asDisplayText(value, fallback = '—') {
 }
 
 export default function AuditTrail() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -39,6 +42,19 @@ export default function AuditTrail() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logsError, setLogsError] = useState('');
+  const [deptFilter, setDeptFilter] = useState('');
+  const [departments, setDepartments] = useState([]);
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api.get('/admin/departments')
+        .then((r) => {
+          const depts = Array.isArray(r.data) ? r.data : [];
+          setDepartments(depts);
+        })
+        .catch(() => {});
+    }
+  }, [isSuperAdmin]);
 
   const actionSuggestions = useMemo(() => {
     const commonActions = [
@@ -76,6 +92,7 @@ export default function AuditTrail() {
     if (keyword) params.action = keyword;
     if (dateFrom) params.from = dateFrom;
     if (dateTo) params.to = dateTo;
+    if (deptFilter && isSuperAdmin) params.department_id = deptFilter;
     api.get('/admin/audit-logs', { params })
       .then((r) => {
         const nextLogs = Array.isArray(r.data?.logs)
@@ -118,6 +135,7 @@ export default function AuditTrail() {
     setKeyword('');
     setDateFrom('');
     setDateTo('');
+    setDeptFilter('');
     setPage(1);
     setTimeout(() => fetchLogs(1), 0);
   };
@@ -225,6 +243,22 @@ export default function AuditTrail() {
             min={dateFrom || undefined}
           />
         </div>
+        {isSuperAdmin && (
+          <div>
+            <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Department</label>
+            <select
+              className="input-field"
+              style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }}
+              value={deptFilter}
+              onChange={(e) => setDeptFilter(e.target.value)}
+            >
+              <option value="">All Departments</option>
+              {departments.map(d => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end' }}>
           <button className="btn-primary" style={{ padding: '8px 18px', fontSize: '0.78rem' }} onClick={handleFilter}>
             Apply Filters

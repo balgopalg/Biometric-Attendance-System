@@ -54,6 +54,28 @@ def _values_equal(actual, expected):
     return _as_text(actual) == _as_text(expected)
 
 
+class FakeCursor(list):
+    """Wraps a list to support chained .sort().skip().limit() as pymongo cursors do."""
+
+    def sort(self, key_or_list, direction=None):
+        if isinstance(key_or_list, str):
+            sort_list = [(key_or_list, direction or 1)]
+        else:
+            sort_list = key_or_list
+        result = list(self)
+        for sort_key, sort_dir in reversed(sort_list):
+            result.sort(key=lambda d: d.get(sort_key) if d.get(sort_key) is not None else datetime.min, reverse=(sort_dir == -1))
+        return FakeCursor(result)
+
+    def skip(self, n):
+        return FakeCursor(list(self)[n:])
+
+    def limit(self, n):
+        if n <= 0:
+            return self
+        return FakeCursor(list(self)[:n])
+
+
 class FakeCollection:
     def __init__(self, docs=None):
         self.docs = [copy.deepcopy(doc) for doc in (docs or [])]
@@ -65,6 +87,10 @@ class FakeCollection:
         for key, expected in query.items():
             if key == "$or":
                 if not any(self._match(doc, subquery) for subquery in expected):
+                    return False
+                continue
+            if key == "$and":
+                if not all(self._match(doc, subquery) for subquery in expected):
                     return False
                 continue
 
@@ -82,6 +108,46 @@ class FakeCollection:
                     else:
                         if not any(_values_equal(actual, option) for option in options):
                             return False
+                    continue
+                if "$nin" in expected:
+                    options = expected["$nin"]
+                    if any(_values_equal(actual, option) for option in options):
+                        return False
+                    continue
+                if "$ne" in expected:
+                    if _values_equal(actual, expected["$ne"]):
+                        return False
+                    continue
+
+                # Comparison operators
+                matched_comparison = True
+                has_comparison = False
+                if "$gte" in expected:
+                    has_comparison = True
+                    if actual is None or actual < expected["$gte"]:
+                        matched_comparison = False
+                if "$gt" in expected:
+                    has_comparison = True
+                    if actual is None or actual <= expected["$gt"]:
+                        matched_comparison = False
+                if "$lte" in expected:
+                    has_comparison = True
+                    if actual is None or actual > expected["$lte"]:
+                        matched_comparison = False
+                if "$lt" in expected:
+                    has_comparison = True
+                    if actual is None or actual >= expected["$lt"]:
+                        matched_comparison = False
+                if has_comparison:
+                    if not matched_comparison:
+                        return False
+                    continue
+
+                if "$regex" in expected:
+                    import re
+                    flags = re.IGNORECASE if expected.get("$options") == "i" else 0
+                    if actual is None or not re.search(expected["$regex"], str(actual), flags):
+                        return False
                     continue
 
             if isinstance(actual, list):
@@ -106,14 +172,17 @@ class FakeCollection:
             projected.pop("_id", None)
         return projected
 
-    def find_one(self, query=None, projection=None):
-        for doc in self.docs:
-            if self._match(doc, query or {}):
-                return self._project(doc, projection)
-        return None
+    def find_one(self, query=None, projection=None, sort=None):
+        matches = [doc for doc in self.docs if self._match(doc, query or {})]
+        if sort and matches:
+            for sort_key, sort_dir in reversed(sort):
+                matches.sort(key=lambda d: d.get(sort_key) or datetime.min, reverse=(sort_dir == -1))
+        if not matches:
+            return None
+        return self._project(matches[0], projection)
 
     def find(self, query=None, projection=None):
-        return [self._project(doc, projection) for doc in self.docs if self._match(doc, query or {})]
+        return FakeCursor([self._project(doc, projection) for doc in self.docs if self._match(doc, query or {})])
 
     def insert_one(self, doc):
         inserted = copy.deepcopy(doc)
@@ -172,6 +241,45 @@ class FakeCollection:
 
     def index_information(self):
         return {}
+
+    def aggregate(self, pipeline):
+        """Minimal aggregate for IPRateLimiter."""
+        docs = list(self.docs)
+        for stage in pipeline:
+            if "$match" in stage:
+                docs = [d for d in docs if self._match(d, stage["$match"])]
+            elif "$group" in stage:
+                group_spec = stage["$group"]
+                result = {}
+                for key, op in group_spec.items():
+                    if key == "_id":
+                        result["_id"] = group_spec["_id"]
+                    elif isinstance(op, dict) and "$sum" in op:
+                        field = op["$sum"]
+                        if isinstance(field, str) and field.startswith("$"):
+                            result[key] = sum(d.get(field[1:], 0) for d in docs)
+                        else:
+                            result[key] = len(docs) * field
+                return [result] if docs else []
+        return docs
+
+    def find_one_and_update(self, query, update, upsert=False, return_document=None):
+        """Minimal find_one_and_update for audit log deduplication."""
+        for doc in self.docs:
+            if self._match(doc, query or {}):
+                before = copy.deepcopy(doc)
+                self._apply_update(doc, update)
+                return before
+        if upsert:
+            if "$setOnInsert" in update:
+                new_doc = copy.deepcopy(update["$setOnInsert"])
+            else:
+                new_doc = self._build_upsert_doc(query or {}, update)
+            if "_id" not in new_doc:
+                new_doc["_id"] = ObjectId()
+            self.docs.append(new_doc)
+            return None
+        return None
 
     def _build_upsert_doc(self, query, update):
         doc = {key: copy.deepcopy(value) for key, value in query.items() if not key.startswith("$")}
@@ -251,20 +359,33 @@ class BaseApiFlowTestCase(unittest.TestCase):
     def _build_seeded_client(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         admin_id = ObjectId()
+        dept_admin_id = ObjectId()
         lecturer_id = ObjectId()
         user_id = ObjectId()
         course_id = ObjectId()
         paper_id = ObjectId()
         audit_id = ObjectId()
+        dept_id = ObjectId()
 
         users = FakeCollection([
             {
                 "_id": admin_id,
-                "name": "System Admin",
+                "name": "Super Admin",
                 "email": "admin@system.com",
                 "password_hash": self._hash_password("admin123"),
-                "role": "admin",
+                "role": "super_admin",
                 "department": "Administration",
+                "department_id": None,
+                "must_change_password": False,
+            },
+            {
+                "_id": dept_admin_id,
+                "name": "Dept Admin",
+                "email": "deptadmin@system.com",
+                "password_hash": self._hash_password("deptadmin123"),
+                "role": "department_admin",
+                "department": "Computing",
+                "department_id": dept_id,
                 "must_change_password": False,
             },
             {
@@ -274,6 +395,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "password_hash": self._hash_password("lecturer123"),
                 "role": "lecturer",
                 "department": "Computing",
+                "department_id": dept_id,
                 "pin": "1234",
                 "must_change_password": False,
             },
@@ -284,6 +406,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "password_hash": self._hash_password("student123"),
                 "role": "student",
                 "department": "Computing",
+                "department_id": dept_id,
                 "must_change_password": False,
             },
         ])
@@ -294,9 +417,19 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "name": "Master of Computer Applications",
                 "code": "MCA",
                 "department": "Computing",
+                "department_id": dept_id,
                 "course_duration": 2,
                 "status": "active",
                 "year": "2026",
+            }
+        ])
+
+        departments_col = FakeCollection([
+            {
+                "_id": dept_id,
+                "name": "Computing",
+                "code": "COMP",
+                "status": "active",
             }
         ])
 
@@ -309,6 +442,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "lecturer_id": str(lecturer_id),
                 "semester": 1,
                 "total_classes": 2,
+                "department_id": dept_id,
             }
         ])
 
@@ -394,17 +528,23 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "exam_eligibility_overrides": FakeCollection([]),
             }
         )
-        academic = FakeDatabase({"student_profiles": student_profiles, "courses": courses, "papers": papers})
-        auth = FakeDatabase({"users": users})
+        academic = FakeDatabase({"student_profiles": student_profiles, "courses": courses, "papers": papers, "departments": departments_col})
+        auth = FakeDatabase({
+            "users": users,
+            "failed_login_attempts": FakeCollection([]),
+            "ip_rate_limits": FakeCollection([]),
+        })
         audit = FakeDatabase({"audit_logs": audit_logs})
 
         return FakeMongoClient({"biometric_auth": auth, "biometric_academic": academic, "biometric_attendance_ops": attendance, "biometric_audit": audit}), {
             "admin_id": str(admin_id),
+            "dept_admin_id": str(dept_admin_id),
             "lecturer_id": str(lecturer_id),
             "user_id": str(user_id),
             "course_id": str(course_id),
             "paper_id": str(paper_id),
             "audit_id": str(audit_id),
+            "dept_id": str(dept_id),
         }
 
     def login(self, email, password):
@@ -422,7 +562,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
 class AuthFlowTests(BaseApiFlowTestCase):
     def test_login_me_and_change_password(self):
         login_payload = self.login("admin@system.com", "admin123")
-        self.assertEqual(login_payload["user"]["role"], "admin")
+        self.assertEqual(login_payload["user"]["role"], "super_admin")
         self.assertEqual(login_payload["user"]["email"], "admin@system.com")
 
         me_response = self.client.get("/api/auth/me")
@@ -453,12 +593,12 @@ class AuthFlowTests(BaseApiFlowTestCase):
         threshold = self.app.config.get("LOGIN_LOCKOUT_THRESHOLD", 5)
         lockout_duration = self.app.config.get("LOGIN_LOCKOUT_DURATION_MINUTES", 15)
 
-        # Fail login up to threshold
-        for i in range(threshold):
+        # First (threshold - 1) attempts return 401 (wrong password but not yet locked)
+        for i in range(threshold - 1):
             resp = self.client.post("/api/auth/login", json={"email": email, "password": wrong_password})
             self.assertEqual(resp.status_code, 401, f"Attempt {i+1} should be unauthorized")
 
-        # The next attempt should lock the account
+        # The threshold-th attempt records the final failure and locks the account
         resp = self.client.post("/api/auth/login", json={"email": email, "password": wrong_password})
         self.assertEqual(resp.status_code, 429, "Should be locked out at threshold")
         payload = resp.get_json()
@@ -466,7 +606,7 @@ class AuthFlowTests(BaseApiFlowTestCase):
         self.assertIn("error", payload)
         self.assertIn("locked", payload["error"].lower())
 
-        # Further attempts remain locked
+        # Further attempts remain locked (is_account_locked check fires first)
         resp2 = self.client.post("/api/auth/login", json={"email": email, "password": wrong_password})
         self.assertEqual(resp2.status_code, 429, "Should remain locked out")
 
@@ -644,9 +784,9 @@ class AdminFlowTests(BaseApiFlowTestCase):
         with patch("app.routes.admin.get_audit_log_by_id", return_value={
             "_id": ObjectId(self.seed["audit_id"]),
             "action": "CREATE_STUDENT",
-            "timestamp": datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1),
+            "timestamp": datetime.now(timezone.utc) - timedelta(hours=1),
             "rollback": {"kind": "noop"},
-            "rollback_until": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
+            "rollback_until": datetime.now(timezone.utc) + timedelta(hours=1),
             "rolled_back": False,
         }), patch("app.routes.admin._execute_rollback_operation", side_effect=lambda payload: None), patch("app.routes.admin.log_action", side_effect=lambda *args, **kwargs: None):
             rollback = self.client.post(f"/api/admin/audit-logs/{self.seed['audit_id']}/rollback")

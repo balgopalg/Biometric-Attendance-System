@@ -64,7 +64,7 @@ function PasswordField({ label, value, field, placeholder, autoFocus = false, on
 }
 
 export default function ChangePassword() {
-  const { clearMustChangePassword, user } = useAuth();
+  const { refreshUser, user } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ current_password: '', new_password: '', confirm_password: '' });
   const [visiblePasswords, setVisiblePasswords] = useState({ current: false, next: false, confirm: false });
@@ -86,8 +86,16 @@ export default function ChangePassword() {
     setError('');
     try {
       await api.post('/auth/change-password', form);
-      clearMustChangePassword();
-      const dest = user?.role === 'admin' ? '/admin' : user?.role === 'lecturer' ? '/lecturer' : '/student';
+      const updatedUser = await refreshUser(); 
+      
+      const role = updatedUser?.role || user?.role;
+      let dest = '/student';
+      if (['admin', 'super_admin', 'department_admin'].includes(role)) {
+        dest = '/admin';
+      } else if (role === 'lecturer') {
+        dest = '/lecturer';
+      }
+
       navigate(dest, {
         replace: true,
         state: { showWelcome: true, welcomeToken: `${Date.now()}-${Math.random().toString(36).slice(2)}` },

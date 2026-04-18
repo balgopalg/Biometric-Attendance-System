@@ -1,108 +1,104 @@
-import { createContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../api/axios';
-import toast from 'react-hot-toast';
 
 const AuthContext = createContext(null);
-const USER_STORAGE_KEY = 'user';
-
-function getUserStorage() {
-  try {
-    return window.sessionStorage;
-  } catch {
-    return null;
-  }
-}
-
-function writeUserToStorage(userData) {
-  const storage = getUserStorage();
-  if (!storage) return;
-  storage.setItem(USER_STORAGE_KEY, JSON.stringify(userData));
-}
-
-function clearUserStorage() {
-  const storage = getUserStorage();
-  if (!storage) return;
-  storage.removeItem(USER_STORAGE_KEY);
-}
-
-let meRequestPromise = null;
-
-function fetchCurrentUserOnce() {
-  if (meRequestPromise) return meRequestPromise;
-
-  meRequestPromise = api.get('/auth/me')
-    .then((res) => res.data)
-    .catch(() => null)
-    .finally(() => {
-      meRequestPromise = null;
-    });
-
-  return meRequestPromise;
-}
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const cached = window.sessionStorage.getItem('user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
 
-  const logout = useCallback(() => {
-    toast.remove();
-    api.post('/auth/logout').catch(() => {});
-    clearUserStorage();
-    setUser(null);
+  const persistUser = useCallback((u) => {
+    setUser(u);
+    try {
+      if (u) {
+        window.sessionStorage.setItem('user', JSON.stringify(u));
+      } else {
+        window.sessionStorage.removeItem('user');
+      }
+    } catch {
+      // sessionStorage unavailable
+    }
   }, []);
 
   useEffect(() => {
-    let active = true;
-
-    fetchCurrentUserOnce()
-      .then((currentUser) => {
-        if (!active) return;
-        if (currentUser) {
-          setUser(currentUser);
-          writeUserToStorage(currentUser);
-          return;
-        }
-
-        clearUserStorage();
-        setUser(null);
+    api
+      .get('/auth/me')
+      .then((res) => {
+        persistUser(res.data);
       })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+      .catch(() => {
+        persistUser(null);
+      })
+      .finally(() => setLoading(false));
+  }, [persistUser]);
 
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const login = async (email, password) => {
-    const res = await api.post('/auth/login', { email, password });
-    const { user: userData } = res.data;
-    writeUserToStorage(userData);
-    setUser(userData);
-    return userData;
-  };
-
-  const clearMustChangePassword = () => {
-    setUser((prev) => {
-      if (!prev) return prev;
-      const updated = { ...prev, must_change_password: false };
-      writeUserToStorage(updated);
-      return updated;
-    });
-  };
-
-  const isAuthenticated = !!user;
-  const mustChangePassword = user?.must_change_password || false;
-
-  return (
-    <AuthContext.Provider value={{
-      user, loading, login, logout, isAuthenticated,
-      mustChangePassword, clearMustChangePassword,
-    }}>
-      {children}
-    </AuthContext.Provider>
+  const login = useCallback(
+    async (email, password) => {
+      const res = await api.post('/auth/login', { email, password });
+      persistUser(res.data.user);
+      return res.data;
+    },
+    [persistUser]
   );
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // ignore
+    }
+    persistUser(null);
+  }, [persistUser]);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await api.get('/auth/me');
+      persistUser(res.data);
+      return res.data;
+    } catch {
+      persistUser(null);
+      return null;
+    }
+  }, [persistUser]);
+
+  // ── Role helpers ──────────────────────────────────────────────────────
+  // Normalize legacy "admin" → "super_admin" for backward compatibility
+  const normalizedRole = user?.role === 'admin' ? 'super_admin' : user?.role;
+  const isSuperAdmin = normalizedRole === 'super_admin';
+  const isDepartmentAdmin = normalizedRole === 'department_admin';
+  const isAnyAdmin = isSuperAdmin || isDepartmentAdmin;
+  const isLecturer = normalizedRole === 'lecturer';
+  const isStudent = normalizedRole === 'student';
+  const departmentId = user?.department_id || null;
+  const departmentName = user?.department_name || user?.department || '';
+
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      login,
+      logout,
+      refreshUser,
+      // Role helpers
+      isSuperAdmin,
+      isDepartmentAdmin,
+      isAnyAdmin,
+      isLecturer,
+      isStudent,
+      departmentId,
+      departmentName,
+    }),
+    [user, loading, login, logout, refreshUser, isSuperAdmin, isDepartmentAdmin, isAnyAdmin, isLecturer, isStudent, departmentId, departmentName]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export default AuthContext;

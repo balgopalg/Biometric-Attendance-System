@@ -39,13 +39,24 @@ def utcnow():
 
 
 def sanitise_mongo_doc(doc: dict) -> dict:
-    """Convert MongoDB ObjectId to string for JSON serialisation."""
+    """Convert MongoDB ObjectId fields to strings for JSON serialisation."""
+    from bson import ObjectId
+
     if doc is None:
         return None
-    new_doc = dict(doc)
-    if "_id" in new_doc:
-        new_doc["_id"] = str(new_doc["_id"])
-    return new_doc
+
+    def _convert(value):
+        if isinstance(value, ObjectId):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: _convert(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_convert(item) for item in value]
+        return value
+
+    return _convert(dict(doc))
 
 
 def sanitise_many(docs) -> list:

@@ -11,6 +11,7 @@ import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlinePlus,
   HiOutlineSearch,
@@ -31,7 +32,6 @@ const EMPTY_FORM = {
   email: '',
   course_id: '',
   mobile_no: '',
-  // roll_number removed, use reg_number only
   reg_number: '',
 };
 const PAGE_SIZE = 10;
@@ -65,6 +65,9 @@ const buildTempPassword = (length = 14) => {
 };
 
 export default function ManageStudents() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+  const [departments, setDepartments] = useState([]);
+
   const [students, setStudents] = useState([]);
   const [totalStudents, setTotalStudents] = useState(0);
   const [page, setPage] = useState(1);
@@ -85,7 +88,7 @@ export default function ManageStudents() {
   const [paperStudent, setPaperStudent] = useState(null);
 
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ course_id: '', paper_id: '', semester: '' });
+  const [filters, setFilters] = useState({ department_id: '', course_id: '', paper_id: '', semester: '' });
   const [showInactiveRows, setShowInactiveRows] = useAdminPreference('show_inactive_faded_rows', true);
   const [filterSemesters, setFilterSemesters] = useState([]);
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -119,9 +122,18 @@ export default function ManageStudents() {
   const [savingStudentPapers, setSavingStudentPapers] = useState(false);
   const fetchStudentsRef = useRef(null);
 
+
+  // Fetch departments for Super Admin
+  const fetchDepartments = () => {
+    api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => setDepartments([]));
+  };
+
   const fetchMetadata = () => {
-    api.get('/admin/courses').then((r) => setCourses(extractItems(r.data))).catch(() => {});
-    api.get('/admin/papers').then((r) => setPapers(extractItems(r.data))).catch(() => {});
+    const params = {};
+    if (isSuperAdmin && filters.department_id) params.department_id = filters.department_id;
+    if (isDepartmentAdmin) params.department_id = departmentId;
+    api.get('/admin/courses', { params }).then((r) => setCourses(extractItems(r.data))).catch(() => {});
+    api.get('/admin/papers', { params }).then((r) => setPapers(extractItems(r.data))).catch(() => {});
   };
 
   const fetchStudents = (nextPage = 1, options = {}) => {
@@ -132,6 +144,12 @@ export default function ManageStudents() {
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
     if (debouncedSearch) params.q = debouncedSearch;
+    // Send both department_id and department name for backend filtering
+    if (debouncedFilters.department_id) {
+      params.department_id = debouncedFilters.department_id;
+      const dept = departments.find((d) => d._id === debouncedFilters.department_id);
+      if (dept) params.department = dept.name;
+    }
     if (debouncedFilters.course_id) params.course_id = debouncedFilters.course_id;
     if (debouncedFilters.paper_id) params.paper_id = debouncedFilters.paper_id;
     if (debouncedFilters.semester) params.semester = debouncedFilters.semester;
@@ -158,15 +176,40 @@ export default function ManageStudents() {
     });
   };
 
-  useEffect(() => {
-    fetchMetadata();
-  }, []);
+
 
   useEffect(() => {
+    if (isSuperAdmin) {
+      fetchDepartments();
+    } else if (isDepartmentAdmin && departmentId && departmentName) {
+      // Ensure department admin's department is present for filter lookup
+      setDepartments([{ _id: departmentId, name: departmentName }]);
+    }
+  }, [isSuperAdmin, isDepartmentAdmin, departmentId, departmentName]);
+
+  useEffect(() => {
+    // Set department filter for department admin
+    if (isDepartmentAdmin && departmentId) {
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
+  }, [isDepartmentAdmin, departmentId]);
+
+  useEffect(() => {
+    fetchMetadata();
+  }, [filters.department_id]);
+
+
+  useEffect(() => {
+    // Dept admins always have department_id set; super admins fetch all by default
+    if (isDepartmentAdmin && !debouncedFilters.department_id) {
+      setStudents([]);
+      setTotalStudents(0);
+      return;
+    }
     const controller = new AbortController();
     fetchStudents(1, { signal: controller.signal });
     return () => controller.abort();
-  }, [debouncedFilters, debouncedSearch, showInactiveRows]);
+  }, [debouncedFilters, debouncedSearch, showInactiveRows, isDepartmentAdmin]);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,19 +219,19 @@ export default function ManageStudents() {
         cancelled = true;
       };
     }
-
-    api.get(`/admin/courses/${filters.course_id}/semesters`)
+    const params = {};
+    if (filters.department_id) params.department_id = filters.department_id;
+    api.get(`/admin/courses/${filters.course_id}/semesters`, { params })
       .then((r) => {
         if (!cancelled) setFilterSemesters(r.data || []);
       })
       .catch(() => {
         if (!cancelled) setFilterSemesters([]);
       });
-
     return () => {
       cancelled = true;
     };
-  }, [filters.course_id]);
+  }, [filters.course_id, filters.department_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -269,12 +312,18 @@ export default function ManageStudents() {
     });
   }, [papers, filters.course_id, filters.semester]);
 
+
   const activeCourses = useMemo(
     () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
     [courses]
   );
 
   const visibleCourses = showInactiveRows ? courses : activeCourses;
+
+  // Department options for filter
+  const departmentOptions = useMemo(() => {
+    return departments.map((d) => ({ value: d._id, label: d.name }));
+  }, [departments]);
 
   useEffect(() => {
     if (showInactiveRows) return;
@@ -377,6 +426,10 @@ export default function ManageStudents() {
       toast.error('Email is required');
       return;
     }
+    if (!form.department?.trim()) {
+      toast.error('Department is required');
+      return;
+    }
     if (!form.course_id?.trim()) {
       toast.error('Please select a course');
       return;
@@ -388,7 +441,7 @@ export default function ManageStudents() {
       const data = res.data;
 
       setShowAdd(false);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       if (data?.temp_password) {
         setCreatedCreds({
           reg_number: data.profile?.reg_number || 'N/A',
@@ -442,7 +495,7 @@ export default function ManageStudents() {
       toast.success('Student updated');
       setShowEdit(false);
       setEditingStudent(null);
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
       fetchStudents(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update student');
@@ -836,10 +889,27 @@ export default function ManageStudents() {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div>
+          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Department</label>
+          <select
+            className="input-field"
+            value={form.department}
+            onChange={(e) => setForm({ ...form, department: e.target.value })}
+            disabled={isDepartmentAdmin}
+          >
+            <option value="" disabled={isSuperAdmin}>
+              {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+            </option>
+            {departments.map((d) => (
+              <option key={d._id} value={d.name}>{d.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course</label>
           <select className="input-field" value={form.course_id} onChange={(e) => setForm({ ...form, course_id: e.target.value })}>
             <option value="">Select course</option>
-            {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
+            {activeCourses.filter(c => !form.department || c.department.toLowerCase() === form.department.toLowerCase()).map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
           </select>
         </div>
 
@@ -919,7 +989,7 @@ export default function ManageStudents() {
           }}>
             <HiOutlineDocumentAdd size={16} /> Import Excel
           </button>
-          <button className="btn-primary" onClick={() => { setForm(EMPTY_FORM); setShowAdd(true); }}>
+          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
             <HiOutlinePlus size={16} /> Add Student
           </button>
         </div>
@@ -927,7 +997,8 @@ export default function ManageStudents() {
 
       <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
 
-      <div className="students-filter-grid" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+
+      <div className="students-filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -938,10 +1009,28 @@ export default function ManageStudents() {
           />
         </div>
 
+        {/* Department Filter */}
+        <select
+          className="input-field"
+          value={filters.department_id}
+          onChange={(e) => {
+            setFilters({ department_id: e.target.value, course_id: '', semester: '', paper_id: '' });
+          }}
+          disabled={isDepartmentAdmin}
+        >
+          <option value="">
+            {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+          </option>
+          {departmentOptions.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
+          ))}
+        </select>
+
         <select
           className="input-field"
           value={filters.course_id}
-          onChange={(e) => setFilters({ course_id: e.target.value, semester: '', paper_id: '' })}
+          onChange={(e) => setFilters({ ...filters, course_id: e.target.value, semester: '', paper_id: '' })}
+          disabled={!filters.department_id && isSuperAdmin}
         >
           <option value="">All Courses</option>
           {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
@@ -966,7 +1055,6 @@ export default function ManageStudents() {
           <option value="">All Subjects</option>
           {subjectOptions.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
         </select>
-
       </div>
 
       <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
@@ -986,7 +1074,7 @@ export default function ManageStudents() {
         ) : null}
 
         {!loadingStudents && studentsError ? (
-          <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => fetchStudents(page)} compact />
+          <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => setFilters({ ...filters })} compact />
         ) : null}
 
         {!loadingStudents && !studentsError && filtered.length === 0 ? (

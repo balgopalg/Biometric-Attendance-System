@@ -54,7 +54,8 @@ api.interceptors.response.use(
       const isAuthBootstrapCall =
         requestUrl.includes('/auth/me') ||
         requestUrl.includes('/auth/login') ||
-        requestUrl.includes('/auth/logout');
+        requestUrl.includes('/auth/logout') ||
+        requestUrl.includes('/auth/change-password');
       const alreadyOnLogin = window.location.pathname === '/login';
 
       const storage = getUserStorage();
