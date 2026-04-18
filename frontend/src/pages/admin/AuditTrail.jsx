@@ -31,7 +31,7 @@ function asDisplayText(value, fallback = '—') {
 }
 
 export default function AuditTrail() {
-  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+  const { isSuperAdmin } = useAuth();
 
   const [logs, setLogs] = useState([]);
   const [total, setTotal] = useState(0);

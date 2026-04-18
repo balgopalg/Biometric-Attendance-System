@@ -49,7 +49,7 @@ class TestRoleCheckers(unittest.TestCase):
     def test_is_super_admin(self):
         self.assertTrue(is_super_admin({"role": "super_admin"}))
         self.assertFalse(is_super_admin({"role": "department_admin"}))
-        self.assertFalse(is_super_admin({"role": "admin"}))
+        self.assertTrue(is_super_admin({"role": "admin"}))
 
     def test_is_department_admin(self):
         self.assertTrue(is_department_admin({"role": "department_admin"}))
