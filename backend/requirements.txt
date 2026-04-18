@@ -9,6 +9,7 @@ python-dotenv==1.0.1
 Pillow==12.2.0
 numpy==1.26.4
 scipy==1.14.1
+imutils==0.5.4
 mediapipe==0.10.21
 keras-facenet==0.3.2
 tensorflow==2.16.2
