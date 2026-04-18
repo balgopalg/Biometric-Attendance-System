@@ -7,7 +7,8 @@ This directory contains end-to-end browser tests using **Playwright** for the bi
 ## Files
 
 - `e2e/` — End-to-end browser test scenarios
-  - `project-flows.spec.js` — 3 integrated user workflows
+  - `project-flows.spec.js` — 3 integrated user workflows (roles, sessions, enrollment, export)
+  - `ux-accessibility.spec.js` — 4 integrated UX/accessibility scenarios (mobile overflow constraints, keyboard a11y, contrast)
 
 ## Quick Run
 
@@ -22,7 +23,9 @@ npx playwright test project-flows -g "Login and navigation"
 npx playwright show-report
 ```
 
-## Test Scenarios (3 tests)
+## Test Scenarios (7 tests across 2 files)
+
+### `project-flows.spec.js` (3 workflows)
 
 ### Test 1: Login and Navigation
 - Install browser stubs (camera, canvas)
@@ -62,6 +65,13 @@ npx playwright show-report
 - Confirm rollback dialog
 - Verify "Rolled Back" status badge
 - **Coverage:** File upload/download, table interactions, enrollment workflow, rollback operation
+
+### `ux-accessibility.spec.js` (4 scenarios)
+
+- **Scenario 1:** supports keyboard-first navigation on login screen
+- **Scenario 2:** maintains accessible contrast on key login texts
+- **Scenario 3:** keeps admin dashboard mobile-safe without horizontal overflow
+- **Scenario 4:** keeps lecturer session actions usable on mobile
 
 ## Key Configuration
 
@@ -279,7 +289,7 @@ npx playwright install chromium
 
 | Aspect | Mocked API | Live Server |
 |--------|-----------|-------------|
-| Speed | ~18s (3 tests) | ~60s+ (startup overhead) |
+| Speed | ~28s (7 tests) | ~60s+ (startup overhead) |
 | Reliability | 100% (no external deps) | Depends on backend health |
 | Debugging | Can inspect mock logic | Must trace through server |
 | CI/CD | Faster, simpler | Needs services/containers |

@@ -1,6 +1,6 @@
 # Project Review
 
-Generated on: April 12, 2026
+Generated on: April 18, 2026
 Project: Biometric Face Attendance Management System
 
 ## 1. Executive Summary
@@ -63,13 +63,15 @@ Frontend highlights:
   - per-record override
   - bulk override
 - Audit trail and rollback:
-  - audit log query and filtering
+  - audit log query and filtering by department logic
   - rollback action for eligible records
+  - Excel and CSV exportation mechanisms
 - Background jobs module:
   - job metrics
   - dead-letter listing
   - replay (bulk and filtered)
 - Dashboard metrics and insights
+- Mobile-first responsive UX conversions deployed site-wide.
 
 ### 3.2 Lecturer Features
 - Assigned papers view
@@ -199,7 +201,6 @@ Based on repository structure and configuration:
 - CI baseline checks are present.
 
 ## 9. Notable Considerations for Future Hardening
-- Add automated end-to-end authenticated tests for role workflows.
 - Consider production-grade session and queue observability dashboards.
 - Add explicit rate-limiting and security hardening checks for public deployment.
 - Add periodic cleanup strategy for runtime image artifacts in uploads and dataset folders.

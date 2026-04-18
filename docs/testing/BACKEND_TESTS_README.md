@@ -6,14 +6,15 @@ This directory contains comprehensive API flow tests for the biometric attendanc
 
 ## Files
 
-- `__init__.py` — Package marker
+- `conftest.py` — Pytest configurations
 - `test_api_flows.py` — Complete test suite with 4 integrated flows
+- `test_rbac.py` — 32 unit tests mapping every permission chain and rule in the system
 
 ## Quick Run
 
 ```bash
 # From backend directory
-python -m unittest tests.test_api_flows -v
+pytest tests/ -v
 ```
 
 ## Test Structure
@@ -41,6 +42,7 @@ Before each test, `_build_seeded_client()` populates the fake database with:
 | `StudentFlowTests` | Profile, attendance, predictions, eligibility | Student dashboard APIs |
 | `LecturerFlowTests` | Session lifecycle, recognition, commit, adjust | Attendance recording |
 | `AdminFlowTests` | Stats, matrix, exports, enrollment, rollback | Admin operations |
+| `RBAC Unit Tests` | Security assignments | Role bindings, scope mappings (32 tests) |
 
 ## Key Helpers
 
@@ -106,5 +108,5 @@ Run in GitHub Actions, GitLab CI, or any CI platform:
 
 ```bash
 pip install -r backend/requirements.txt
-python -m unittest discover -s backend/tests -p "test_*.py"
+pytest tests/ -v
 ```

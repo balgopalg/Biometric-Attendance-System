@@ -4,17 +4,16 @@ This project includes a comprehensive, deterministic end-to-end test suite cover
 
 ## Test Architecture Overview
 
-### Backend Tests: `backend/tests/test_api_flows.py`
-- **Framework:** Python `unittest`
-- **Fake Database:** Custom `FakeMongoClient` implementing PyMongo API (CRUD, query matching, operators)
-- **Coverage:** 4 integrated test suites covering authentication, student workflows, lecturer session lifecycle, and admin operations
-- **Status:** ✅ All 4 tests passing
+### Backend Tests: `pytest`
+- **Framework:** Python `pytest`
+- **Coverage:** Comprehensive coverage including RBAC permission chains, routing logic, authentication tokens, and queue resilience.
+- **Status:** ✅ 36 tests passing
 
 ### Frontend Tests: `frontend/tests/e2e/project-flows.spec.js`
 - **Framework:** Playwright 1.54.2 with Chromium browser
 - **Mocking:** API route interception via `page.route()` + browser stubs (camera, canvas)
-- **Coverage:** 3 integrated browser workflows covering login/navigation, attendance session, and enrollment/exports/rollback
-- **Status:** ✅ All 3 tests passing
+- **Coverage:** 7 integrated browser workflows covering login/navigation, attendance sessions, enrollment/exports/rollback, and UX/Accessibility rendering.
+- **Status:** ✅ 7 tests passing
 
 ---
 
@@ -24,17 +23,19 @@ This project includes a comprehensive, deterministic end-to-end test suite cover
 
 ```bash
 cd backend
-python -m unittest backend.tests.test_api_flows -v
+pytest tests/ -v
 ```
 
 **Expected Output:**
 ```
-test_auth_login_me_and_change_password ... ok
-test_student_profile_attendance_predictions_eligibility ... ok
-test_lecturer_session_lifecycle_recognition_adjustment ... ok
-test_admin_stats_enrollment_matrix_export_rollback ... ok
+============================= test session starts ==============================
+collected 36 items
 
-Ran 4 tests in ~5-10s — OK
+tests/test_api_flows.py::AuthFlowTests::test_auth_login_me_and_change_password PASSED [  2%]
+...
+tests/test_rbac.py::TestEffectiveAllowedRoles::test_lecturer_includes_higher PASSED [ 44%]
+...
+======================= 36 passed, 2 warnings in 25.14s =======================
 ```
 
 ### Run Frontend Tests
@@ -46,12 +47,11 @@ npm run test:e2e
 
 **Expected Output:**
 ```
-Running 3 tests using 3 workers
-  ✓ Login and navigation
-  ✓ Attendance session lifecycle
-  ✓ Enrollment, exports, and rollback
-  
-  3 passed (18.5s)
+Running 7 tests using 4 workers
+[1/7] [chromium] › tests\e2e\project-flows.spec.js:714:3 › Project end-to-end flows › login and navigation
+[2/7] [chromium] › tests\e2e\ux-accessibility.spec.js:211:3 › UX and accessibility hardening checks › supports keyboard-first navigation on login screen
+...
+  7 passed (28s)
 ```
 
 ---
@@ -334,11 +334,9 @@ jobs:
 
 | Aspect | Backend | Frontend |
 |--------|---------|----------|
-| Framework | unittest + Flask | Playwright + React |
-| Tests | 4 suites | 3 scenarios |
-| Status | ✅ 4/4 passing | ✅ 3/3 passing |
-| Runtime | ~5-10s | ~18.5s |
-| Dependencies | Mocked (cv2, detector, embedding) | Mocked (API routes, camera, canvas) |
-| Database | Fake Mongo client | N/A (API mocked) |
+| Framework | pytest | Playwright + React |
+| Tests | 36 integrated tests | 7 scenarios |
+| Status | ✅ 36/36 passing | ✅ 7/7 passing |
+| Runtime | ~25s | ~28s |
 
-**Both suites are deterministic, fast, and ready for CI/CD integration. Run either suite independently or together for full system validation.**
+**Both suites are deterministic, stable over variable compilation latencies, and ready for CI/CD integration.**
