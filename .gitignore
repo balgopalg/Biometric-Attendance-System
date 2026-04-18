@@ -80,6 +80,11 @@ frontend/dist/
 
 # Vite cache
 .vite/
+frontend/test-results/
+frontend-test-results/
+blob-report/
+playwright-report/
+test-results/
 
 # Optional lockfiles (uncomment if you do not want them tracked)
 # package-lock.json

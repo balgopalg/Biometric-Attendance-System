@@ -267,79 +267,104 @@ export default function StudentEnrollment() {
   };
 
   return (
-    <div className="admin-page">
+    <div className="admin-page" style={{ paddingBottom: 40, overflowX: 'hidden' }}>
 
-      <div style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Face Enrollment</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Upload a student photo to extract and store their face embedding.</p>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Student Face Enrollment</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>
+          Establish a biometric profile for students by capturing or uploading a high-quality face photo.
+        </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <select
-          className="input-field"
-          value={filters.department_id}
-          onChange={(e) => {
-            setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '' });
-            setSelectedStudent('');
-          }}
-          disabled={isDepartmentAdmin}
-        >
-          <option value="">
-            {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
-          </option>
-          {departments.map((d) => (
-            <option key={d._id} value={d._id}>{d.name}</option>
-          ))}
-        </select>
+      <div className="filter-bar">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.7rem] font-bold uppercase tracking-wider text-muted px-1">Department</label>
+            <select
+              className="input-field"
+              value={filters.department_id}
+              onChange={(e) => {
+                setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '' });
+                setSelectedStudent('');
+              }}
+              disabled={isDepartmentAdmin}
+            >
+              <option value="">
+                {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+              </option>
+              {departments.map((d) => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
 
-        <select
-          className="input-field"
-          value={filters.course_id}
-          onChange={(e) => {
-            setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '' });
-            setSelectedStudent('');
-          }}
-          disabled={!filters.department_id}
-        >
-          <option value="">All Courses</option>
-          {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
-        </select>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.7rem] font-bold uppercase tracking-wider text-muted px-1">Course</label>
+            <select
+              className="input-field"
+              value={filters.course_id}
+              onChange={(e) => {
+                setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '' });
+                setSelectedStudent('');
+              }}
+              disabled={!filters.department_id}
+            >
+              <option value="">All Courses</option>
+              {activeCourses.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {formatCourseName(c.name, { status: c.status })}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <select
-          className="input-field"
-          value={filters.academic_session}
-          onChange={(e) => {
-            setFilters({ ...filters, academic_session: e.target.value });
-            setSelectedStudent('');
-          }}
-          disabled={!filters.course_id}
-        >
-          <option value="">All Sessions</option>
-          {effectiveSessionOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.7rem] font-bold uppercase tracking-wider text-muted px-1">Session</label>
+            <select
+              className="input-field"
+              value={filters.academic_session}
+              onChange={(e) => {
+                setFilters({ ...filters, academic_session: e.target.value });
+                setSelectedStudent('');
+              }}
+              disabled={!filters.course_id}
+            >
+              <option value="">All Sessions</option>
+              {effectiveSessionOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
 
-        <select
-          className="input-field"
-          value={filters.semester}
-          onChange={(e) => {
-            setFilters({ ...filters, semester: e.target.value });
-            setSelectedStudent('');
-          }}
-          disabled={!filters.course_id}
-        >
-          <option value="">All Semesters</option>
-          {semesterOptions.map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
-        </select>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[0.7rem] font-bold uppercase tracking-wider text-muted px-1">Semester</label>
+            <select
+              className="input-field"
+              value={filters.semester}
+              onChange={(e) => {
+                setFilters({ ...filters, semester: e.target.value });
+                setSelectedStudent('');
+              }}
+              disabled={!filters.course_id}
+            >
+              <option value="">All Semesters</option>
+              {semesterOptions.map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
+            </select>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {loadingStudents && students.length === 0 ? (
-          <StatePanel variant="loading" title="Loading students" description="Preparing searchable student options." compact />
-        ) : null}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2 relative">
+        {/* Overlay states that shouldn't move cards */}
+        {loadingStudents && students.length === 0 && (
+          <div className="absolute inset-0 z-10 bg-primary/20 backdrop-blur-[2px] rounded-xl flex items-center justify-center">
+            <StatePanel variant="loading" title="Loading students" description="Preparing searchable student options." compact />
+          </div>
+        )}
 
-        {!loadingStudents && studentsError ? (
-          <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => setFilters({ ...filters })} compact />
-        ) : null}
+        {studentsError && (
+          <div className="col-span-full mb-4">
+            <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => setFilters({ ...filters })} compact />
+          </div>
+        )}
 
 
 
