@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle } from 'react-icons/hi';
+import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle, HiX } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
@@ -274,7 +274,7 @@ export default function StudentEnrollment() {
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Upload a student photo to extract and store their face embedding.</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <select
           className="input-field"
           value={filters.department_id}
@@ -332,7 +332,7 @@ export default function StudentEnrollment() {
         </select>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {loadingStudents && students.length === 0 ? (
           <StatePanel variant="loading" title="Loading students" description="Preparing searchable student options." compact />
         ) : null}
@@ -427,26 +427,61 @@ export default function StudentEnrollment() {
             )}
           </div>
 
-          <div
-            onClick={() => fileRef.current?.click()}
-            style={{
-              border: '2px dashed var(--border-glass)',
-              borderRadius: 'var(--radius-lg)',
-              padding: 40,
-              textAlign: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.3s',
-              background: preview ? 'transparent' : 'var(--bg-glass)',
-            }}
-          >
-            {preview ? (
-              <img src={preview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 250, borderRadius: 'var(--radius)', objectFit: 'cover' }} />
-            ) : (
-              <>
-                <HiOutlineUpload size={32} style={{ color: 'var(--accent-purple)', marginBottom: 8 }} />
-                <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>Click to upload student photo</p>
-                <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>JPG, PNG — clear frontal face</p>
-              </>
+          <div style={{ position: 'relative' }}>
+            <div
+              onClick={() => fileRef.current?.click()}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '2px dashed var(--border-glass)',
+                borderRadius: 'var(--radius-lg)',
+                padding: 40,
+                textAlign: 'center',
+                cursor: 'pointer',
+                transition: 'all 0.3s',
+                background: preview ? 'transparent' : 'var(--bg-glass)',
+                minHeight: 250,
+              }}
+            >
+              {preview ? (
+                <img src={preview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 250, borderRadius: 'var(--radius)', objectFit: 'cover' }} />
+              ) : (
+                <>
+                  <HiOutlineUpload size={32} style={{ color: 'var(--accent-purple)', marginBottom: 8 }} />
+                  <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>Click to upload student photo</p>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>JPG, PNG — clear frontal face</p>
+                </>
+              )}
+            </div>
+            {preview && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreview(null);
+                  if (fileRef.current) fileRef.current.value = '';
+                }}
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  background: 'rgba(0, 0, 0, 0.6)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  zIndex: 2,
+                }}
+              >
+                <HiX size={18} />
+              </button>
             )}
           </div>
           <input ref={fileRef} type="file" accept="image/*" onChange={handleFileChange} style={{ display: 'none' }} />

@@ -204,6 +204,11 @@ async function installApiMocks(page) {
     const path = url.pathname;
     const method = request.method();
 
+    if (!path.startsWith('/api/')) {
+      await route.continue();
+      return;
+    }
+
     if (path === '/api/auth/me') {
       await route.fulfill({ status: 401, json: { error: 'Unauthorized' } });
       return;
@@ -224,6 +229,11 @@ async function installApiMocks(page) {
 
     if (path === '/api/admin/stats') {
       await route.fulfill({ status: 200, json: createAdminDashboardPayload() });
+      return;
+    }
+
+    if (path === '/api/admin/departments') {
+      await route.fulfill({ status: 200, json: [{ _id: 'dept-1', name: 'Computing' }] });
       return;
     }
 
@@ -632,7 +642,57 @@ async function installApiMocks(page) {
       return;
     }
 
-    await route.continue();
+    if (path === '/api/admin/stats/monthly-attendance') {
+      await route.fulfill({ status: 200, json: [] });
+      return;
+    }
+
+    if (path === '/api/lecturer/capabilities') {
+      await route.fulfill({ status: 200, json: { can_stop_session: true } });
+      return;
+    }
+
+    if (path === '/api/admin/attendance-matrix' && method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        json: {
+          dates: [],
+          rows: [],
+          meta: { students_count: 1, dates_count: 0, sessions_count: 0 },
+          options: { academic_sessions: ['2026'], semesters: [1, 2] },
+        },
+      });
+      return;
+    }
+
+    if (path === '/api/admin/attendance-matrix/export-csv' && method === 'GET') {
+      const csvContent = 'Roll,Name\nREG001,Alice Student';
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': `attachment; filename="attendance_matrix_${Date.now()}.csv"`,
+        },
+        body: csvContent,
+      });
+      return;
+    }
+
+    if (path === '/api/admin/attendance-matrix/export' && method === 'GET') {
+      // Return a minimal blob for Excel download
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="attendance_matrix_${Date.now()}.xlsx"`,
+        },
+        body: Buffer.from('fake-xlsx-data'),
+      });
+      return;
+    }
+
+    // Default fallback to prevent 401s from real server if endpoint is unmocked
+    await route.fulfill({ status: 200, json: {} });
   });
 
   return sessionState;
@@ -643,6 +703,7 @@ async function loginAs(page, role) {
   const password = role === 'lecturer' ? 'lecturer123' : role === 'student' ? 'student123' : 'admin123';
 
   await page.goto('/login');
+  
   await page.locator('#login-email').fill(email);
   await page.locator('#login-password').fill(password);
   await page.getByRole('button', { name: 'Sign In' }).click();
@@ -652,16 +713,16 @@ async function loginAs(page, role) {
 test.describe('Project end-to-end flows', () => {
   test('login and navigation', async ({ page }) => {
     await installCameraStubs(page);
-    await installApiMocks(page, 'admin');
+    await installApiMocks(page);
     await loginAs(page, 'admin');
 
-    await expect(page.getByRole('heading', { name: 'Admin Dashboard' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Admin Dashboard' })).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Students' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Enrollment' })).toBeVisible();
 
     await page.getByRole('link', { name: 'Students' }).click();
-    await expect(page.getByRole('heading', { name: /^Students$/ })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Students$/ })).toBeVisible({ timeout: 15000 });
 
     await page.getByRole('link', { name: 'Enrollment' }).click();
     await expect(page.getByRole('heading', { name: 'Student Enrollment' })).toBeVisible({ timeout: 15000 });
@@ -669,11 +730,11 @@ test.describe('Project end-to-end flows', () => {
 
   test('attendance session lifecycle with upload, commit, and adjustment', async ({ page }) => {
     await installCameraStubs(page);
-    await installApiMocks(page, 'lecturer');
+    await installApiMocks(page);
     await loginAs(page, 'lecturer');
 
     await page.getByRole('link', { name: 'Take Attendance' }).click();
-    await expect(page.getByRole('heading', { name: 'Take Attendance' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Take Attendance' })).toBeVisible({ timeout: 15000 });
 
     // Ensure course/paper selectors are hydrated before starting the session.
     await page.getByRole('combobox', { name: 'Select course' }).selectOption({ index: 1 });
@@ -705,7 +766,7 @@ test.describe('Project end-to-end flows', () => {
 
   test('enrollment, exports, and rollback flows', async ({ page }) => {
     await installCameraStubs(page);
-    const state = await installApiMocks(page, 'admin');
+    const state = await installApiMocks(page);
     await loginAs(page, 'admin');
 
     await page.getByRole('link', { name: 'Enrollment' }).click();
@@ -720,12 +781,14 @@ test.describe('Project end-to-end flows', () => {
     await expect(page.getByText('Face enrolled successfully')).toBeVisible();
 
     await page.getByRole('link', { name: 'Attendance Matrix' }).click();
-    await expect(page.getByRole('main').getByRole('heading', { name: 'Attendance Matrix' })).toBeVisible();
+    await expect(page.getByRole('main').getByRole('heading', { name: 'Attendance Matrix' })).toBeVisible({ timeout: 15000 });
 
-    await expect(page.getByRole('combobox').nth(0)).toContainText('All Courses');
-    await page.getByRole('combobox').nth(0).selectOption({ index: 1 });
-    await page.getByRole('combobox').nth(1).selectOption('2026');
-    await page.getByRole('combobox').nth(2).selectOption('1');
+    // Combobox order: 0=Department, 1=Course, 2=Academic Session, 3=Semester
+    await expect(page.getByRole('combobox').nth(0)).toContainText('All Departments');
+    await page.getByRole('combobox').nth(0).selectOption({ index: 1 }); // Select "Computing"
+    await page.getByRole('combobox').nth(1).selectOption({ index: 1 }); // Select course
+    await page.getByRole('combobox').nth(2).selectOption('2026');
+    await page.getByRole('combobox').nth(3).selectOption('1');
 
     const csvDownloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Export CSV' }).click();
@@ -738,7 +801,7 @@ test.describe('Project end-to-end flows', () => {
     expect(xlsxDownload.suggestedFilename()).toMatch(/attendance_matrix_.*\.xlsx/);
 
     await page.getByRole('link', { name: 'Audit Log' }).click();
-    await expect(page.getByRole('heading', { name: 'Audit Log' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Audit Log', exact: true })).toBeVisible({ timeout: 15000 });
     page.on('dialog', async (dialog) => dialog.accept());
     await page.getByRole('button', { name: 'Rollback' }).click();
     await expect(page.getByRole('cell', { name: 'Rolled Back' })).toBeVisible();

@@ -243,6 +243,11 @@ export default function ManageCourses() {
     </>
   );
 
+  // Department options for filter
+  const departmentOptions = useMemo(() => {
+    return departments.map((d) => ({ value: d._id, label: d.name }));
+  }, [departments]);
+
   if (!loadingCourses && coursesError) {
     return (
       <div className="admin-page">
@@ -250,12 +255,6 @@ export default function ManageCourses() {
       </div>
     );
   }
-
-
-  // Department options for filter
-  const departmentOptions = useMemo(() => {
-    return departments.map((d) => ({ value: d._id, label: d.name }));
-  }, [departments]);
 
   return (
     <div className="admin-page">

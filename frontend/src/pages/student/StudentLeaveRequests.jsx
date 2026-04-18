@@ -159,7 +159,7 @@ export default function StudentLeaveRequests() {
             </div>
           ) : (
             <div className="vertical-timeline">
-              {leaves.map((l, idx) => {
+              {leaves.map((l) => {
                 const paper = papers.find(p => p.id === l.paper_id);
                 return (
                   <div key={l._id} className={`timeline-card ${l.status}`}>

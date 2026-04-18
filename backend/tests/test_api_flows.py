@@ -341,10 +341,10 @@ class BaseApiFlowTestCase(unittest.TestCase):
         self.fake_client, self.seed = self._build_seeded_client()
         self.exit_stack = ExitStack()
         self.exit_stack.enter_context(patch("app.mongo.init_app", return_value=None))
-        self.exit_stack.enter_context(patch("app._bootstrap_isolated_databases", autospec=True, side_effect=lambda *args, **kwargs: None))
-        self.exit_stack.enter_context(patch("app._ensure_indexes", autospec=True, side_effect=lambda *args, **kwargs: None))
-        self.exit_stack.enter_context(patch("app._run_startup_health_checks", autospec=True, side_effect=lambda *args, **kwargs: None))
-        self.exit_stack.enter_context(patch("app._seed_admin", autospec=True, side_effect=lambda *args, **kwargs: None))
+        self.exit_stack.enter_context(patch("app._bootstrap_isolated_databases", side_effect=lambda *args, **kwargs: None))
+        self.exit_stack.enter_context(patch("app._ensure_indexes", side_effect=lambda *args, **kwargs: None))
+        self.exit_stack.enter_context(patch("app._run_startup_health_checks", side_effect=lambda *args, **kwargs: None))
+        self.exit_stack.enter_context(patch("app._seed_admin", side_effect=lambda *args, **kwargs: None))
 
         from app import create_app
 

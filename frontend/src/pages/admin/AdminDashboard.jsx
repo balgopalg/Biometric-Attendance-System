@@ -137,7 +137,6 @@ export default function AdminDashboard() {
     api.get('/admin/courses', { params: courseParams })
       .then((r) => setAllCourses(r.data || []))
       .catch(() => setAllCourses([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDepartmentAdmin, departmentId]);
 
   useEffect(() => {
