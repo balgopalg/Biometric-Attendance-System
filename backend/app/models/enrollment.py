@@ -281,13 +281,28 @@ def set_face_embeddings(user_id: str, embeddings: List[Any]) -> None:
     )
 
 
-def enroll_in_papers(user_id: str, paper_ids: List[str]) -> None:
+def enroll_in_papers(user_id: str, paper_ids: List[str]) -> int:
     """Add papers to a students enrolled papers list."""
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_user_id:
+        return 0
+
+    user_id_filters = [normalized_user_id]
+    try:
+        user_id_filters.append(ObjectId(normalized_user_id))
+    except Exception:
+        pass  # nosec B110
+
+    normalized_paper_ids = [str(pid).strip() for pid in (paper_ids or []) if str(pid).strip()]
+    if not normalized_paper_ids:
+        return 0
+
     profiles = get_collection("academic", "student_profiles")
-    profiles.update_one(
-        {"user_id": user_id},
-        {"$addToSet": {"enrolled_papers": {"$each": paper_ids}}},
+    result = profiles.update_one(
+        {"user_id": {"$in": user_id_filters}},
+        {"$addToSet": {"enrolled_papers": {"$each": normalized_paper_ids}}},
     )
+    return int(result.modified_count or 0)
 
 
 def get_profiles_for_paper(paper_id: str) -> List[dict]:

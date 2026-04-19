@@ -15,6 +15,7 @@ const ManageCourses = lazy(() => import('./pages/admin/ManageCourses'));
 const ManagePapers = lazy(() => import('./pages/admin/ManagePapers'));
 const ManageLecturers = lazy(() => import('./pages/admin/ManageLecturers'));
 const ManageStudents = lazy(() => import('./pages/admin/ManageStudents'));
+const ManageTimetable = lazy(() => import('./pages/admin/ManageTimetable'));
 const StudentEnrollment = lazy(() => import('./pages/admin/StudentEnrollment'));
 const ExamEligibility = lazy(() => import('./pages/admin/ExamEligibility'));
 const AttendanceMatrix = lazy(() => import('./pages/admin/AttendanceMatrix'));
@@ -25,9 +26,11 @@ const ManageDepartmentAdmins = lazy(() => import('./pages/admin/ManageDepartment
 const LecturerDashboard = lazy(() => import('./pages/lecturer/LecturerDashboard'));
 const AttendanceSession = lazy(() => import('./pages/lecturer/AttendanceSession'));
 const LecturerProgress = lazy(() => import('./pages/lecturer/LecturerProgress'));
+const LecturerTimetable = lazy(() => import('./pages/lecturer/LecturerTimetable'));
 const StudentDashboard = lazy(() => import('./pages/student/StudentDashboard'));
 const AttendanceSummary = lazy(() => import('./pages/student/AttendanceSummary'));
 const ExamPortal = lazy(() => import('./pages/student/ExamPortal'));
+const StudentTimetable = lazy(() => import('./pages/student/StudentTimetable'));
 const StudentLeaveRequests = lazy(() => import('./pages/student/StudentLeaveRequests'));
 const ManageLeaves = lazy(() => import('./pages/admin/ManageLeaves'));
 
@@ -153,6 +156,7 @@ export default function App() {
                 <Route path="/admin" element={<LazyPage><AdminDashboard /></LazyPage>} />
                 <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
                 <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
+                <Route path="/admin/timetable" element={<LazyPage><ManageTimetable /></LazyPage>} />
                 <Route path="/admin/lecturers" element={<LazyPage><ManageLecturers /></LazyPage>} />
                 <Route path="/admin/students" element={<LazyPage><ManageStudents /></LazyPage>} />
                 <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />
@@ -170,6 +174,7 @@ export default function App() {
                 <Route path="/lecturer" element={<LazyPage><LecturerDashboard /></LazyPage>} />
                 <Route path="/lecturer/session" element={<LazyPage><AttendanceSession /></LazyPage>} />
                 <Route path="/lecturer/progress" element={<LazyPage><LecturerProgress /></LazyPage>} />
+                <Route path="/lecturer/timetable" element={<LazyPage><LecturerTimetable /></LazyPage>} />
               </Route>
 
               {/* Student */}
@@ -177,6 +182,7 @@ export default function App() {
                 <Route path="/student" element={<LazyPage><StudentDashboard /></LazyPage>} />
                 <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
                 <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
+                <Route path="/student/timetable" element={<LazyPage><StudentTimetable /></LazyPage>} />
               </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />

@@ -9,10 +9,10 @@ import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal } from 'react-icons/hi';
+import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal, HiOutlineUpload } from 'react-icons/hi';
 import { useAuth } from '../../hooks/useAuth';
 
-const EMPTY_FORM = { name: '', code: '', course_id: '', lecturer_id: '', semester: '' };
+const EMPTY_FORM = { name: '', code: '', department_id: '', course_id: '', lecturer_id: '', semester: '' };
 const PAGE_SIZE = 10;
 
 const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
@@ -28,6 +28,7 @@ export default function ManagePapers() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editingPaper, setEditingPaper] = useState(null);
 
   const [search, setSearch] = useState('');
@@ -40,6 +41,8 @@ export default function ManagePapers() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [showMobileOptions, setShowMobileOptions] = useState(false);
   const [exportingPapers, setExportingPapers] = useState(false);
+  const [importingPapers, setImportingPapers] = useState(false);
+  const [importFile, setImportFile] = useState(null);
 
   // Fetch departments for Super Admin
   const fetchDepartments = () => {
@@ -79,7 +82,7 @@ export default function ManagePapers() {
     }).catch((err) => {
       setPapers([]);
       setTotalPapers(0);
-      setPapersError(err.response?.data?.error || 'Failed to load subjects.');
+      setPapersError(err.response?.data?.error || 'Failed to load papers.');
     }).finally(() => setLoadingPapers(false));
   };
 
@@ -109,6 +112,11 @@ export default function ManagePapers() {
   const selectedFilterCourse = useMemo(
     () => courses.find((c) => c._id === filters.course_id) || null,
     [courses, filters.course_id]
+  );
+
+  const selectedFormDepartment = useMemo(
+    () => departments.find((d) => d._id === form.department_id) || null,
+    [departments, form.department_id]
   );
 
   const isInactiveCourseSelected = useMemo(
@@ -153,6 +161,12 @@ export default function ManagePapers() {
     [courses]
   );
 
+  const formDepartmentCourses = useMemo(() => {
+    if (!form.department_id) return activeCourses;
+    const departmentNameMatch = selectedFormDepartment?.name || '';
+    return activeCourses.filter((course) => String(course.department || '') === departmentNameMatch);
+  }, [activeCourses, form.department_id, selectedFormDepartment]);
+
   const visibleCourses = showInactiveRows ? courses : activeCourses;
 
   useEffect(() => {
@@ -195,15 +209,15 @@ export default function ManagePapers() {
   }, [form.course_id, form.lecturer_id, formLecturers]);
 
   const handleAdd = async () => {
-    if (!form.lecturer_id) {
-      toast.error('Please assign a lecturer');
+    if (!form.department_id) {
+      toast.error('Please select a department');
       return;
     }
     try {
       await api.post('/admin/papers', form);
-      toast.success('Subject created');
+      toast.success('Paper created');
       setShowAdd(false);
-      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
+      setForm({ ...EMPTY_FORM, department_id: isDepartmentAdmin && departmentId ? departmentId : '' });
       fetchPapers(1);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed');
@@ -211,10 +225,13 @@ export default function ManagePapers() {
   };
 
   const openEdit = (paper) => {
+    const paperCourse = courses.find((course) => course._id === paper.course_id) || null;
+    const paperDepartment = departments.find((dept) => dept.name === (paperCourse?.department || '')) || null;
     setEditingPaper(paper);
     setForm({
       name: paper.name || '',
       code: paper.code || '',
+      department_id: paperDepartment?._id || paper.department_id || '',
       course_id: paper.course_id || '',
       lecturer_id: paper.lecturer_id || '',
       semester: String(paper.semester || ''),
@@ -226,18 +243,18 @@ export default function ManagePapers() {
     if (!editingPaper) return;
     try {
       await api.put(`/admin/papers/${editingPaper._id}`, form);
-      toast.success('Subject updated');
+      toast.success('Paper updated');
       setShowEdit(false);
       setEditingPaper(null);
-      setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
+      setForm({ ...EMPTY_FORM, department_id: isDepartmentAdmin && departmentId ? departmentId : '' });
       fetchPapers(1);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to update subject');
+      toast.error(err.response?.data?.error || 'Failed to update paper');
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Delete this subject?')) return;
+    if (!window.confirm('Delete this paper?')) return;
     try {
       await api.delete(`/admin/papers/${id}`);
       toast.success('Deleted');
@@ -305,6 +322,122 @@ export default function ManagePapers() {
     }
   };
 
+  const handleOpenImportModal = () => {
+    setImportFile(null);
+    setShowImport(true);
+  };
+
+  const _pickField = (row, keys) => {
+    const entries = Object.entries(row || {});
+    for (const key of keys) {
+      const normalizedNeedle = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const found = entries.find(([header]) => String(header).toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedNeedle);
+      if (found && String(found[1] || '').trim()) {
+        return String(found[1]).trim();
+      }
+    }
+    return '';
+  };
+
+  const handleImportPapers = async () => {
+    const file = importFile;
+    if (!file) return;
+
+    setImportingPapers(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames?.[0];
+      if (!firstSheetName) {
+        toast.error('The selected file has no sheets');
+        return;
+      }
+
+      const sheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      if (!rows.length) {
+        toast.error('No rows found in the sheet');
+        return;
+      }
+
+      const courseByCode = new Map(courses.map((course) => [String(course.code || '').toLowerCase(), course]));
+      const courseByName = new Map(courses.map((course) => [String(course.name || '').toLowerCase(), course]));
+      const lecturerByEmail = new Map(lecturers.map((lec) => [String(lec.email || '').toLowerCase(), lec]));
+      const lecturerByName = new Map(lecturers.map((lec) => [String(lec.name || '').toLowerCase(), lec]));
+
+      let created = 0;
+      const failures = [];
+
+      for (let index = 0; index < rows.length; index += 1) {
+        const row = rows[index];
+        const rowNo = index + 2;
+        const name = _pickField(row, ['name', 'papername', 'paper']);
+        const code = _pickField(row, ['code', 'papercode']);
+        const courseRef = _pickField(row, ['course', 'coursename', 'coursecode']);
+        const semesterRaw = _pickField(row, ['semester', 'sem']);
+        const lecturerRef = _pickField(row, ['lecturer', 'lecturername', 'lectureremail']);
+
+        if (!name || !code || !courseRef || !semesterRaw) {
+          failures.push(`Row ${rowNo}: name, code, course, semester are required`);
+          continue;
+        }
+
+        const semester = Number(semesterRaw);
+        if (!Number.isFinite(semester) || semester <= 0) {
+          failures.push(`Row ${rowNo}: semester must be a positive number`);
+          continue;
+        }
+
+        const course = courseByCode.get(courseRef.toLowerCase()) || courseByName.get(courseRef.toLowerCase());
+        if (!course?._id) {
+          failures.push(`Row ${rowNo}: course '${courseRef}' not found`);
+          continue;
+        }
+
+        let lecturerId = '';
+        if (lecturerRef) {
+          const lecturer = lecturerByEmail.get(lecturerRef.toLowerCase()) || lecturerByName.get(lecturerRef.toLowerCase());
+          if (!lecturer?._id) {
+            failures.push(`Row ${rowNo}: lecturer '${lecturerRef}' not found`);
+            continue;
+          }
+          lecturerId = lecturer._id;
+        }
+
+        try {
+          await api.post('/admin/papers', {
+            name,
+            code,
+            course_id: course._id,
+            semester,
+            lecturer_id: lecturerId || '',
+          });
+          created += 1;
+        } catch (err) {
+          failures.push(`Row ${rowNo}: ${err.response?.data?.error || 'failed to create paper'}`);
+        }
+      }
+
+      if (created > 0) {
+        toast.success(`Imported ${created} paper${created > 1 ? 's' : ''}`);
+      }
+
+      if (failures.length > 0) {
+        toast.error(`Import completed with ${failures.length} issue${failures.length > 1 ? 's' : ''}`);
+        console.warn('Paper import issues:', failures);
+      }
+
+      await fetchPapers(1);
+    } catch (err) {
+      toast.error(err?.message || 'Failed to import papers');
+    } finally {
+      setImportingPapers(false);
+      setImportFile(null);
+      setShowImport(false);
+    }
+  };
+
   const PaperForm = ({ onSubmit, submitLabel }) => (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -318,6 +451,24 @@ export default function ManagePapers() {
         </div>
       </div>
 
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Department</label>
+        {isSuperAdmin ? (
+          <select
+            className="input-field"
+            value={form.department_id}
+            onChange={(e) => setForm({ ...form, department_id: e.target.value, course_id: '', semester: '', lecturer_id: '' })}
+          >
+            <option value="">Select department</option>
+            {departments.map((dept) => (
+              <option key={dept._id} value={dept._id}>{dept.name} ({dept.code})</option>
+            ))}
+          </select>
+        ) : (
+          <input className="input-field" value={departmentName || 'Department'} readOnly disabled />
+        )}
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
         <div>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course</label>
@@ -325,12 +476,13 @@ export default function ManagePapers() {
             className="input-field"
             value={form.course_id}
             onChange={(e) => setForm({ ...form, course_id: e.target.value, semester: '', lecturer_id: '' })}
+            disabled={isSuperAdmin && !form.department_id}
           >
-            <option value="">Select course</option>
-            {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
+            <option value="">{isSuperAdmin ? (form.department_id ? 'Select course' : 'Select department first') : 'Select course'}</option>
+            {(isSuperAdmin ? formDepartmentCourses : activeCourses).map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
           </select>
           <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 6 }}>
-            Pick any lecturer. Course-linked filtering is used only when available.
+            {isSuperAdmin ? 'Choose a department first, then select one of its courses.' : 'Pick any lecturer. Course-linked filtering is used only when available.'}
           </p>
         </div>
         <div>
@@ -348,7 +500,7 @@ export default function ManagePapers() {
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Lecturer</label>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Lecturer (Optional)</label>
         <select className="input-field" value={form.lecturer_id} onChange={(e) => setForm({ ...form, lecturer_id: e.target.value })}>
           <option value="">Select lecturer</option>
           {formLecturers.map((l) => <option key={l._id} value={l._id}>{l.name}</option>)}
@@ -365,7 +517,7 @@ export default function ManagePapers() {
   if (!loadingPapers && papersError) {
     return (
       <div className="admin-page">
-        <StatePanel variant="error" title="Unable to load subjects" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
+        <StatePanel variant="error" title="Unable to load papers" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
       </div>
     );
   }
@@ -379,11 +531,14 @@ export default function ManagePapers() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalPapers} papers in current filter</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" title="Import papers from Excel" onClick={handleOpenImportModal} disabled={importingPapers}>
+            <HiOutlineUpload size={16} /> {importingPapers ? 'Importing...' : 'Import Excel'}
+          </button>
           <button className="btn-secondary" title="Export papers to Excel" onClick={handleExportPapers} disabled={exportingPapers}>
             <HiOutlineDownload size={16} /> {exportingPapers ? 'Exporting...' : 'Export'}
           </button>
-          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
-            <HiOutlinePlus size={16} /> Add Subject
+          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department_id: isDepartmentAdmin && departmentId ? departmentId : '' }); setShowAdd(true); }}>
+            <HiOutlinePlus size={16} /> Add Paper
           </button>
         </div>
       </div>
@@ -471,21 +626,21 @@ export default function ManagePapers() {
 
       {!showInactiveRows && isInactiveCourseSelected && (
         <div className="glass-card" style={{ padding: '10px 12px', marginBottom: 12, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Showing subjects for selected inactive course.
+          Showing papers for selected inactive course.
         </div>
       )}
 
       <div className="glass-card">
         {loadingPapers ? (
-          <StatePanel variant="loading" title="Loading subjects" description="Fetching subject records for selected filters." compact />
+          <StatePanel variant="loading" title="Loading papers" description="Fetching paper records for selected filters." compact />
         ) : null}
 
         {!loadingPapers && papersError ? (
-          <StatePanel variant="error" title="Unable to load subjects" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
+          <StatePanel variant="error" title="Unable to load papers" description={papersError} actionLabel="Retry" onAction={() => fetchPapers(page)} compact />
         ) : null}
 
         {!loadingPapers && !papersError && filtered.length === 0 ? (
-          <StatePanel variant="empty" title="No subjects found" description="Try changing filters or create a new subject." compact />
+          <StatePanel variant="empty" title="No papers found" description="Try changing filters or create a new paper." compact />
         ) : null}
 
         {!loadingPapers && !papersError && filtered.length > 0 ? (
@@ -529,12 +684,32 @@ export default function ManagePapers() {
 
       <Pagination page={page} total={totalPapers} perPage={PAGE_SIZE} onPageChange={fetchPapers} />
 
-      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Subject" width={520}>
-        {PaperForm({ onSubmit: handleAdd, submitLabel: 'Create Subject' })}
+      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Paper" width={520}>
+        {PaperForm({ onSubmit: handleAdd, submitLabel: 'Create Paper' })}
       </Modal>
 
-      <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Subject" width={520}>
+      <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Paper" width={520}>
         {PaperForm({ onSubmit: handleUpdate, submitLabel: 'Save Changes' })}
+      </Modal>
+
+      <Modal isOpen={showImport} onClose={() => setShowImport(false)} title="Import Papers" width={520}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            Upload an Excel or CSV file with columns: <strong>name</strong>, <strong>code</strong>, <strong>course</strong>, <strong>semester</strong>. Lecturer is optional.
+          </p>
+          <input
+            className="input-field"
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
+            <button className="btn-secondary" onClick={() => setShowImport(false)} disabled={importingPapers}>Cancel</button>
+            <button className="btn-primary" onClick={handleImportPapers} disabled={!importFile || importingPapers}>
+              {importingPapers ? 'Importing...' : 'Upload and Import'}
+            </button>
+          </div>
+        </div>
       </Modal>
 
       <Modal isOpen={showMobileOptions} onClose={() => setShowMobileOptions(false)} title="Paper Options" width={420}>

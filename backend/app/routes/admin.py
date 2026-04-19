@@ -794,6 +794,15 @@ def _safe_get_profile_by_id(profile_id):
         return None
 
 
+def _get_profile_by_user_any(user_id):
+    """Resolve student profile by user_id across legacy string/ObjectId storage."""
+    variants = _id_variants(user_id)
+    if not variants:
+        return None
+    profiles = get_collection("academic", "student_profiles")
+    return profiles.find_one({"user_id": {"$in": variants}})
+
+
 def _safe_get_course(course_id):
     try:
         return get_course_by_id(course_id)
@@ -817,7 +826,7 @@ def _get_active_course_or_error(course_id):
 
 
 def _ensure_student_course_active(user_id):
-    profile = get_profile_by_user(user_id)
+    profile = _get_profile_by_user_any(user_id)
     if not profile:
         return None, (jsonify({"error": "Student profile not found"}), 404)
     course = _safe_get_course(profile.get("course_id"))
@@ -829,9 +838,9 @@ def _ensure_student_course_active(user_id):
 def _ensure_paper_course_active(paper):
     course_id = _as_text((paper or {}).get("course_id"))
     if not course_id:
-        return jsonify({"error": "Subject is not linked to a valid course"}), 409
+        return jsonify({"error": "Paper is not linked to a valid course"}), 409
     if not is_course_active(course_id):
-        return jsonify({"error": "Subject is linked to an inactive course and is read-only"}), 409
+        return jsonify({"error": "Paper is linked to an inactive course and is read-only"}), 409
     return None
 
 
@@ -966,17 +975,17 @@ def _refresh_face_trainer_artifact():
 
 def _resolve_user_identity(user_identifier):
     """Resolve route id that may be either user_id or profile_id."""
-    profile = get_profile_by_user(user_identifier)
+    profile = _get_profile_by_user_any(user_identifier)
     if profile:
-        return user_identifier, profile
+        return _as_text(profile.get("user_id")) or _as_text(user_identifier), profile
 
     profile = _safe_get_profile_by_id(user_identifier)
     if profile:
-        return profile.get("user_id"), profile
+        return _as_text(profile.get("user_id")), profile
 
     user = _safe_find_user(user_identifier)
     if user and user.get("role") == "student":
-        return user_identifier, get_profile_by_user(user_identifier)
+        return _as_text(user_identifier), _get_profile_by_user_any(user_identifier)
 
     return None, None
 
@@ -1080,7 +1089,33 @@ def list_courses(user):
         dept_id = _as_text(request.args.get("department_id", "")).strip() or None
     else:
         dept_id = _user_dept_id(user)
-    courses = sanitise_many(get_all_courses(["name", "code", "department", "course_duration", "status", "department_id"], department_id=dept_id))
+
+    # Fetch all courses first; apply scoped filtering with legacy fallback below.
+    courses = sanitise_many(get_all_courses(["name", "code", "department", "course_duration", "status", "department_id"], department_id=None))
+
+    if dept_id:
+        selected_dept_id = _as_text(dept_id).strip()
+        selected_dept_name = ""
+        selected_dept = None
+        try:
+            selected_dept = get_department_by_id(selected_dept_id)
+        except Exception:
+            selected_dept = None
+        if selected_dept:
+            selected_dept_name = _as_text(selected_dept.get("name", "")).strip().lower()
+
+        scoped_courses = []
+        for course in courses:
+            course_dept_id = _as_text(course.get("department_id", "")).strip()
+            course_dept_name = _as_text(course.get("department", "")).strip().lower()
+            if course_dept_id and course_dept_id == selected_dept_id:
+                scoped_courses.append(course)
+                continue
+            # Legacy fallback for old course records that only stored department name.
+            if selected_dept_name and course_dept_name and course_dept_name == selected_dept_name:
+                scoped_courses.append(course)
+        courses = scoped_courses
+
     q = _as_text(request.args.get("q", "")).lower()
     course_duration = _as_text(request.args.get("course_duration", ""))
     status = _as_text(request.args.get("status", "")).lower()
@@ -1326,8 +1361,39 @@ def list_papers(user):
         dept_id = _as_text(request.args.get("department_id", "")).strip() or None
     else:
         dept_id = _user_dept_id(user)
-    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at", "department_id"], department_id=dept_id)
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year", "department_id"], department_id=dept_id))
+
+    # Fetch full sets first; apply scoped filtering with legacy fallback below.
+    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at", "department_id"], department_id=None)
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year", "department_id"], department_id=None))
+
+    if dept_id:
+        selected_dept_id = _as_text(dept_id).strip()
+        selected_dept_name = ""
+        selected_dept = None
+        try:
+            selected_dept = get_department_by_id(selected_dept_id)
+        except Exception:
+            selected_dept = None
+        if selected_dept:
+            selected_dept_name = _as_text(selected_dept.get("name", "")).strip().lower()
+
+        scoped_course_ids = set()
+        scoped_courses = []
+        for course in courses:
+            course_dept_id = _as_text(course.get("department_id", "")).strip()
+            course_dept_name = _as_text(course.get("department", "")).strip().lower()
+            if course_dept_id and course_dept_id == selected_dept_id:
+                scoped_courses.append(course)
+                scoped_course_ids.add(course.get("_id"))
+                continue
+            # Legacy fallback for old records linked only by department name.
+            if selected_dept_name and course_dept_name and course_dept_name == selected_dept_name:
+                scoped_courses.append(course)
+                scoped_course_ids.add(course.get("_id"))
+
+        courses = scoped_courses
+        papers = [paper for paper in papers if paper.get("course_id") in scoped_course_ids]
+
     lecturers = sanitise_many(get_users_by_role("lecturer", department_id=dept_id))
     course_map = {c["_id"]: c for c in courses}
     lecturer_map = {l["_id"]: l for l in lecturers}
@@ -1386,8 +1452,8 @@ def get_paper_details(user, pid):
 @role_required("department_admin")
 def add_paper(user):
     d = request.get_json(silent=True) or {}
-    if not d.get("name") or not d.get("code") or not d.get("course_id") or not d.get("lecturer_id") or not d.get("semester"):
-        return jsonify({"error": "name, code, course_id, lecturer_id and semester are required"}), 400
+    if not d.get("name") or not d.get("code") or not d.get("course_id") or not d.get("semester"):
+        return jsonify({"error": "name, code, course_id and semester are required"}), 400
 
     course_id, semester, error = _normalise_course_semester(d.get("course_id"), d.get("semester"))
     if error:
@@ -1473,14 +1539,14 @@ def remove_paper(user, pid):
 
 
 @admin_bp.route("/papers/bulk-assign", methods=["POST"])
-@role_required("department_admin")
+@role_required("super_admin", "department_admin")
 def bulk_assign(user):
     """Assign multiple papers to a lecturer or course in one click."""
     d = request.get_json(silent=True) or {}
 
     # Student enrollment flow: assign one paper to many students.
-    paper_id = d.get("paper_id")
-    user_ids = d.get("user_ids") or []
+    paper_id = _as_text(d.get("paper_id"))
+    user_ids = [_as_text(sid) for sid in (d.get("user_ids") or []) if _as_text(sid)]
     if paper_id and user_ids:
         paper = get_paper_by_id(paper_id)
         if not paper:
@@ -1498,8 +1564,12 @@ def bulk_assign(user):
             _, student_lock_error = _ensure_student_course_active(uid)
             if student_lock_error:
                 continue
-            enroll_in_papers(uid, [paper_id])
-            updated_count += 1
+            changed = enroll_in_papers(uid, [paper_id])
+            if changed > 0:
+                updated_count += 1
+
+        if updated_count <= 0:
+            return jsonify({"error": "No eligible students could be assigned"}), 400
 
         log_action(
             "BULK_ENROLL_STUDENTS",
@@ -1507,7 +1577,54 @@ def bulk_assign(user):
             details=f"Paper {paper_id}, students {updated_count}",
         )
         _clear_query_cache()
-        return jsonify({"message": "Students enrolled successfully", "updated_count": updated_count}), 200
+        return jsonify({"message": "Students enrolled successfully", "updated_count": updated_count, "assigned_paper_count": 1}), 200
+
+    # Student enrollment flow: assign many papers to many students.
+    # This branch is intentionally prioritized whenever user_ids are present,
+    # even if course_id is also included by the frontend payload.
+    paper_ids_for_students = [_as_text(pid) for pid in (d.get("paper_ids") or []) if _as_text(pid)]
+    if user_ids and paper_ids_for_students and not d.get("lecturer_id"):
+        valid_paper_ids = []
+        for pid in paper_ids_for_students:
+            paper = get_paper_by_id(pid)
+            if not paper:
+                continue
+            lock_error = _ensure_paper_course_active(paper)
+            if lock_error:
+                continue
+            valid_paper_ids.append(pid)
+
+        if not valid_paper_ids:
+            return jsonify({"error": "No active papers found for assignment"}), 400
+
+        updated_count = 0
+        for sid in user_ids:
+            uid, _ = _resolve_user_identity(sid)
+            if not uid:
+                continue
+            _, student_lock_error = _ensure_student_course_active(uid)
+            if student_lock_error:
+                continue
+            changed = enroll_in_papers(uid, valid_paper_ids)
+            if changed > 0:
+                updated_count += 1
+
+        if updated_count <= 0:
+            return jsonify({"error": "No eligible students could be assigned"}), 400
+
+        log_action(
+            "BULK_ENROLL_STUDENTS",
+            str(user["_id"]),
+            details=f"Papers {len(valid_paper_ids)}, students {updated_count}",
+        )
+        _clear_query_cache()
+        return jsonify(
+            {
+                "message": "Students enrolled successfully",
+                "updated_count": updated_count,
+                "assigned_paper_count": len(valid_paper_ids),
+            }
+        ), 200
 
     paper_ids = d.get("paper_ids", [])
     lecturer_id = d.get("lecturer_id")
@@ -1534,7 +1651,7 @@ def bulk_assign(user):
         if not course:
             return jsonify({"error": "Course not found"}), 404
         if _course_is_inactive(course):
-            return jsonify({"error": "Cannot assign subjects to an inactive course"}), 409
+            return jsonify({"error": "Cannot assign papers to an inactive course"}), 409
         max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
 
         invalid = []
@@ -1619,7 +1736,33 @@ def list_lecturers(user):
         dept_id = _as_text(request.args.get("department_id", "")).strip() or None
     else:
         dept_id = _user_dept_id(user)
-    lecturers = sanitise_many(get_users_by_role("lecturer", department_id=dept_id))
+
+    # Primary filter by department_id with legacy fallback by department name.
+    # Some older lecturer records were stored without department_id.
+    if dept_id:
+        all_lecturers = sanitise_many(get_users_by_role("lecturer"))
+        selected_dept_id = _as_text(dept_id).strip()
+        selected_dept_name = ""
+        selected_dept = None
+        try:
+            selected_dept = get_department_by_id(selected_dept_id)
+        except Exception:
+            selected_dept = None
+        if selected_dept:
+            selected_dept_name = _as_text(selected_dept.get("name", "")).strip().lower()
+
+        lecturers = []
+        for lec in all_lecturers:
+            lec_dept_id = _as_text(lec.get("department_id", "")).strip()
+            lec_dept_name = _as_text(lec.get("department", "")).strip().lower()
+            if lec_dept_id and lec_dept_id == selected_dept_id:
+                lecturers.append(lec)
+                continue
+            if selected_dept_name and lec_dept_name and lec_dept_name == selected_dept_name:
+                lecturers.append(lec)
+    else:
+        lecturers = sanitise_many(get_users_by_role("lecturer", department_id=dept_id))
+
     papers = sanitise_many(get_all_papers(["name", "code", "lecturer_id", "course_id", "semester", "total_classes", "created_at"]))
     courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
     course_map = {c["_id"]: c for c in courses}

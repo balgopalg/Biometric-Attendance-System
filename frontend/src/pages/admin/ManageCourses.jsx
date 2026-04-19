@@ -119,8 +119,16 @@ export default function ManageCourses() {
   );
 
   const handleAdd = async () => {
+    if (!form.department?.trim()) {
+      toast.error('Please select a department');
+      return;
+    }
+    const matchedDepartment = departments.find((dept) => dept.name === form.department);
     try {
-      await api.post('/admin/courses', form);
+      await api.post('/admin/courses', {
+        ...form,
+        department_id: isDepartmentAdmin ? departmentId : (matchedDepartment?._id || ''),
+      });
       toast.success('Course created');
       setShowAdd(false);
       setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
@@ -263,7 +271,19 @@ export default function ManageCourses() {
       </div>
       <div style={{ marginBottom: 14 }}>
         <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Department</label>
-        <input className="input-field" placeholder="e.g. Computer Science" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
+        {isSuperAdmin ? (
+          <select className="input-field" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}>
+            <option value="">Select department</option>
+            {departments.map((dept) => (
+              <option key={dept._id} value={dept.name}>{dept.name} ({dept.code})</option>
+            ))}
+            {form.department && !departments.some((dept) => dept.name === form.department) ? (
+              <option value={form.department}>{form.department}</option>
+            ) : null}
+          </select>
+        ) : (
+          <input className="input-field" value={departmentName || form.department} readOnly disabled />
+        )}
       </div>
       <div style={{ marginBottom: 20 }}>
         <div>
@@ -283,6 +303,9 @@ export default function ManageCourses() {
 
   // Department options for filter
   const departmentOptions = useMemo(() => {
+    if (isDepartmentAdmin && departmentName) {
+      return [{ value: departmentId, label: departmentName }];
+    }
     return departments.map((d) => ({ value: d._id, label: d.name }));
   }, [departments]);
 

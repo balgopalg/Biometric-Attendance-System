@@ -102,6 +102,7 @@ export default function ManageStudents() {
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [bulkForm, setBulkForm] = useState({ course_id: '', semester: '', paper_id: '', user_ids: [] });
+  const [bulkAssignAllPapers, setBulkAssignAllPapers] = useState(false);
   const [bulkSemesters, setBulkSemesters] = useState([]);
   const [bulkPapers, setBulkPapers] = useState([]);
   const [bulkStudents, setBulkStudents] = useState([]);
@@ -317,7 +318,7 @@ export default function ManageStudents() {
 
     api.get('/admin/papers', { params: { course_id: bulkForm.course_id, semester: bulkForm.semester } })
       .then((r) => {
-        if (!cancelled) setBulkPapers(r.data || []);
+        if (!cancelled) setBulkPapers(extractItems(r.data));
       })
       .catch(() => {
         if (!cancelled) setBulkPapers([]);
@@ -331,7 +332,7 @@ export default function ManageStudents() {
       },
     })
       .then((r) => {
-        if (!cancelled) setBulkStudents(r.data || []);
+        if (!cancelled) setBulkStudents(extractItems(r.data));
       })
       .catch(() => {
         if (!cancelled) setBulkStudents([]);
@@ -607,7 +608,7 @@ export default function ManageStudents() {
           semester,
         },
       });
-      const options = Array.isArray(res.data) ? res.data : [];
+      const options = extractItems(res.data);
       const optionIds = new Set(options.map((p) => p._id));
       const currentSemAssigned = assignedIds.filter((id) => optionIds.has(id));
       setPaperOptions(options);
@@ -861,6 +862,7 @@ export default function ManageStudents() {
 
   const openBulkAssignModal = () => {
     setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
+    setBulkAssignAllPapers(false);
     setBulkSemesters([]);
     setBulkPapers([]);
     setBulkStudents([]);
@@ -868,15 +870,43 @@ export default function ManageStudents() {
   };
 
   const handleBulkAssign = async () => {
-    if (!bulkForm.paper_id || bulkForm.user_ids.length === 0) {
-      toast.error('Select subject and at least one student');
+    if (bulkForm.user_ids.length === 0) {
+      toast.error('Select at least one student');
       return;
     }
+    if (!bulkAssignAllPapers && !bulkForm.paper_id) {
+      toast.error('Select a paper');
+      return;
+    }
+    if (bulkAssignAllPapers && bulkPapers.length === 0) {
+      toast.error('No papers found for selected semester');
+      return;
+    }
+
+    const payload = bulkAssignAllPapers
+      ? {
+          course_id: bulkForm.course_id,
+          semester: bulkForm.semester,
+          user_ids: bulkForm.user_ids,
+          paper_ids: bulkPapers.map((p) => p._id).filter(Boolean),
+        }
+      : {
+          paper_id: bulkForm.paper_id,
+          user_ids: bulkForm.user_ids,
+        };
+
     try {
-      await api.post('/admin/papers/bulk-assign', bulkForm);
-      toast.success('Students assigned to subject');
+      const res = await api.post('/admin/papers/bulk-assign', payload);
+      const assignedPapers = Number(res.data?.assigned_paper_count || (bulkAssignAllPapers ? bulkPapers.length : 1));
+      const updatedStudents = Number(res.data?.updated_count || 0);
+      if (updatedStudents <= 0) {
+        toast.error(res.data?.error || 'No students were updated');
+        return;
+      }
+      toast.success(`Assigned ${assignedPapers} paper${assignedPapers === 1 ? '' : 's'} to ${updatedStudents} student${updatedStudents === 1 ? '' : 's'}`);
       setShowBulk(false);
       setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
+      setBulkAssignAllPapers(false);
       setBulkSemesters([]);
       setBulkPapers([]);
       setBulkStudents([]);
@@ -1528,13 +1558,16 @@ export default function ManageStudents() {
         </div>
       </Modal>
 
-      <Modal isOpen={showBulk} onClose={() => setShowBulk(false)} title="Bulk Assign Subject" width={520}>
+      <Modal isOpen={showBulk} onClose={() => setShowBulk(false)} title="Bulk Assign Paper" width={520}>
         <div style={{ marginBottom: 14 }}>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 1: Course</label>
           <select
             className="input-field"
             value={bulkForm.course_id}
-            onChange={(e) => setBulkForm({ course_id: e.target.value, semester: '', paper_id: '', user_ids: [] })}
+            onChange={(e) => {
+              setBulkAssignAllPapers(false);
+              setBulkForm({ course_id: e.target.value, semester: '', paper_id: '', user_ids: [] });
+            }}
           >
             <option value="">Select course</option>
             {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
@@ -1546,7 +1579,10 @@ export default function ManageStudents() {
           <select
             className="input-field"
             value={bulkForm.semester}
-            onChange={(e) => setBulkForm({ ...bulkForm, semester: e.target.value, paper_id: '', user_ids: [] })}
+            onChange={(e) => {
+              setBulkAssignAllPapers(false);
+              setBulkForm({ ...bulkForm, semester: e.target.value, paper_id: '', user_ids: [] });
+            }}
             disabled={!bulkForm.course_id}
           >
             <option value="">Select semester</option>
@@ -1555,14 +1591,29 @@ export default function ManageStudents() {
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 3: Subject</label>
+          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 3: Paper</label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={bulkAssignAllPapers}
+              disabled={!bulkForm.semester || bulkPapers.length === 0}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setBulkAssignAllPapers(checked);
+                if (checked) {
+                  setBulkForm({ ...bulkForm, paper_id: '' });
+                }
+              }}
+            />
+            Assign all papers in selected semester ({bulkPapers.length})
+          </label>
           <select
             className="input-field"
             value={bulkForm.paper_id}
             onChange={(e) => setBulkForm({ ...bulkForm, paper_id: e.target.value })}
-            disabled={!bulkForm.semester}
+            disabled={!bulkForm.semester || bulkAssignAllPapers}
           >
-            <option value="">Select subject</option>
+            <option value="">Select paper</option>
             {bulkPapers.map((p) => <option key={p._id} value={p._id}>{p.name} ({p.code})</option>)}
           </select>
         </div>
