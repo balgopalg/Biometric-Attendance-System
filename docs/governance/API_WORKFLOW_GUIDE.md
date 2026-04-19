@@ -179,11 +179,11 @@ Success response example:
 ### 2.4 Paper bulk assignment
 
 - Endpoint: POST /api/admin/papers/bulk-assign
-- Required fields:
-  - paper_id
-  - user_ids
+- Supported payload modes:
+  - Single paper to many students: `paper_id` + `user_ids`
+  - Many papers to many students: `paper_ids` + `user_ids` (optionally with `course_id`, `semester` from UI state)
 
-Request example:
+Single-paper request example:
 
 ```json
 {
@@ -191,6 +191,32 @@ Request example:
   "user_ids": [
     "69da6f37cd4bb4ef527e972d"
   ]
+}
+```
+
+Multi-paper request example:
+
+```json
+{
+  "course_id": "69da6f26cd4bb4ef527e972b",
+  "semester": 1,
+  "paper_ids": [
+    "69da7292cd4bb4ef527e9735",
+    "69da7292cd4bb4ef527e9736"
+  ],
+  "user_ids": [
+    "69da6f37cd4bb4ef527e972d"
+  ]
+}
+```
+
+Success response example:
+
+```json
+{
+  "message": "Students enrolled successfully",
+  "updated_count": 1,
+  "assigned_paper_count": 2
 }
 ```
 
@@ -225,6 +251,57 @@ Success response example:
   "message": "Rollback completed successfully"
 }
 ```
+
+### 2.7 Timetable admin workflows
+
+- List/filter timetables: GET `/api/timetable/admin`
+- Generate timetable: POST `/api/timetable/admin/generate`
+- Regenerate timetable: POST `/api/timetable/admin/{timetable_id}/regenerate`
+- Update timetable slots: PUT `/api/timetable/admin/{timetable_id}/slots`
+- Update timetable status: PATCH `/api/timetable/admin/{timetable_id}/status`
+- Delete timetable: DELETE `/api/timetable/admin/{timetable_id}`
+- Scope metadata endpoints:
+  - GET `/api/timetable/academic-sessions`
+  - GET `/api/timetable/papers`
+
+Generate request example:
+
+```json
+{
+  "department_id": "69da6f26cd4bb4ef527e9721",
+  "course_id": "69da6f26cd4bb4ef527e972b",
+  "academic_session": "2026-28",
+  "semester": 1,
+  "class_duration_minutes": 60,
+  "class_start_time": "09:00",
+  "class_end_time": "16:00",
+  "recess_start_time": "12:30",
+  "recess_end_time": "13:00",
+  "max_classes_per_day": 4,
+  "status": "draft"
+}
+```
+
+Slot update request example:
+
+```json
+{
+  "slots": [
+    {
+      "slot_id": "6803a977f1fd79175a07b3f1",
+      "paper_id": "69da7292cd4bb4ef527e9735"
+    }
+  ]
+}
+```
+
+Lecturer timetable endpoint:
+
+- GET `/api/timetable/lecturer/my`
+
+Student timetable endpoint:
+
+- GET `/api/timetable/student/my`
 
 ## 3. Lecturer workflows
 

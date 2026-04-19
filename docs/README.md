@@ -2,6 +2,12 @@
 
 This folder is the single source of truth for project documentation.
 
+## Latest Updates
+
+- Timetable workflows documented for admin generation/editing, lecturer view, and student view.
+- Export documentation now covers both client-side table export and backend attendance matrix export endpoints.
+- Testing docs aligned with current execution baseline (backend `pytest`, frontend Playwright over HTTPS with serial-safe config).
+
 ## Structure
 
 - governance/
@@ -20,6 +26,8 @@ This folder is the single source of truth for project documentation.
   - Frontend-specific setup and operational notes.
 - reports/
   - Delivery summaries, readiness checklist, and project review records.
+- EXCEL_EXPORT_GUIDE.md
+  - Frontend export utility usage and backend matrix export integration.
 
 ## Start Here
 
@@ -28,6 +36,8 @@ This folder is the single source of truth for project documentation.
 3. Deployment owners: /docs/operations/DEPLOYMENT_PRODUCTION.md
 4. Security reviewers: /docs/security/SECURITY_HARDENING.md
 5. QA engineers: /docs/testing/TESTING_QUICKSTART.md
+6. Frontend implementers: /docs/frontend/FRONTEND_README.md
+7. Export workflows: /docs/EXCEL_EXPORT_GUIDE.md
 
 ## Documentation Standards
 

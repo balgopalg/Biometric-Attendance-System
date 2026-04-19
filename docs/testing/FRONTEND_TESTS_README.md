@@ -76,10 +76,12 @@ npx playwright show-report
 ## Key Configuration
 
 ### `playwright.config.js`
-- **Base URL:** http://127.0.0.1:4173 (Vite dev server)
+- **Base URL:** https://127.0.0.1:4173 (Vite HTTPS preview server)
 - **Browser:** Chromium
 - **Artifacts:** Traces on-first-retry, screenshots/videos on-failure
-- **Timeout:** 30s per test
+- **Timeout:** 60s per test
+- **Execution mode:** Serial-safe (`workers: 1`, `fullyParallel: false`)
+- **TLS handling:** `ignoreHTTPSErrors: true` for self-signed local certs
 
 ### Test Fixtures & Helpers
 
@@ -289,7 +291,7 @@ npx playwright install chromium
 
 | Aspect | Mocked API | Live Server |
 |--------|-----------|-------------|
-| Speed | ~28s (7 tests) | ~60s+ (startup overhead) |
+| Speed | ~25-40s (7 tests) | ~60s+ (startup overhead) |
 | Reliability | 100% (no external deps) | Depends on backend health |
 | Debugging | Can inspect mock logic | Must trace through server |
 | CI/CD | Faster, simpler | Needs services/containers |

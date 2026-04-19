@@ -28,7 +28,11 @@ Production-ready full stack attendance platform for classroom operations using f
 ### Admin
 
 - Manage courses, papers, lecturers, students, and mappings
+- Timetable management for department/course/semester with draft/active lifecycle
+- Slot-level timetable editing and conflict-aware timetable generation
+- PDF export of generated timetable views
 - Bulk import students and lecturers from Excel files with per-row result reporting
+- Bulk import papers from Excel with course/lecturer resolution and row-level validation
 - Enrollment workflows and semester progression utilities
 - Automated welcome and password-reset credential emails (Yagmail-backed, optional)
 - Automated attendance shortage warnings (email alerts for students below threshold)
@@ -42,6 +46,7 @@ Production-ready full stack attendance platform for classroom operations using f
 - Live recognition-assisted attendance
 - Biometric session commit (authenticated session closing via face recognition)
 - PIN-protected sensitive actions and correction windows
+- Personal timetable view with PDF export
 
 ### Student
 
@@ -49,6 +54,33 @@ Production-ready full stack attendance platform for classroom operations using f
 - Eligibility and projection views (accounting for approved medical leave)
 - Medical leave appeals (submission of medical certificates)
 - Course and paper visibility
+- Personal timetable view with PDF export
+
+## Release Highlights (Apr 2026)
+
+- Timetable module delivered end-to-end (admin generation/edit/status flow + lecturer/student views)
+- Paper import and multi-paper assignment workflows expanded for semester operations
+- Export surface expanded:
+	- Attendance matrix CSV/XLSX via backend APIs
+	- Timetable PDF export in admin/lecturer/student UI
+- Automated testing baseline validated:
+	- Backend: `pytest` suite (36 passing)
+	- Frontend: Playwright E2E suite (7 passing)
+
+## Validation Commands
+
+```powershell
+# Backend tests
+cd backend
+pytest -q
+
+# Frontend lint
+cd ..\frontend
+npm run lint
+
+# Frontend E2E
+npm run test:e2e
+```
 
 ## Repository Layout
 
@@ -81,6 +113,18 @@ Production-ready full stack attendance platform for classroom operations using f
 ├── verify_security.py
 └── README.md
 ```
+
+Key new modules in this release:
+
+- Backend timetable domain:
+	- `backend/app/models/timetable.py`
+	- `backend/app/routes/timetable.py`
+	- `backend/app/services/timetable_generator.py`
+- Frontend timetable UI:
+	- `frontend/src/pages/admin/ManageTimetable.jsx`
+	- `frontend/src/pages/lecturer/LecturerTimetable.jsx`
+	- `frontend/src/pages/student/StudentTimetable.jsx`
+	- `frontend/src/components/timetable/WeeklyTimetableGrid.jsx`
 
 ## Documentation
 
