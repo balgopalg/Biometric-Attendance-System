@@ -134,6 +134,8 @@ class Config:
     # Lower = lenient matching, may have false positives
     
     FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.60"))
+    DROWSINESS_EAR_THRESHOLD = float(os.getenv("DROWSINESS_EAR_THRESHOLD", "0.25"))
+    DROWSINESS_MAR_THRESHOLD = float(os.getenv("DROWSINESS_MAR_THRESHOLD", "0.60"))
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
     SLOW_REQUEST_THRESHOLD_MS = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "500"))
     QUERY_CACHE_MAX_ENTRIES = int(os.getenv("QUERY_CACHE_MAX_ENTRIES", "500"))

@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlineShieldCheck } from 'react-icons/hi';
+import { HiOutlineShieldCheck, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import StatePanel from '../../components/ui/StatePanel';
+import Modal from '../../components/ui/Modal';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { exportToExcel, exportToCSV } from '../../utils/excelExport';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function ExamEligibility() {
@@ -16,8 +18,11 @@ export default function ExamEligibility() {
   const [loading, setLoading] = useState(false);
   const [eligibilityError, setEligibilityError] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [exportingEligibility, setExportingEligibility] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [search, setSearch] = useState('');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [showMobileOptions, setShowMobileOptions] = useState(false);
   const [departments, setDepartments] = useState([]);
   const [filters, setFilters] = useState({
     department_id: '',
@@ -321,6 +326,65 @@ export default function ExamEligibility() {
   const handleBulkAllow = () => handleBulkOverride(true);
   const handleBulkBlock = () => handleBulkOverride(false);
 
+  const handleExportEligibility = async () => {
+    if (displayedRows.length === 0) {
+      toast.error('No eligibility records to export');
+      return;
+    }
+
+    const exportData = displayedRows.map((row) => ({
+      student_name: row.student_name || '',
+      reg_number: row.reg_number || row.student_reg_no || row.username || '',
+      course: row.course_name || '',
+      session: row.academic_session || row.academic_year || '',
+      semester: row.student_semester || row.semester || '',
+      attendance: row.attendance_pct ?? row.attendance_percentage ?? '',
+      status: row.final_eligible ? 'Eligible' : 'Ineligible',
+      override: row.override_status === true ? 'Allowed' : row.override_status === false ? 'Blocked' : 'None',
+      override_reason: row.override_reason || '',
+    }));
+
+    const columns = [
+      { key: 'student_name', header: 'Student' },
+      { key: 'reg_number', header: 'Reg No' },
+      { key: 'course', header: 'Course' },
+      { key: 'session', header: 'Academic Session' },
+      { key: 'semester', header: 'Semester' },
+      { key: 'attendance', header: 'Overall Attendance (%)' },
+      { key: 'status', header: 'Status' },
+      { key: 'override', header: 'Override' },
+      { key: 'override_reason', header: 'Override Reason' },
+    ];
+
+    setExportingEligibility(true);
+    try {
+      try {
+        await exportToExcel({
+          data: exportData,
+          columns,
+          fileName: 'Exam_Eligibility',
+          sheetName: 'Eligibility',
+        });
+        toast.success(`Exported ${displayedRows.length} eligibility records to Excel`);
+      } catch (xlsxError) {
+        if (xlsxError.message.includes('xlsx')) {
+          exportToCSV({
+            data: exportData,
+            columns,
+            fileName: 'Exam_Eligibility',
+          });
+          toast.success(`Exported ${displayedRows.length} eligibility records to CSV`);
+        } else {
+          throw xlsxError;
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to export eligibility records');
+    } finally {
+      setExportingEligibility(false);
+    }
+  };
+
   if (!loading && eligibilityError) {
     return (
       <div className="admin-page">
@@ -382,7 +446,10 @@ export default function ExamEligibility() {
             Filter and manage exam eligibility overrides.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
+          <button className="btn-secondary" onClick={handleExportEligibility} disabled={exportingEligibility || displayedRows.length === 0}>
+            <HiOutlineDownload size={16} /> {exportingEligibility ? 'Exporting...' : 'Export'}
+          </button>
           <div className="glass-card" style={{ padding: '10px 14px' }}>
             <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Total</p>
             <p style={{ fontSize: '1rem', fontWeight: 700 }}>{summary.total}</p>
@@ -398,8 +465,51 @@ export default function ExamEligibility() {
         </div>
       </div>
 
+      <div className="mobile-filters-toggle-wrap exam-eligibility-mobile-filters-toggle-wrap">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title="Options"
+          aria-label="Options"
+          onClick={() => setShowMobileOptions(true)}
+        >
+          <HiOutlineDotsHorizontal size={18} />
+        </button>
+      </div>
+
+      <div className="exam-eligibility-select-strip">
+        <label className="exam-eligibility-select-all-toggle">
+          <input
+            type="checkbox"
+            checked={allDisplayedSelected}
+            onChange={handleToggleSelectAllDisplayed}
+            disabled={displayedStudentIds.length === 0}
+            aria-label="Select all shown students"
+          />
+          <span>Select all shown</span>
+        </label>
+        <button
+          className="btn-secondary"
+          style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+          onClick={() => setSelectedStudentIds([])}
+          disabled={selectedStudentIds.length === 0}
+        >
+          Clear
+        </button>
+      </div>
+
       <div className="glass-card" style={{ padding: 18, marginBottom: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+        <div className={`exam-eligibility-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
           <input
             className="input-field"
             placeholder="Search student, reg no, subject..."
@@ -451,17 +561,11 @@ export default function ExamEligibility() {
           </select>
         </div>
 
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="exam-eligibility-inline-actions" style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
             Selected: {selectedStudentIds.length} / {displayedStudentIds.length}
           </p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.72rem' }} onClick={handleToggleSelectAllDisplayed}>
-              {allDisplayedSelected ? 'Unselect All' : 'Select All Shown'}
-            </button>
-            <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.72rem' }} onClick={() => setSelectedStudentIds([])}>
-              Clear Selection
-            </button>
             <button
               className="btn-primary"
               style={{ padding: '6px 10px', fontSize: '0.72rem' }}
@@ -633,6 +737,44 @@ export default function ExamEligibility() {
           </div>
         )}
       </div>
+
+      <Modal isOpen={showMobileOptions} onClose={() => setShowMobileOptions(false)} title="Options" width={420}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            className="btn-primary"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setShowMobileOptions(false);
+              handleBulkAllow();
+            }}
+            disabled={bulkUpdating || selectedStudentIds.length === 0}
+          >
+            {bulkUpdating ? 'Applying...' : 'Bulk Allow'}
+          </button>
+          <button
+            className="btn-secondary"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setShowMobileOptions(false);
+              handleBulkBlock();
+            }}
+            disabled={bulkUpdating || selectedStudentIds.length === 0}
+          >
+            {bulkUpdating ? 'Applying...' : 'Bulk Block'}
+          </button>
+          <button
+            className="btn-secondary"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setShowMobileOptions(false);
+              handleExportEligibility();
+            }}
+            disabled={exportingEligibility || displayedRows.length === 0}
+          >
+            <HiOutlineDownload size={16} /> {exportingEligibility ? 'Exporting...' : 'Export'}
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

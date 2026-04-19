@@ -230,34 +230,36 @@ export default function AuditTrail() {
   return (
     <div className="admin-page">
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16, marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '1 1 300px' }}>
           <HiOutlineShieldCheck size={22} style={{ color: 'var(--accent-purple)' }} />
           <div>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Audit Log</h2>
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 2 }}>Rollback available for eligible create/update/delete actions within 1 day.</p>
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-          <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{total} total entries</span>
-          <button 
-            className="btn-secondary" 
-            style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}
-            onClick={handleExport}
-            disabled={exporting || total === 0}
-          >
-            {exporting ? 'Exporting...' : 'Export to Excel'}
-          </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6, flex: '100%' }}>
+          <div style={{ display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>{total} total entries</span>
+            <button 
+              className="btn-secondary" 
+              style={{ padding: '6px 12px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={handleExport}
+              disabled={exporting || total === 0}
+            >
+              {exporting ? 'Exporting...' : 'Export to Excel'}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="filter-bar">
+      <div className="filter-bar" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', alignItems: 'end' }}>
         <div>
           <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Action keyword</label>
           <input
             className="input-field"
-            style={{ width: 180, padding: '8px 12px', fontSize: '0.8rem' }}
+            style={{ width: '100%', padding: '8px 12px', fontSize: '0.8rem' }}
             placeholder="e.g. OVERRIDE"
             list="audit-action-suggestions"
             value={keyword}
@@ -272,7 +274,7 @@ export default function AuditTrail() {
           <input
             type="date"
             className="input-field"
-            style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }}
+            style={{ width: '100%', padding: '8px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center' }}
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             max={dateTo || undefined}
@@ -283,7 +285,7 @@ export default function AuditTrail() {
           <input
             type="date"
             className="input-field"
-            style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }}
+            style={{ width: '100%', padding: '8px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center' }}
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             min={dateFrom || undefined}
@@ -294,7 +296,7 @@ export default function AuditTrail() {
             <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Department</label>
             <select
               className="input-field"
-              style={{ width: 160, padding: '8px 12px', fontSize: '0.8rem' }}
+              style={{ width: '100%', padding: '8px 12px', fontSize: '0.8rem' }}
               value={deptFilter}
               onChange={(e) => setDeptFilter(e.target.value)}
             >
@@ -305,11 +307,11 @@ export default function AuditTrail() {
             </select>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end' }}>
-          <button className="btn-primary" style={{ padding: '8px 18px', fontSize: '0.78rem' }} onClick={handleFilter}>
-            Apply Filters
+        <div style={{ display: 'flex', gap: 8, height: '40px', alignItems: 'center' }}>
+          <button className="btn-primary" style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem', justifyContent: 'center' }} onClick={handleFilter}>
+            Apply
           </button>
-          <button className="btn-secondary" style={{ padding: '8px 14px', fontSize: '0.78rem' }} onClick={handleReset}>
+          <button className="btn-secondary" style={{ flex: 1, padding: '8px 10px', fontSize: '0.78rem', justifyContent: 'center' }} onClick={handleReset}>
             Reset
           </button>
         </div>

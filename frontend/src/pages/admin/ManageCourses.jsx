@@ -4,9 +4,10 @@ import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { exportToExcel, exportToCSV, EXPORT_COLUMN_PRESETS } from '../../utils/excelExport';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlinePlus, HiOutlineSearch, HiOutlinePencil, HiOutlineTrash } from 'react-icons/hi';
+import { HiOutlinePlus, HiOutlineSearch, HiOutlinePencil, HiOutlineTrash, HiOutlineFilter, HiOutlineDownload } from 'react-icons/hi';
 import { useAuth } from '../../hooks/useAuth';
 
 const EMPTY_FORM = { name: '', code: '', department: '', course_duration: '' };
@@ -36,6 +37,8 @@ export default function ManageCourses() {
   });
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [coursesError, setCoursesError] = useState('');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [exportingCourses, setExportingCourses] = useState(false);
 
   // Fetch departments for Super Admin
   const fetchDepartments = () => {
@@ -211,6 +214,41 @@ export default function ManageCourses() {
     }
   };
 
+  const handleExportCourses = async () => {
+    if (filtered.length === 0) {
+      toast.error('No courses to export');
+      return;
+    }
+
+    setExportingCourses(true);
+    try {
+      try {
+        await exportToExcel({
+          data: filtered,
+          columns: EXPORT_COLUMN_PRESETS.COURSES,
+          fileName: 'Courses',
+          sheetName: 'Courses',
+        });
+        toast.success(`Exported ${filtered.length} courses to Excel`);
+      } catch (xlsxError) {
+        if (xlsxError.message.includes('xlsx')) {
+          exportToCSV({
+            data: filtered,
+            columns: EXPORT_COLUMN_PRESETS.COURSES,
+            fileName: 'Courses',
+          });
+          toast.success(`Exported ${filtered.length} courses to CSV`);
+        } else {
+          throw xlsxError;
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to export courses');
+    } finally {
+      setExportingCourses(false);
+    }
+  };
+
   const CourseForm = ({ onSubmit, submitLabel }) => (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -264,8 +302,26 @@ export default function ManageCourses() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Courses</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalCourses} courses in current filter</p>
         </div>
-        <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
-          <HiOutlinePlus size={16} /> Add Course
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" onClick={handleExportCourses} disabled={filtered.length === 0 || exportingCourses} title="Export filtered courses to Excel">
+            <HiOutlineDownload size={16} /> {exportingCourses ? 'Exporting...' : 'Export'}
+          </button>
+          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
+            <HiOutlinePlus size={16} /> Add Course
+          </button>
+        </div>
+      </div>
+
+      <div className="mobile-admin-action-strip">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
         </button>
       </div>
 
@@ -277,7 +333,7 @@ export default function ManageCourses() {
         </div>
       )}
 
-      <div className="courses-filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className={`courses-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input

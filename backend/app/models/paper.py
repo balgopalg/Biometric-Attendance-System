@@ -1,10 +1,14 @@
 """Paper (Subject) model helpers."""
 
+import re
 from datetime import datetime, timezone
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List
+
 from bson import ObjectId
 from bson.errors import InvalidId
+
 from app.extensions import get_collection
+
 
 def create_paper(
     name: str,
@@ -16,7 +20,6 @@ def create_paper(
     department_id: Any = None,
 ) -> dict:
     papers = get_collection("academic", "papers")
-    # Coerce department_id to ObjectId
     dept_oid = None
     if department_id is not None and str(department_id).strip():
         try:
@@ -58,6 +61,12 @@ def get_all_papers(fields: Optional[List[str]] = None, department_id: Any = None
 def get_paper_by_id(paper_id: str) -> Optional[dict]:
     papers = get_collection("academic", "papers")
     return papers.find_one({"_id": ObjectId(paper_id)})
+
+
+def get_paper_by_code(code: str) -> Optional[dict]:
+    papers = get_collection("academic", "papers")
+    escaped = re.escape(code.strip())
+    return papers.find_one({"code": {"$regex": f"^{escaped}$", "$options": "i"}})
 
 
 def get_papers_by_course(course_id: str) -> List[dict]:
@@ -102,6 +111,4 @@ def bulk_assign_course(paper_ids: List[str], course_id: str) -> None:
 def increment_total_classes(paper_id: str, count: int = 1) -> None:
     """Increment total_classes after a session is committed."""
     papers = get_collection("academic", "papers")
-    papers.update_one(
-        {"_id": ObjectId(paper_id)}, {"$inc": {"total_classes": count}}
-    )
+    papers.update_one({"_id": ObjectId(paper_id)}, {"$inc": {"total_classes": count}})

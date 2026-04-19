@@ -55,7 +55,12 @@ export default function RecognizedList({ students = [] }) {
               {displayName.charAt(0)?.toUpperCase() || '?'}
             </div>
             <div style={{ flex: 1 }}>
-              <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{displayName}</p>
+              <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>
+                {displayName}
+                {s?.isDrowsy && (
+                  <span title="Drowsiness Detetced" style={{ marginLeft: 6 }}>😴</span>
+                )}
+              </p>
               <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
                 {subLabel}
               </p>

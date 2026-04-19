@@ -3,6 +3,7 @@ import api from '../../api/axios';
 import useAdminPreference from '../../hooks/useAdminPreference';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { exportToExcel, exportToCSV, EXPORT_COLUMN_PRESETS } from '../../utils/excelExport';
 import Modal from '../../components/ui/Modal';
 import FaceEnrollmentModal from '../../components/admin/FaceEnrollmentModal';
 import TrainingProgressPanel from '../../components/admin/TrainingProgressPanel';
@@ -15,6 +16,8 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlinePlus,
   HiOutlineSearch,
+  HiOutlineFilter,
+  HiOutlineDotsHorizontal,
   HiOutlineCamera,
   HiOutlineClipboardList,
   HiOutlineTrash,
@@ -25,6 +28,7 @@ import {
   HiOutlineArrowUp,
   HiOutlineSparkles,
   HiOutlineDocumentAdd,
+  HiOutlineDownload,
 } from 'react-icons/hi';
 
 const EMPTY_FORM = {
@@ -81,6 +85,7 @@ export default function ManageStudents() {
   const [showFaceEnroll, setShowFaceEnroll] = useState(false);
   const [showStudentPapers, setShowStudentPapers] = useState(false);
   const [showExcelImport, setShowExcelImport] = useState(false);
+  const [showMobileOps, setShowMobileOps] = useState(false);
 
   const [createdCreds, setCreatedCreds] = useState(null);
   const [editingStudent, setEditingStudent] = useState(null);
@@ -89,6 +94,7 @@ export default function ManageStudents() {
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ department_id: '', course_id: '', paper_id: '', semester: '' });
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [showInactiveRows, setShowInactiveRows] = useAdminPreference('show_inactive_faded_rows', true);
   const [filterSemesters, setFilterSemesters] = useState([]);
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -104,6 +110,11 @@ export default function ManageStudents() {
   const [excelFile, setExcelFile] = useState(null);
   const [excelImporting, setExcelImporting] = useState(false);
   const [excelResults, setExcelResults] = useState(null);
+  const [showPromoteModal, setShowPromoteModal] = useState(false);
+  const [promoteSemester, setPromoteSemester] = useState('');
+  const [promoteSemesterOptions, setPromoteSemesterOptions] = useState([]);
+  const [loadingPromoteSemesters, setLoadingPromoteSemesters] = useState(false);
+  const [promotingSelected, setPromotingSelected] = useState(false);
   const excelFileInputRef = useRef(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [trainingStudentId, setTrainingStudentId] = useState('');
@@ -120,7 +131,14 @@ export default function ManageStudents() {
   const [baseAssignedPaperIds, setBaseAssignedPaperIds] = useState([]);
   const [loadingStudentPapers, setLoadingStudentPapers] = useState(false);
   const [savingStudentPapers, setSavingStudentPapers] = useState(false);
+  const [exportingStudents, setExportingStudents] = useState(false);
   const fetchStudentsRef = useRef(null);
+  const hasFetchedStudentsRef = useRef(false);
+  const previousStudentsQueryRef = useRef({
+    search: '',
+    filters: { department_id: '', course_id: '', paper_id: '', semester: '' },
+    showInactiveRows: false,
+  });
 
 
   // Fetch departments for Super Admin
@@ -138,7 +156,8 @@ export default function ManageStudents() {
 
   const fetchStudents = (nextPage = 1, options = {}) => {
     const signal = options.signal;
-    setLoadingStudents(true);
+    const silent = Boolean(options.silent);
+    if (!silent) setLoadingStudents(true);
     setStudentsError('');
     const params = {};
     params.page = nextPage;
@@ -172,7 +191,7 @@ export default function ManageStudents() {
       setStudentsError(err.response?.data?.error || 'Failed to load students.');
     }).finally(() => {
       if (signal?.aborted) return;
-      setLoadingStudents(false);
+      if (!silent) setLoadingStudents(false);
     });
   };
 
@@ -206,8 +225,32 @@ export default function ManageStudents() {
       setTotalStudents(0);
       return;
     }
+
+    const previous = previousStudentsQueryRef.current;
+    const searchChanged = previous.search !== debouncedSearch;
+    const filtersChanged =
+      previous.filters.department_id !== debouncedFilters.department_id
+      || previous.filters.course_id !== debouncedFilters.course_id
+      || previous.filters.paper_id !== debouncedFilters.paper_id
+      || previous.filters.semester !== debouncedFilters.semester;
+    const inactiveChanged = previous.showInactiveRows !== showInactiveRows;
+    const silent = hasFetchedStudentsRef.current && searchChanged && !filtersChanged && !inactiveChanged;
+
     const controller = new AbortController();
-    fetchStudents(1, { signal: controller.signal });
+    fetchStudents(1, { signal: controller.signal, silent });
+
+    previousStudentsQueryRef.current = {
+      search: debouncedSearch,
+      filters: {
+        department_id: debouncedFilters.department_id,
+        course_id: debouncedFilters.course_id,
+        paper_id: debouncedFilters.paper_id,
+        semester: debouncedFilters.semester,
+      },
+      showInactiveRows,
+    };
+    hasFetchedStudentsRef.current = true;
+
     return () => controller.abort();
   }, [debouncedFilters, debouncedSearch, showInactiveRows, isDepartmentAdmin]);
 
@@ -816,6 +859,14 @@ export default function ManageStudents() {
     }
   };
 
+  const openBulkAssignModal = () => {
+    setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
+    setBulkSemesters([]);
+    setBulkPapers([]);
+    setBulkStudents([]);
+    setShowBulk(true);
+  };
+
   const handleBulkAssign = async () => {
     if (!bulkForm.paper_id || bulkForm.user_ids.length === 0) {
       toast.error('Select subject and at least one student');
@@ -835,24 +886,94 @@ export default function ManageStudents() {
     }
   };
 
-  const handlePromoteSelected = async () => {
+  const openPromoteSelectedModal = async () => {
     if (selectedStudentIds.length === 0) {
       toast.error('Select at least one student to promote');
       return;
     }
 
-    if (!window.confirm(`Promote ${selectedStudentIds.length} selected students to next semester?`)) {
+    const selectedIdSet = new Set(selectedStudentIds.map((id) => String(id)));
+    const selectedCourseIds = Array.from(new Set(
+      students
+        .filter((student) => selectedIdSet.has(String(student.user_id || student._id)))
+        .map((student) => String(student.course_id || '').trim())
+        .filter(Boolean)
+    ));
+
+    setPromoteSemester('');
+    setPromoteSemesterOptions([]);
+    setShowPromoteModal(true);
+
+    if (selectedCourseIds.length === 0) {
       return;
     }
 
+    setLoadingPromoteSemesters(true);
+    try {
+      const semesterLists = await Promise.all(
+        selectedCourseIds.map((courseId) =>
+          api.get(`/admin/courses/${courseId}/semesters`).then((r) => r.data || [])
+        )
+      );
+
+      const semesterToCourseNames = new Map();
+      selectedCourseIds.forEach((courseId, index) => {
+        const course = courses.find((item) => item._id === courseId);
+        const courseLabel = course
+          ? `${course.name || 'Course'}${course.code ? ` (${course.code})` : ''}`
+          : 'Course';
+        (semesterLists[index] || []).forEach((value) => {
+          const semester = Number(value);
+          if (!Number.isInteger(semester) || semester <= 0) return;
+          const labels = semesterToCourseNames.get(semester) || new Set();
+          labels.add(courseLabel);
+          semesterToCourseNames.set(semester, labels);
+        });
+      });
+
+      const options = Array.from(semesterToCourseNames.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([semester, labelSet]) => {
+          const labels = Array.from(labelSet);
+          const label = selectedCourseIds.length > 1
+            ? `Semester ${semester} (${labels.join(', ')})`
+            : `Semester ${semester}`;
+          return { value: String(semester), label };
+        });
+
+      setPromoteSemesterOptions(options);
+    } catch {
+      setPromoteSemesterOptions([]);
+      toast.error('Unable to load semester list right now');
+    } finally {
+      setLoadingPromoteSemesters(false);
+    }
+  };
+
+  const handlePromoteSelected = async () => {
+    const trimmedSemester = String(promoteSemester || '').trim();
+    const parsedTargetSemester = trimmedSemester ? Number(trimmedSemester) : 0;
+
+    if (trimmedSemester && (!Number.isInteger(parsedTargetSemester) || parsedTargetSemester <= 0)) {
+      toast.error('Semester must be a positive whole number');
+      return;
+    }
+
+    setPromotingSelected(true);
     try {
       const fromSemester = Number(filters.semester || 0) || undefined;
-      const res = await api.post('/admin/student-bulk-promote', {
+      const payload = {
         user_ids: selectedStudentIds,
         from_semester: fromSemester,
-      });
+      };
+      if (parsedTargetSemester > 0) payload.target_semester = parsedTargetSemester;
+
+      const res = await api.post('/admin/student-bulk-promote', payload);
       toast.success(res.data?.message || 'Students promoted');
       setSelectedStudentIds([]);
+      setShowPromoteModal(false);
+      setPromoteSemester('');
+      setPromoteSemesterOptions([]);
       fetchStudents(1);
     } catch (err) {
       if (err.response?.status === 404 || err.response?.status === 405) {
@@ -860,6 +981,55 @@ export default function ManageStudents() {
       } else {
         toast.error(err.response?.data?.error || 'Failed to promote students');
       }
+    } finally {
+      setPromotingSelected(false);
+    }
+  };
+
+  const handleExportStudents = async () => {
+    if (filtered.length === 0) {
+      toast.error('No students to export');
+      return;
+    }
+
+    setExportingStudents(true);
+    try {
+      // Transform data to include course names
+      const transformedData = filtered.map((student) => {
+        const course = courses.find((c) => c._id === student.course_id);
+        return {
+          ...student,
+          course_name: course ? `${course.name}${course.code ? ` (${course.code})` : ''}` : 'N/A',
+        };
+      });
+
+      // Try Excel export first, fallback to CSV if xlsx not installed
+      try {
+        await exportToExcel({
+          data: transformedData,
+          columns: EXPORT_COLUMN_PRESETS.STUDENTS,
+          fileName: 'Students',
+          sheetName: 'Students',
+        });
+        toast.success(`Exported ${filtered.length} students to Excel`);
+      } catch (xlsxError) {
+        if (xlsxError.message.includes('xlsx')) {
+          // Fallback to CSV
+          exportToCSV({
+            data: transformedData,
+            columns: EXPORT_COLUMN_PRESETS.STUDENTS,
+            fileName: 'Students',
+          });
+          toast.success(`Exported ${filtered.length} students to CSV (install xlsx for Excel format)`);
+        } else {
+          throw xlsxError;
+        }
+      }
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.error(err.message || 'Failed to export students');
+    } finally {
+      setExportingStudents(false);
     }
   };
 
@@ -961,25 +1131,26 @@ export default function ManageStudents() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Students</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalStudents} students in current filter</p>
         </div>
-        <div className="students-toolbar-actions" style={{ display: 'flex', gap: 10 }}>
+        <div className="students-toolbar-actions students-toolbar-actions-extra" style={{ display: 'flex', gap: 10 }}>
           <button className="btn-secondary" onClick={handleRebuildAllFaces} disabled={rebuildingAllFaces}>
             <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
           </button>
           <button className="btn-secondary" onClick={handleBulkTrainFace} disabled={selectedStudentIds.length === 0 || bulkTraining}>
             <HiOutlineSparkles size={16} /> {bulkTraining ? 'Training...' : `Bulk Train Face (${selectedStudentIds.length})`}
           </button>
-          <button className="btn-secondary" onClick={handlePromoteSelected} disabled={selectedStudentIds.length === 0}>
+          <button className="btn-secondary" onClick={openPromoteSelectedModal} disabled={selectedStudentIds.length === 0}>
             <HiOutlineArrowUp size={16} /> Promote Selected ({selectedStudentIds.length})
           </button>
-          <button className="btn-secondary" onClick={() => {
-            setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
-            setBulkSemesters([]);
-            setBulkPapers([]);
-            setBulkStudents([]);
-            setShowBulk(true);
-          }}>
+          <button className="btn-secondary" onClick={openBulkAssignModal}>
             <HiOutlineClipboardList size={16} /> Bulk Assign Subject
           </button>
+          <button className="btn-secondary" onClick={handleExportStudents} disabled={filtered.length === 0 || exportingStudents} title="Export filtered students to Excel">
+            <HiOutlineDownload size={16} /> {exportingStudents ? 'Exporting...' : `Export (${filtered.length})`}
+          </button>
+        </div>
+      </div>
+
+      <div className="students-toolbar-actions students-toolbar-actions-primary" style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
           <button className="btn-secondary" title="Import students from Excel" onClick={() => {
             setExcelForm({ course_id: '', semester: '' });
             setExcelFile(null);
@@ -993,12 +1164,32 @@ export default function ManageStudents() {
             <HiOutlinePlus size={16} /> Add Student
           </button>
         </div>
-      </div>
 
       <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
 
+      <div className="mobile-admin-action-strip">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title="More actions"
+          aria-label="More actions"
+          onClick={() => setShowMobileOps(true)}
+        >
+          <HiOutlineDotsHorizontal size={18} />
+        </button>
+      </div>
 
-      <div className="students-filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+      <div className={`students-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -1057,14 +1248,18 @@ export default function ManageStudents() {
         </select>
       </div>
 
-      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
-        <label style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="desktop-fade-rows-control" role="group" aria-label="Faded rows visibility">
+        <span>Fade Rows</span>
+        <label className="rows-toggle-switch">
           <input
             type="checkbox"
             checked={showInactiveRows}
             onChange={(e) => setShowInactiveRows(e.target.checked)}
+            aria-label="Toggle faded rows"
           />
-          Show faded rows (inactive-course students)
+          <span className="rows-toggle-track">
+            <span className="rows-toggle-thumb" />
+          </span>
         </label>
       </div>
 
@@ -1073,7 +1268,7 @@ export default function ManageStudents() {
           <StatePanel variant="loading" title="Loading students" description="Fetching student records and enrollment status." compact />
         ) : null}
 
-        {!loadingStudents && studentsError ? (
+        {studentsError ? (
           <StatePanel variant="error" title="Unable to load students" description={studentsError} actionLabel="Retry" onAction={() => setFilters({ ...filters })} compact />
         ) : null}
 
@@ -1153,7 +1348,7 @@ export default function ManageStudents() {
                 <td>{s.current_semester ? `Semester ${s.current_semester}` : 'N/A'}</td>
                 <td>{s.course_name ? `${formatCourseName(s.course_name, { isInactive: s.is_course_inactive })} · ${s.academic_session || 'N/A'}` : 'N/A'}</td>
                 <td>{(s.enrolled_papers || []).length}</td>
-                <td>
+                <td style={{ textAlign: 'center' }}>
                   <span className={`badge ${s.has_face ? 'badge-success' : 'badge-warning'}`}>
                     {s.has_face ? 'Face Ready' : 'No Face'}
                   </span>
@@ -1240,6 +1435,96 @@ export default function ManageStudents() {
           <button className="btn-secondary" style={{ width: '100%', justifyContent: 'center' }} onClick={copyCredentials}>
             <HiOutlineClipboardCopy size={16} /> Copy credentials
           </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showMobileOps} onClose={() => setShowMobileOps(false)} title="Student Operations" width={420}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div
+            className="btn-secondary"
+            style={{ justifyContent: 'space-between', cursor: 'default' }}
+          >
+            <span>Fade Rows</span>
+            <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showInactiveRows}
+                onChange={(e) => setShowInactiveRows(e.target.checked)}
+                aria-label="Toggle faded rows"
+                style={{ position: 'absolute', opacity: 0, width: 1, height: 1 }}
+              />
+              <span
+                style={{
+                  width: 38,
+                  height: 22,
+                  borderRadius: 999,
+                  background: showInactiveRows ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                  transition: 'background 160ms ease',
+                  position: 'relative',
+                  display: 'inline-block',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: showInactiveRows ? 18 : 2,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 160ms ease',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                  }}
+                />
+              </span>
+            </label>
+          </div>
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); handleRebuildAllFaces(); }} disabled={rebuildingAllFaces}>
+            <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
+          </button>
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); handleBulkTrainFace(); }} disabled={selectedStudentIds.length === 0 || bulkTraining}>
+            <HiOutlineSparkles size={16} /> {bulkTraining ? 'Training...' : `Bulk Train Face (${selectedStudentIds.length})`}
+          </button>
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); openPromoteSelectedModal(); }} disabled={selectedStudentIds.length === 0}>
+            <HiOutlineArrowUp size={16} /> Promote Selected ({selectedStudentIds.length})
+          </button>
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); openBulkAssignModal(); }}>
+            <HiOutlineClipboardList size={16} /> Bulk Assign Subject
+          </button>
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); handleExportStudents(); }} disabled={filtered.length === 0 || exportingStudents}>
+            <HiOutlineDownload size={16} /> {exportingStudents ? 'Exporting...' : `Export (${filtered.length})`}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showPromoteModal} onClose={() => { if (!promotingSelected) { setShowPromoteModal(false); setPromoteSemesterOptions([]); } }} title="Promote Selected Students" width={440}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+            Leave semester blank to auto-promote each student to next semester.
+          </p>
+          <div>
+            <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>
+              Target Semester (optional)
+            </label>
+            <select
+              className="input-field"
+              value={promoteSemester}
+              onChange={(e) => setPromoteSemester(e.target.value)}
+              disabled={loadingPromoteSemesters}
+            >
+              <option value="">Auto next semester</option>
+              {promoteSemesterOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button className="btn-secondary" onClick={() => { setShowPromoteModal(false); setPromoteSemesterOptions([]); }} disabled={promotingSelected}>Cancel</button>
+            <button className="btn-primary" onClick={handlePromoteSelected} disabled={promotingSelected}>
+              {promotingSelected ? 'Promoting...' : `Promote ${selectedStudentIds.length}`}
+            </button>
+          </div>
         </div>
       </Modal>
 

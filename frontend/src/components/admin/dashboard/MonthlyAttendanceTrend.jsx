@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
+import { useState } from 'react';
 
 function AttendanceBars({ points, maxValue, width, height }) {
   const padding = { top: 8, right: 10, bottom: 24, left: 10 };
   const innerWidth = width - padding.left - padding.right;
   const innerHeight = height - padding.top - padding.bottom;
   const barWidth = points.length > 0 ? Math.max(10, innerWidth / (points.length * 1.6)) : 10;
+  const [hoveredBar, setHoveredBar] = useState(null);
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} style={{ width: '100%', height }} role="img" aria-label="Monthly attendance bar chart">
@@ -41,12 +43,36 @@ function AttendanceBars({ points, maxValue, width, height }) {
               height={Math.max(0, barHeight)}
               rx="6"
               fill="url(#attendanceBarGradient)"
+              onMouseEnter={() => setHoveredBar({ key: point.key, x: x + barWidth / 2, y, value })}
+              onMouseLeave={() => setHoveredBar((prev) => (prev?.key === point.key ? null : prev))}
             />
             <text x={x + barWidth / 2} y={height - 8} textAnchor="middle" fontSize="11" fill="var(--text-muted)">{point.label}</text>
             <title>{`${point.label}: ${value}`}</title>
           </g>
         );
       })}
+
+      {hoveredBar ? (
+        <g pointerEvents="none">
+          <rect
+            x={Math.max(4, hoveredBar.x - 42)}
+            y={Math.max(4, hoveredBar.y - 26)}
+            width="84"
+            height="18"
+            rx="4"
+            fill="rgba(15, 23, 42, 0.9)"
+          />
+          <text
+            x={hoveredBar.x}
+            y={Math.max(17, hoveredBar.y - 14)}
+            textAnchor="middle"
+            fontSize="10"
+            fill="#ffffff"
+          >
+            {`${hoveredBar.value} attendances`}
+          </text>
+        </g>
+      ) : null}
     </svg>
   );
 }
@@ -87,7 +113,7 @@ export default function MonthlyAttendanceTrend({
 
   return (
     <div className="glass-card" style={{ padding: 20, overflow: 'hidden' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+      <div className="monthly-trend-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
         <div>
           <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>Monthly Attendance Trend</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
@@ -109,9 +135,9 @@ export default function MonthlyAttendanceTrend({
             {loading && <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Updating...</span>}
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <p style={{ fontSize: '1.1rem', fontWeight: 800, lineHeight: 1 }}>{totalAttendance}</p>
-          <p style={{ color: delta >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)', fontSize: '0.72rem', marginTop: 3 }}>{deltaText}</p>
+        <div className="monthly-trend-kpi" style={{ textAlign: 'right' }}>
+          <p className="monthly-trend-kpi-value" style={{ fontSize: '1.1rem', fontWeight: 800, lineHeight: 1 }}>{totalAttendance}</p>
+          <p className="monthly-trend-kpi-delta" style={{ color: delta >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)', fontSize: '0.72rem', marginTop: 3 }}>{deltaText}</p>
         </div>
       </div>
 
