@@ -135,12 +135,14 @@ def create_app(config_class=Config, seed_default_admin=False):
     from .routes.lecturer import lecturer_bp
     from .routes.student import student_bp
     from .routes.recognition import recognition_bp
+    from .routes.timetable import timetable_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(lecturer_bp, url_prefix="/api/lecturer")
     app.register_blueprint(student_bp, url_prefix="/api/student")
     app.register_blueprint(recognition_bp, url_prefix="/api/recognition")
+    app.register_blueprint(timetable_bp, url_prefix="/api/timetable")
 
     with app.app_context():
         _bootstrap_isolated_databases(mongo, app.config)
@@ -208,6 +210,16 @@ def _ensure_indexes(mongo, config):
     _create_index_safe(papers, [("code", ASCENDING)], unique=True, name="uq_papers_code")
     _create_index_safe(papers, [("course_id", ASCENDING)], name="ix_papers_course")
     _create_index_safe(papers, [("lecturer_id", ASCENDING)], name="ix_papers_lecturers")
+
+    timetables = client[config["MONGO_DB_ACADEMIC"]]["timetables"]
+    _create_index_safe(timetables, [("department_id", ASCENDING), ("course_id", ASCENDING), ("semester", ASCENDING)], name="ix_timetables_scope")
+    _create_index_safe(timetables, [("status", ASCENDING), ("updated_at", DESCENDING)], name="ix_timetables_status_updated")
+    _create_index_safe(timetables, [("academic_session", ASCENDING)], name="ix_timetables_session")
+
+    timetable_slots = client[config["MONGO_DB_ACADEMIC"]]["timetable_slots"]
+    _create_index_safe(timetable_slots, [("timetable_id", ASCENDING), ("day_index", ASCENDING), ("start_minutes", ASCENDING)], name="ix_timetable_slots_grid")
+    _create_index_safe(timetable_slots, [("lecturer_id", ASCENDING), ("day_index", ASCENDING), ("start_minutes", ASCENDING)], name="ix_timetable_slots_lecturer")
+    _create_index_safe(timetable_slots, [("course_id", ASCENDING), ("semester", ASCENDING)], name="ix_timetable_slots_course_sem")
 
     profiles = client[config["MONGO_DB_ACADEMIC"]]["student_profiles"]
     _create_index_safe(profiles, [("user_id", ASCENDING)], unique=True, name="uq_profiles_user")

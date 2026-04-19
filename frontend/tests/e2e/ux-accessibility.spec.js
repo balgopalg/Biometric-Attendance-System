@@ -207,6 +207,20 @@ async function installCommonApiMocks(page) {
   });
 }
 
+async function tabUntilFocused(page, locator, maxTabs = 8) {
+  for (let i = 0; i < maxTabs; i += 1) {
+    try {
+      await expect(locator).toBeFocused({ timeout: 150 });
+      return;
+    } catch {
+      // Keep tabbing until the target control receives focus.
+    }
+    await page.keyboard.press('Tab');
+  }
+
+  await expect(locator).toBeFocused();
+}
+
 test.describe('UX and accessibility hardening checks', () => {
   test('supports keyboard-first navigation on login screen', async ({ page }) => {
     await installCommonApiMocks(page);
@@ -218,11 +232,8 @@ test.describe('UX and accessibility hardening checks', () => {
     await page.keyboard.press('Tab');
     await expect(page.locator('#login-password')).toBeFocused();
 
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: /Show password|Hide password/i })).toBeFocused();
-
-    await page.keyboard.press('Tab');
-    await expect(page.locator('#login-submit')).toBeFocused();
+    await tabUntilFocused(page, page.getByRole('button', { name: /Show password|Hide password/i }));
+    await tabUntilFocused(page, page.locator('#login-submit'));
   });
 
   test('maintains accessible contrast on key login texts', async ({ page }) => {

@@ -43,24 +43,7 @@ export default function AttendanceSession() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
 
-  const isDrowsy = useDrowsinessDetection(videoRef, scanning);
-  const isDrowsyRef = useRef(isDrowsy);
-  useEffect(() => {
-    isDrowsyRef.current = isDrowsy;
-    // If drowsiness is detected, try annotating the most recently recognized student
-    if (isDrowsy) {
-      setRecognized(prev => {
-        if (prev.length === 0) return prev;
-        const lastStudent = prev[prev.length - 1];
-        if (!lastStudent.isDrowsy) {
-          const updated = [...prev];
-          updated[updated.length - 1] = { ...lastStudent, isDrowsy: true };
-          return updated;
-        }
-        return prev;
-      });
-    }
-  }, [isDrowsy]);
+  useDrowsinessDetection(videoRef, scanning);
 
   const [diag, setDiag] = useState({ faces_detected: 0, candidates_count: 0, best_similarity_seen: null, threshold: null });
   const [scanError, setScanError] = useState('');
@@ -317,7 +300,7 @@ export default function AttendanceSession() {
       }
 
       const newMatchesRaw = safeMatches(res.data?.new_matches);
-      const newMatches = newMatchesRaw.map(m => ({ ...m, isDrowsy: !!isDrowsyRef.current }));
+      const newMatches = newMatchesRaw.map((m) => ({ ...m, isDrowsy: !!m?.isDrowsy }));
 
       if (newMatches.length > 0) {
         setRecognized((prev) => [...prev, ...newMatches]);

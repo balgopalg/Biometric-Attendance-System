@@ -50,7 +50,9 @@ export default function SplashScreen() {
             width: 150,
             height: 150,
             borderRadius: '50%',
-            border: isLightTheme ? '1px dashed rgba(15, 23, 42, 0.2)' : '1px dashed rgba(255,255,255,0.1)',
+            borderWidth: 1,
+            borderStyle: 'dashed',
+            borderColor: isLightTheme ? 'rgba(15, 23, 42, 0.2)' : 'rgba(255,255,255,0.1)',
             borderTopColor: 'var(--accent-cyan)',
             borderBottomColor: 'var(--accent-indigo)',
             zIndex: 1
@@ -66,7 +68,9 @@ export default function SplashScreen() {
             width: 120,
             height: 120,
             borderRadius: '50%',
-            border: '2px solid transparent',
+            borderWidth: 2,
+            borderStyle: 'solid',
+            borderColor: 'transparent',
             borderRightColor: 'var(--accent-emerald)',
             borderLeftColor: isLightTheme ? 'rgba(15, 23, 42, 0.12)' : 'rgba(255,255,255,0.05)',
             zIndex: 1

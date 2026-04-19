@@ -1123,6 +1123,97 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   accent-color: var(--accent-cyan);
 }
 
+.timetable-grid-scroll {
+  overflow-x: auto;
+}
+
+.timetable-grid-table {
+  min-width: 760px;
+}
+
+.timetable-slot-chip {
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--bg-glass);
+  min-height: 72px;
+  position: relative;
+}
+
+.timetable-cell-edit-btn {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-glass);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.timetable-cell-edit-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--accent-cyan);
+}
+
+.timetable-sketch-table {
+  min-width: 980px;
+  border-collapse: collapse;
+  border: 3px solid #111827;
+}
+
+.timetable-sketch-table th,
+.timetable-sketch-table td {
+  border: 3px solid #111827;
+  vertical-align: top;
+}
+
+.timetable-sketch-table .timetable-day-cell {
+  background: color-mix(in srgb, var(--bg-card) 86%, #ffffff 14%);
+}
+
+.timetable-sketch-table .timetable-slot-chip {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  min-height: 62px;
+  padding: 6px;
+}
+
+.timetable-recess-header {
+  min-width: 68px;
+  text-align: center;
+}
+
+.timetable-recess-cell {
+  min-width: 68px;
+  background: color-mix(in srgb, var(--bg-card) 75%, #e5e7eb 25%);
+  text-align: center;
+  padding: 4px !important;
+}
+
+.timetable-recess-cell span {
+  display: inline-block;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  font-weight: 800;
+  font-size: 0.8rem;
+  letter-spacing: 0.3px;
+}
+
+.timetable-recess-cell small {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+}
+
 .student-page .student-pred-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1371,6 +1462,15 @@ input[type="date"]:invalid::-webkit-datetime-edit {
     height: 19px;
   }
 
+  .timetable-grid-table {
+    min-width: 680px;
+  }
+
+  .timetable-slot-chip {
+    min-height: 64px;
+    padding: 7px;
+  }
+
   .mobile-filters-icon-btn {
     width: 38px;
     height: 38px;
@@ -1395,7 +1495,8 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   .students-filter-grid,
   .courses-filter-grid,
   .papers-filter-grid,
-  .exam-eligibility-filter-grid {
+  .exam-eligibility-filter-grid,
+  .timetable-filter-grid {
     grid-template-columns: 1fr !important;
   }
 
@@ -1403,7 +1504,8 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   .students-filter-grid > :not(:first-child),
   .courses-filter-grid > :not(:first-child),
   .papers-filter-grid > :not(:first-child),
-  .exam-eligibility-filter-grid > :not(:first-child) {
+  .exam-eligibility-filter-grid > :not(:first-child),
+  .timetable-filter-grid > :not(:first-child) {
     display: none;
   }
 
@@ -1411,7 +1513,8 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   .students-filter-grid.is-mobile-open > :not(:first-child),
   .courses-filter-grid.is-mobile-open > :not(:first-child),
   .papers-filter-grid.is-mobile-open > :not(:first-child),
-  .exam-eligibility-filter-grid.is-mobile-open > :not(:first-child) {
+  .exam-eligibility-filter-grid.is-mobile-open > :not(:first-child),
+  .timetable-filter-grid.is-mobile-open > :not(:first-child) {
     display: block;
   }
 
