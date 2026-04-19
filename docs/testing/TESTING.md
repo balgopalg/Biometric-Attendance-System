@@ -9,7 +9,7 @@ This project includes a comprehensive, deterministic end-to-end test suite cover
 - **Coverage:** Comprehensive coverage including RBAC permission chains, routing logic, authentication tokens, and queue resilience.
 - **Status:** ✅ 36 tests passing
 
-### Frontend Tests: `frontend/tests/e2e/project-flows.spec.js`
+### Frontend Tests: `frontend/tests/e2e/project-flows.spec.js` + `frontend/tests/e2e/ux-accessibility.spec.js`
 - **Framework:** Playwright 1.54.2 with Chromium browser
 - **Mocking:** API route interception via `page.route()` + browser stubs (camera, canvas)
 - **Coverage:** 7 integrated browser workflows covering login/navigation, attendance sessions, enrollment/exports/rollback, and UX/Accessibility rendering.
@@ -47,11 +47,11 @@ npm run test:e2e
 
 **Expected Output:**
 ```
-Running 7 tests using 4 workers
+Running 7 tests using 1 worker
 [1/7] [chromium] › tests\e2e\project-flows.spec.js:714:3 › Project end-to-end flows › login and navigation
 [2/7] [chromium] › tests\e2e\ux-accessibility.spec.js:211:3 › UX and accessibility hardening checks › supports keyboard-first navigation on login screen
 ...
-  7 passed (28s)
+  7 passed (~25-40s)
 ```
 
 ---
@@ -124,7 +124,8 @@ python -m unittest backend.tests.test_api_flows.AuthFlowTests -v
 ## Frontend Test Suite Details
 
 ### File Location
-`frontend/tests/e2e/project-flows.spec.js` (~740 lines)
+- `frontend/tests/e2e/project-flows.spec.js`
+- `frontend/tests/e2e/ux-accessibility.spec.js`
 
 ### Test Structure
 
@@ -180,6 +181,12 @@ python -m unittest backend.tests.test_api_flows.AuthFlowTests -v
 - Click Rollback button
 - Confirm rollback dialog
 - Verify "Rolled Back" badge in audit table
+
+**UX/Accessibility scenarios (`ux-accessibility.spec.js`)**
+- Keyboard-first login flow remains reachable by tab order
+- Key login text contrast remains readable
+- Admin dashboard avoids horizontal overflow on mobile widths
+- Lecturer session action controls remain usable on mobile widths
 
 ### Running Specific Test
 ```bash
@@ -308,7 +315,7 @@ jobs:
 ### Frontend Tests Timeout
 - **Selector not found:** Verify exact element text/role in browser DevTools or Playwright error screenshot
 - **API mock not working:** Check route pattern in `page.route()` and response JSON format
-- **Test duration >30s:** Optimize mock responses or reduce test complexity
+- **Test duration >60s:** Optimize mock responses or reduce test complexity
 
 ### Browser Hangs at Login
 - **Element not visible:** Check that camera/API mocks are installed before `loginAs()`
@@ -337,6 +344,6 @@ jobs:
 | Framework | pytest | Playwright + React |
 | Tests | 36 integrated tests | 7 scenarios |
 | Status | ✅ 36/36 passing | ✅ 7/7 passing |
-| Runtime | ~25s | ~28s |
+| Runtime | ~25s | ~25-40s |
 
 **Both suites are deterministic, stable over variable compilation latencies, and ready for CI/CD integration.**

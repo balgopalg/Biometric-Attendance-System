@@ -16,6 +16,11 @@ This directory contains the React single-page application built with Vite for th
 - **Role-Based Access Control**: Protected routes and specific UI layouts mapped to `admin`, `department_admin`, `lecturer`, and `student` roles.
 - **Optimistic UI & Hydration**: Advanced error boundaries and dynamic suspense wrappers.
 - **Biometric UI Pipeline**: Built-in webcam capture flows with centering capabilities and image cropping for face enrollment/attendance.
+- **Timetable Module**:
+	- Admin timetable management at `/admin/timetable` (generate, edit slots, activate, delete, export PDF)
+	- Lecturer timetable view at `/lecturer/timetable` with PDF export
+	- Student timetable view at `/student/timetable` with PDF export
+- **Paper Import Module**: Admin paper import from Excel in Manage Papers flow.
 
 ## Development Setup
 
@@ -50,6 +55,14 @@ npm run test:e2e
 - Explicit Vite path checking during interception fixes "infinite load" sub-chunking issues.
 - Responsive design constraints are explicitly tested (e.g., mobile overflow boundaries).
 - Accessibility and high-contrast logging texts are asserted.
+- Playwright runs over HTTPS with self-signed certificate tolerance:
+	- `baseURL: https://127.0.0.1:4173`
+	- `use.ignoreHTTPSErrors: true`
+	- `webServer.ignoreHTTPSErrors: true`
+- Test execution is intentionally serialized for stability in local/CI runs:
+	- `fullyParallel: false`
+	- `workers: 1`
+	- `timeout: 60000`
 
 ## Styling Guidelines
 

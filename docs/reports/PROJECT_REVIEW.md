@@ -41,7 +41,7 @@ Frontend highlights:
 
 ### 3.1 Admin Features
 - Course management: create, update, delete, list, session and semester metadata support
-- Paper management: create, update, delete, list, course-linked filtering
+- Paper management: create, update, delete, list, course-linked filtering, and Excel import with row-level validation
 - Lecturer management: create, update, delete, reset password, reset or update PIN, assign papers
 - Student management: create, update, delete, reset password, enrollment support
 - Bulk lecturer import from Excel with row-level success/skip/error output
@@ -58,6 +58,11 @@ Frontend highlights:
   - filters by course, academic session, semester
   - aggregated attendance view and totals
   - export to Excel and CSV
+- Timetable module:
+  - create and regenerate timetables per department/course/semester/session
+  - slot-level editing and timetable status lifecycle (draft/active/archived)
+  - conflict detection and retry-aware generation
+  - PDF export of weekly timetable layouts
 - Exam eligibility module:
   - eligibility summary retrieval
   - per-record override
@@ -76,6 +81,7 @@ Frontend highlights:
 ### 3.2 Lecturer Features
 - Assigned papers view
 - PIN setup and generation
+- Personal timetable view with weekly schedule and PDF export
 - Attendance session lifecycle:
   - start
   - recognize from webcam frames
@@ -90,6 +96,7 @@ Frontend highlights:
 - Profile view
 - Attendance summary by paper
 - Exam eligibility and attendance prediction view
+- Personal timetable view by assigned course/semester with PDF export
 
 ### 3.4 System and Platform Features
 - JWT authentication using cookies (with configurable CSRF cookie protection)
@@ -115,6 +122,7 @@ Primary route groups:
 - /api/lecturer: papers, pin management, session start/recognize/stop/commit/review/adjust, progress
 - /api/student: profile, attendance, predictions and exam eligibility
 - /api/recognition: detect and identify
+- /api/timetable: academic session discovery, paper options, admin timetable CRUD/generation/slot updates, lecturer view, student view
 
 Overall route mapping is coherent with frontend usage and role-based screens.
 
@@ -156,6 +164,8 @@ Dependency intent:
 Runtime dependencies:
 - axios
 - framer-motion
+- html2canvas
+- jspdf
 - react
 - react-dom
 - react-hot-toast

@@ -5,18 +5,18 @@
 Your project now has a **comprehensive, production-ready test suite** with two independent test harnesses:
 
 ### Backend Tests
-- **File:** `backend/tests/test_api_flows.py` (606 lines)
-- **Framework:** Python unittest + Fake MongoDB client
-- **Tests:** 4 integrated API flow tests
-- **Status:** ✅ All 4/4 passing
-- **Runtime:** ~5-10 seconds
+- **Location:** `backend/tests/`
+- **Framework:** Python `pytest`
+- **Tests:** 36 integrated tests across API, RBAC, observability, and resilience flows
+- **Status:** ✅ 36/36 passing
+- **Runtime:** ~20-30 seconds (local)
 
 ### Frontend Tests
-- **File:** `frontend/tests/e2e/project-flows.spec.js` (~740 lines)
+- **Files:** `frontend/tests/e2e/project-flows.spec.js`, `frontend/tests/e2e/ux-accessibility.spec.js`
 - **Framework:** Playwright 1.54.2 + Chromium browser
-- **Tests:** 3 end-to-end browser workflows
-- **Status:** ✅ All 3/3 passing
-- **Runtime:** ~18.5 seconds
+- **Tests:** 7 end-to-end browser scenarios
+- **Status:** ✅ 7/7 passing
+- **Runtime:** ~25-40 seconds (serial-safe local config)
 
 ---
 
@@ -25,7 +25,7 @@ Your project now has a **comprehensive, production-ready test suite** with two i
 ### Backend Tests
 ```bash
 cd backend
-python -m unittest tests.test_api_flows -v
+pytest -q
 ```
 
 ### Frontend Tests
@@ -37,7 +37,7 @@ npm run test:e2e
 ### Both Suites (from root)
 ```bash
 # Terminal 1: Backend
-cd backend && python -m unittest tests.test_api_flows -v
+cd backend && pytest -q
 
 # Terminal 2: Frontend
 cd frontend && npm run test:e2e
@@ -47,24 +47,25 @@ cd frontend && npm run test:e2e
 
 ## 📋 Test Coverage
 
-### Backend Suite (4 Tests)
+### Backend Suite (36 Tests)
 
 | Test | Validates |
 |------|-----------|
-| **AuthFlowTests** | Login, profile fetch, password change |
-| **StudentFlowTests** | Attendance records, eligibility, predictions |
-| **LecturerFlowTests** | Session lifecycle, image upload, recognition, commit, adjust |
-| **AdminFlowTests** | Stats, attendance matrix, exports (CSV/XLSX), enrollment, rollback |
+| **API flow tests** | Login, profile, attendance, recognition, commit, exports, rollback |
+| **RBAC tests** | Role inheritance and authorization mapping |
+| **Resilience/ops tests** | Queue and observability checks |
+| **Security coverage** | CSRF/JWT and protected-route expectations |
 
 **Key Feature:** Uses fake MongoDB client—no database required, all operations in-memory
 
-### Frontend Suite (3 Tests)
+### Frontend Suite (7 Tests)
 
 | Test | Validates |
 |------|-----------|
 | **Login & Navigation** | Auth, sidebar/header, page routing |
 | **Session Lifecycle** | Session start/pause, image upload, recognition, commit with PIN, re-commit |
 | **Enrollment & Rollback** | Student search, face upload, enrollment confirmation, matrix exports, audit rollback |
+| **UX/Accessibility** | Keyboard-first navigation, contrast checks, mobile overflow safety |
 
 **Key Feature:** Uses API route mocking—no backend server required, all API calls intercepted
 
@@ -74,17 +75,15 @@ cd frontend && npm run test:e2e
 
 ```
 backend/tests/
-├── .gitkeep           # Git tracking
 ├── __init__.py
-├── README.md          # Backend test guide
-└── test_api_flows.py  # 4 test suites, 606 lines
+├── test_api_flows.py
+└── test_rbac.py
 
 frontend/tests/
-├── .gitkeep           # Git tracking
 ├── README.md          # Frontend test guide
 └── e2e/
-    ├── .gitkeep       # Git tracking
-    └── project-flows.spec.js  # 3 e2e scenarios, ~740 lines
+    ├── project-flows.spec.js
+    └── ux-accessibility.spec.js
 
 /docs/testing/TESTING.md            # Main testing documentation (this root-level guide)
 ```
@@ -173,7 +172,7 @@ frontend/tests/
 
 ## 📞 Next Steps
 
-1. **Run both suites locally:** Verify 4/4 backend and 3/3 frontend pass
+1. **Run both suites locally:** Verify backend and frontend are green on your machine
 2. **Add to CI/CD:** Copy commands to GitHub Actions / GitLab CI workflow
 3. **Extend as needed:** Use README guides to add new test scenarios
 4. **Monitor failures:** Use test reports + artifacts for debugging
@@ -183,8 +182,8 @@ frontend/tests/
 ## Summary
 
 You now have:
-- ✅ **Backend test suite** — 4 tests, 606 lines, ALL PASSING
-- ✅ **Frontend test suite** — 3 tests, 740 lines, ALL PASSING
+- ✅ **Backend test suite** — 36 tests, ALL PASSING
+- ✅ **Frontend test suite** — 7 tests, ALL PASSING
 - ✅ **Documentation** — 3 comprehensive README files
 - ✅ **CI/CD ready** — Single commands, deterministic, no setup required
 - ✅ **Production quality** — Standard frameworks, best practices, well-structured
