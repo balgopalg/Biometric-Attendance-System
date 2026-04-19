@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../../api/axios';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { exportToExcel, exportToCSV, EXPORT_COLUMN_PRESETS } from '../../utils/excelExport';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
@@ -10,12 +11,15 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   HiOutlinePlus,
   HiOutlineSearch,
+  HiOutlineFilter,
   HiOutlineTrash,
   HiOutlineKey,
   HiOutlineCheckCircle,
   HiOutlineClipboardCopy,
   HiOutlineClipboardList,
   HiOutlineDocumentAdd,
+  HiOutlineDownload,
+  HiOutlineDotsHorizontal,
 } from 'react-icons/hi';
 
 const EMPTY_FORM = { name: '', email: '' };
@@ -68,14 +72,22 @@ export default function ManageLecturers() {
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ department_id: '', course_id: '', semester: '', paper_id: '' });
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [showMobileOperations, setShowMobileOperations] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [loadingLecturers, setLoadingLecturers] = useState(false);
   const [lecturersError, setLecturersError] = useState('');
+  const [exportingLecturers, setExportingLecturers] = useState(false);
   const [showExcelImport, setShowExcelImport] = useState(false);
   const [excelFile, setExcelFile] = useState(null);
   const [excelImporting, setExcelImporting] = useState(false);
   const [excelResults, setExcelResults] = useState(null);
   const excelFileInputRef = useRef(null);
+  const hasFetchedLecturersRef = useRef(false);
+  const previousQueryRef = useRef({
+    search: '',
+    filters: { department_id: '', course_id: '', semester: '', paper_id: '' },
+  });
 
   // Fetch departments for Super Admin
   const fetchDepartments = () => {
@@ -90,8 +102,9 @@ export default function ManageLecturers() {
     api.get('/admin/papers', { params }).then((r) => setPapers(extractItems(r.data))).catch(() => {});
   };
 
-  const fetchLecturers = (nextPage = 1) => {
-    setLoadingLecturers(true);
+  const fetchLecturers = (nextPage = 1, options = {}) => {
+    const silent = Boolean(options.silent);
+    if (!silent) setLoadingLecturers(true);
     setLecturersError('');
     const params = {};
     params.page = nextPage;
@@ -116,7 +129,9 @@ export default function ManageLecturers() {
       setLecturers([]);
       setTotalLecturers(0);
       setLecturersError(err.response?.data?.error || 'Failed to load lecturers.');
-    }).finally(() => setLoadingLecturers(false));
+    }).finally(() => {
+      if (!silent) setLoadingLecturers(false);
+    });
   };
 
   useEffect(() => {
@@ -134,7 +149,28 @@ export default function ManageLecturers() {
   }, [filters.department_id]);
 
   useEffect(() => {
-    fetchLecturers(1);
+    const previous = previousQueryRef.current;
+    const searchChanged = previous.search !== search;
+    const filtersChanged =
+      previous.filters.department_id !== filters.department_id
+      || previous.filters.course_id !== filters.course_id
+      || previous.filters.semester !== filters.semester
+      || previous.filters.paper_id !== filters.paper_id;
+
+    const silent = hasFetchedLecturersRef.current && searchChanged && !filtersChanged;
+
+    fetchLecturers(1, { silent });
+
+    previousQueryRef.current = {
+      search,
+      filters: {
+        department_id: filters.department_id,
+        course_id: filters.course_id,
+        semester: filters.semester,
+        paper_id: filters.paper_id,
+      },
+    };
+    hasFetchedLecturersRef.current = true;
   }, [filters.department_id, filters.course_id, filters.semester, filters.paper_id, search]);
 
   const semesterOptions = useMemo(() => {
@@ -278,6 +314,53 @@ export default function ManageLecturers() {
     }
   };
 
+  const handleExportLecturers = async () => {
+    if (lecturers.length === 0) {
+      toast.error('No lecturers to export');
+      return;
+    }
+
+    setExportingLecturers(true);
+    try {
+      try {
+        await exportToExcel({
+          data: lecturers,
+          columns: EXPORT_COLUMN_PRESETS.LECTURERS,
+          fileName: 'Lecturers',
+          sheetName: 'Lecturers',
+        });
+        toast.success(`Exported ${lecturers.length} lecturers to Excel`);
+      } catch (xlsxError) {
+        if (xlsxError.message.includes('xlsx')) {
+          exportToCSV({
+            data: lecturers,
+            columns: EXPORT_COLUMN_PRESETS.LECTURERS,
+            fileName: 'Lecturers',
+          });
+          toast.success(`Exported ${lecturers.length} lecturers to CSV`);
+        } else {
+          throw xlsxError;
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to export lecturers');
+    } finally {
+      setExportingLecturers(false);
+    }
+  };
+
+  const openLecturerImportModal = () => {
+    setExcelFile(null);
+    setExcelResults(null);
+    if (excelFileInputRef.current) excelFileInputRef.current.value = '';
+    setShowExcelImport(true);
+  };
+
+  const openAddLecturerModal = () => {
+    setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' });
+    setShowAdd(true);
+  };
+
   if (!loadingLecturers && lecturersError) {
     return (
       <div className="admin-page">
@@ -293,23 +376,55 @@ export default function ManageLecturers() {
         <div>
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Lecturers</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalLecturers} lecturers in current filter</p>
+          <div className="lecturers-toolbar-actions-mobile">
+            <button
+              className="btn-secondary"
+              title="Import lecturers from Excel"
+              onClick={openLecturerImportModal}
+            >
+              <HiOutlineDocumentAdd size={16} /> Import Excel
+            </button>
+            <button className="btn-primary" onClick={openAddLecturerModal}>
+              <HiOutlinePlus size={16} /> Add Lecturer
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-secondary" title="Import lecturers from Excel" onClick={() => {
-            setExcelFile(null);
-            setExcelResults(null);
-            if (excelFileInputRef.current) excelFileInputRef.current.value = '';
-            setShowExcelImport(true);
-          }}>
+        <div className="lecturers-toolbar-actions-primary" style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" title="Export lecturers to Excel" onClick={handleExportLecturers} disabled={exportingLecturers}>
+            <HiOutlineDownload size={16} /> {exportingLecturers ? 'Exporting...' : 'Export'}
+          </button>
+          <button className="btn-secondary" title="Import lecturers from Excel" onClick={openLecturerImportModal}>
             <HiOutlineDocumentAdd size={16} /> Import Excel
           </button>
-          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
+          <button className="btn-primary" onClick={openAddLecturerModal}>
             <HiOutlinePlus size={16} /> Add Lecturer
           </button>
         </div>
       </div>
 
-      <div className="lecturers-filter-grid" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className="mobile-filters-toggle-wrap lecturers-mobile-filters-toggle-wrap">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title="Quick actions"
+          aria-label="Quick actions"
+          onClick={() => setShowMobileOperations(true)}
+        >
+          <HiOutlineDotsHorizontal size={18} />
+        </button>
+      </div>
+
+      <div className={`lecturers-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input className="search-input" placeholder="Search by name, email or subject..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -351,7 +466,7 @@ export default function ManageLecturers() {
           <StatePanel variant="loading" title="Loading lecturers" description="Retrieving lecturer records and assignments." compact />
         ) : null}
 
-        {!loadingLecturers && lecturersError ? (
+        {lecturersError ? (
           <StatePanel variant="error" title="Unable to load lecturers" description={lecturersError} actionLabel="Retry" onAction={() => fetchLecturers(page)} compact />
         ) : null}
 
@@ -536,6 +651,18 @@ export default function ManageLecturers() {
         </div>
       </Modal>
 
+      {/* ─── Mobile Operations Modal ─────────────────────────────────────── */}
+      <Modal isOpen={showMobileOperations} onClose={() => setShowMobileOperations(false)} title="Quick Actions" width={400}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button className="btn-secondary" style={{ justifyContent: 'flex-start' }} onClick={() => {
+            setShowMobileOperations(false);
+            handleExportLecturers();
+          }} disabled={exportingLecturers}>
+            <HiOutlineDownload size={16} /> {exportingLecturers ? 'Exporting...' : 'Export Lecturers'}
+          </button>
+        </div>
+      </Modal>
+
       {/* ─── Lecturer Excel Import Modal ─────────────────────────────────── */}
       <Modal
         isOpen={showExcelImport}
@@ -546,8 +673,9 @@ export default function ManageLecturers() {
         {!excelResults ? (
           <>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 16 }}>
-              Upload an <strong>.xlsx</strong> file with columns: <code>Name</code> and <code>Email</code>.
-              Each lecturer gets an auto-generated temporary password.
+              Upload an <strong>.xlsx</strong> file with columns: <code>Department</code>, <code>Name</code>, <code>Email</code>, <code>Courses</code>, and <code>Papers</code>.
+              <code>Courses</code> and <code>Papers</code> must be comma-separated codes, like <code>MCA, BCA</code> or <code>CS101, CS102</code>.
+              Only existing course and paper codes are assigned.
             </p>
 
             <div style={{ marginBottom: 14 }}>
@@ -580,7 +708,9 @@ export default function ManageLecturers() {
             >
               <strong style={{ color: 'var(--text-secondary)' }}>Expected column headers (row 1):</strong>
               <br />
-              <code>Name</code> · <code>Email</code>
+              <code>Department</code> · <code>Name</code> · <code>Email</code> · <code>Courses</code> · <code>Papers</code>
+              <br />
+              Example row: <code>Computer Science</code> · <code>Dr. Anita</code> · <code>anita@college.edu</code> · <code>MCA, BCA</code> · <code>CS101, CS102</code>
               <br />
               Duplicate emails are skipped automatically.
             </div>
@@ -610,9 +740,12 @@ export default function ManageLecturers() {
                   <thead>
                     <tr>
                       <th>Row</th>
+                      <th>Department</th>
                       <th>Name</th>
                       <th>Email</th>
                       <th>Status</th>
+                      <th>Courses</th>
+                      <th>Papers</th>
                       <th>Temp Password / Reason</th>
                     </tr>
                   </thead>
@@ -620,6 +753,7 @@ export default function ManageLecturers() {
                     {excelResults.results.map((r) => (
                       <tr key={r.row} style={{ opacity: r.status === 'skipped' || r.status === 'error' ? 0.65 : 1 }}>
                         <td>{r.row}</td>
+                        <td>{r.department || '—'}</td>
                         <td>{r.name || '—'}</td>
                         <td>{r.email || '—'}</td>
                         <td>
@@ -634,14 +768,22 @@ export default function ManageLecturers() {
                             {r.status}
                           </span>
                         </td>
+                        <td>{Array.isArray(r.matched_courses) ? (r.matched_courses.length ? r.matched_courses.join(', ') : '—') : (r.assigned_course_count ? String(r.assigned_course_count) : '—')}</td>
+                        <td>{Array.isArray(r.matched_papers) ? (r.matched_papers.length ? r.matched_papers.join(', ') : '—') : (r.assigned_paper_count ? String(r.assigned_paper_count) : '—')}</td>
                         <td style={{ fontFamily: r.temp_password ? 'monospace' : 'inherit', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {r.temp_password || r.reason || '—'}
+                          {r.temp_password || r.reason || r.department_warning || '—'}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            )}
+
+            {excelResults.results?.some((r) => r.department_warning) && (
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginBottom: 16 }}>
+                Rows with a department warning were imported using the raw department text because no exact department match was found.
+              </p>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>

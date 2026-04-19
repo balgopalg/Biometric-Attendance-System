@@ -277,12 +277,11 @@ export default function AttendanceMatrix() {
       </div>
 
       <div className="glass-card" style={{ padding: 18, marginBottom: 12 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'center' }}>
           <select
             className="input-field"
             value={filters.department_id}
             onChange={(e) => setFilters((prev) => ({ ...prev, department_id: e.target.value, course_id: '', semester: '' }))}
-            style={{ flex: '1 1 200px', maxWidth: 240 }}
             disabled={isDepartmentAdmin}
           >
             <option value="">
@@ -297,7 +296,6 @@ export default function AttendanceMatrix() {
              className="input-field"
              value={filters.course_id}
              onChange={(e) => setFilters((prev) => ({ ...prev, course_id: e.target.value, semester: '' }))}
-             style={{ flex: '1 1 220px', maxWidth: 260 }}
              disabled={!filters.department_id}
            >
              <option value="">Select Course...</option>
@@ -310,7 +308,6 @@ export default function AttendanceMatrix() {
             className="input-field"
             value={filters.academic_session}
             onChange={(e) => setFilters((prev) => ({ ...prev, academic_session: e.target.value }))}
-            style={{ flex: '1 1 220px', maxWidth: 260 }}
           >
             <option value="">All Academic Sessions</option>
             {sessionOptions.map((session) => <option key={session} value={session}>{session}</option>)}
@@ -320,7 +317,6 @@ export default function AttendanceMatrix() {
             className="input-field"
             value={filters.semester}
             onChange={(e) => setFilters((prev) => ({ ...prev, semester: e.target.value }))}
-            style={{ flex: '1 1 180px', maxWidth: 220 }}
           >
             <option value="">All Semesters</option>
             {semesterOptions.map((s) => <option key={s} value={String(s)}>Semester {s}</option>)}
@@ -332,7 +328,7 @@ export default function AttendanceMatrix() {
             value={filters.from_date}
             onChange={(e) => setFilters((prev) => ({ ...prev, from_date: e.target.value }))}
             max={filters.to_date || undefined}
-            style={{ flex: '1 1 180px', maxWidth: 220 }}
+            style={{ display: 'flex', alignItems: 'center' }}
           />
 
           <input
@@ -341,7 +337,7 @@ export default function AttendanceMatrix() {
             value={filters.to_date}
             onChange={(e) => setFilters((prev) => ({ ...prev, to_date: e.target.value }))}
             min={filters.from_date || undefined}
-            style={{ flex: '1 1 180px', maxWidth: 220 }}
+            style={{ display: 'flex', alignItems: 'center' }}
           />
         </div>
 

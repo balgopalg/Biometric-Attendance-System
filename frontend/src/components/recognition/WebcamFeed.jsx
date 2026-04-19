@@ -1,14 +1,23 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState, useEffect } from 'react';
 
 const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error }, ref) {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   return (
-    <div className="glass-card" style={{ padding: 20, position: 'relative', overflow: 'hidden' }}>
+    <div className="glass-card" style={{ padding: '20px', position: 'relative', overflow: 'hidden' }}>
       <div style={{
         position: 'relative',
         borderRadius: 'var(--radius)',
         overflow: 'hidden',
         background: '#000',
-        aspectRatio: '4/3',
+        aspectRatio: isMobile ? '3/4' : '4/3',
+        transition: 'aspect-ratio 0.3s ease'
       }}>
         <video
           ref={ref}

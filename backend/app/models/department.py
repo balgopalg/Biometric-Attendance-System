@@ -48,6 +48,11 @@ def get_department_by_code(code: str) -> Optional[dict]:
     departments = get_collection("academic", "departments")
     return departments.find_one({"code": code.strip().upper()})
 
+    def get_department_by_name(name: str) -> Optional[dict]:
+        """Return a single department by its name."""
+        departments = get_collection("academic", "departments")
+        return departments.find_one({"name": name.strip()})
+
 
 def update_department(department_id: str, fields: dict) -> Optional[dict]:
     """Update a department and return the updated document."""

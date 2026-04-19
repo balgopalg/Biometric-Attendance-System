@@ -94,7 +94,8 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       aria-label="Primary"
       style={{
         width: isMobile ? 260 : (isCollapsed ? 76 : 220),
-        height: '100vh',
+        // Use dynamic viewport height on mobile to keep footer actions visible.
+        height: isMobile ? '100dvh' : '100vh',
         background: 'var(--sidebar-bg)',
         display: 'flex',
         flexDirection: 'column',
@@ -109,7 +110,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       }}
     >
       {/* Logo */}
-      <div style={{ padding: isCollapsed ? '20px 12px 0' : '20px 20px 0', display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start', gap: 10 }}>
+      <div style={{ padding: isCollapsed ? '20px 12px 0' : '20px 20px 0', display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start', gap: 10, flexShrink: 0 }}>
         <div style={{
           width: 34, height: 34, borderRadius: 10,
           background: 'linear-gradient(160deg, rgba(34,211,238,0.34), rgba(14,165,233,0.3))',
@@ -142,7 +143,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       </div>
 
       {/* User Profile */}
-      <div style={{ padding: isCollapsed ? '20px 12px 16px' : '20px 20px 16px', borderBottom: '1px solid var(--sidebar-divider)', textAlign: 'center' }}>
+      <div style={{ padding: isCollapsed ? '20px 12px 16px' : '20px 20px 16px', borderBottom: '1px solid var(--sidebar-divider)', textAlign: 'center', flexShrink: 0 }}>
         <div style={{
           width: 44, height: 44, borderRadius: '50%',
           background: 'rgba(255,255,255,0.2)',
@@ -187,7 +188,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       </div>
 
       {/* Navigation */}
-      <nav aria-label="Sidebar navigation" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, padding: '12px 10px', overflowY: 'auto' }}>
+      <nav aria-label="Sidebar navigation" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2, padding: '12px 10px', overflowY: 'auto' }}>
         {links.map((link, index) => (
           <NavLink
             key={link.to}
@@ -229,7 +230,12 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       </nav>
 
       {/* Logout */}
-      <div style={{ padding: '12px 10px 16px', borderTop: '1px solid var(--sidebar-divider)' }}>
+      <div style={{ 
+        padding: '12px 10px',
+        paddingBottom: isMobile ? 'calc(16px + env(safe-area-inset-bottom))' : '16px',
+        borderTop: '1px solid var(--sidebar-divider)',
+        flexShrink: 0 
+      }}>
         <button
           onClick={handleLogout}
           aria-label="Log out"

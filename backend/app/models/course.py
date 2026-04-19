@@ -1,14 +1,17 @@
 """Course model helpers."""
 
+import re
 from datetime import datetime, timezone
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List
+
 from bson import ObjectId
 from bson.errors import InvalidId
+
 from app.extensions import get_collection
+
 
 def create_course(name: str, code: str, department: str, course_duration: Any, department_id: Any = None) -> dict:
     courses = get_collection("academic", "courses")
-    # Coerce department_id to ObjectId
     dept_oid = None
     if department_id is not None and str(department_id).strip():
         try:
@@ -49,6 +52,12 @@ def get_all_courses(fields: Optional[List[str]] = None, department_id: Any = Non
 def get_course_by_id(course_id: str) -> Optional[dict]:
     courses = get_collection("academic", "courses")
     return courses.find_one({"_id": ObjectId(course_id)})
+
+
+def get_course_by_code(code: str) -> Optional[dict]:
+    courses = get_collection("academic", "courses")
+    escaped = re.escape(code.strip())
+    return courses.find_one({"code": {"$regex": f"^{escaped}$", "$options": "i"}})
 
 
 def update_course(course_id: str, fields: dict) -> Optional[dict]:

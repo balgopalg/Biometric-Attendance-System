@@ -30,6 +30,7 @@ from app.models.course import (
     create_course,
     get_all_courses,
     get_course_by_id,
+    get_course_by_code,
     update_course,
     delete_course,
     is_course_active,
@@ -49,6 +50,7 @@ from app.models.paper import (
     create_paper,
     get_all_papers,
     get_paper_by_id,
+    get_paper_by_code,
     get_papers_by_course,
     update_paper,
     delete_paper,
@@ -2400,10 +2402,14 @@ def remove_student(user, sid):
 @admin_bp.route("/student-bulk-promote", methods=["POST"])
 @role_required("department_admin")
 def bulk_promote_students(user):
-    """Promote selected students to the next semester."""
+    """Promote selected students to the next semester or an optional target semester."""
     d = request.get_json(silent=True) or {}
     raw_ids = d.get("user_ids") or []
     from_semester = _to_int(d.get("from_semester"), 0)
+    target_semester = _to_int(d.get("target_semester"), 0)
+
+    if d.get("target_semester") is not None and target_semester <= 0:
+        return jsonify({"error": "target_semester must be a positive integer"}), 400
 
     user_ids = [sid for sid in raw_ids if _as_text(sid)]
     if not user_ids:
@@ -2415,6 +2421,7 @@ def bulk_promote_students(user):
     promoted = 0
     skipped = 0
     skipped_max_semester = 0
+    skipped_target_semester = 0
     removed_papers = 0
     rollback_ops = []
     for sid in user_ids:
@@ -2436,11 +2443,24 @@ def bulk_promote_students(user):
         course = course_map.get(course_id) or {}
         max_semester = max(1, _to_int(course.get("course_duration"), 1) * 2)
 
-        if current_sem >= max_semester:
-            skipped_max_semester += 1
-            continue
+        if target_semester > 0:
+            if target_semester > max_semester:
+                skipped_max_semester += 1
+                continue
+            # Temporary rule: allow selecting semester 1 to force reset/demotion to first semester.
+            if target_semester == 1:
+                next_sem = 1
+            elif target_semester <= current_sem:
+                skipped_target_semester += 1
+                continue
+            else:
+                next_sem = target_semester
+        else:
+            if current_sem >= max_semester:
+                skipped_max_semester += 1
+                continue
+            next_sem = current_sem + 1
 
-        next_sem = current_sem + 1
         enrolled_papers = list((profile or {}).get("enrolled_papers") or [])
         kept_papers = []
         for pid in enrolled_papers:
@@ -2458,7 +2478,11 @@ def bulk_promote_students(user):
     log_action(
         "BULK_PROMOTE_STUDENTS",
         str(user["_id"]),
-        details=f"Promoted {promoted}, skipped {skipped}, skipped_max={skipped_max_semester}, removed_papers={removed_papers}, from_semester={from_semester or 'auto'}",
+        details=(
+            f"Promoted {promoted}, skipped {skipped}, skipped_max={skipped_max_semester}, "
+            f"skipped_target={skipped_target_semester}, removed_papers={removed_papers}, "
+            f"from_semester={from_semester or 'auto'}, target_semester={target_semester or 'auto'}"
+        ),
         rollback=_rb_batch(rollback_ops) if rollback_ops else None,
     )
     _clear_query_cache()
@@ -2469,7 +2493,9 @@ def bulk_promote_students(user):
             "promoted_count": promoted,
             "skipped_count": skipped,
             "skipped_max_semester_count": skipped_max_semester,
+            "skipped_target_semester_count": skipped_target_semester,
             "removed_papers_count": removed_papers,
+            "target_semester": target_semester or None,
         }
     )
 
@@ -2669,7 +2695,7 @@ def import_lecturers_excel(user):
       - file : .xlsx file
 
     Excel columns (case-insensitive):
-      Name, Email
+            Department, Name, Email, Courses, Papers
     """
     uploaded = request.files.get("file")
     if not uploaded:
@@ -2688,30 +2714,80 @@ def import_lecturers_excel(user):
         return jsonify({"error": "Excel file is empty"}), 400
 
     header_raw = [str(h).strip().lower() if h is not None else "" for h in rows[0]]
-
+    department_idx = next((i for i, h in enumerate(header_raw) if h in ["department", "dept"]), None)
     name_idx = next((i for i, h in enumerate(header_raw) if h in ["name", "full name", "fullname"]), None)
     email_idx = next((i for i, h in enumerate(header_raw) if h in ["email", "email address", "e-mail"]), None)
+    courses_idx = next((i for i, h in enumerate(header_raw) if h in ["courses", "course"]), None)
+    papers_idx = next((i for i, h in enumerate(header_raw) if h in ["papers", "paper"]), None)
 
-    if name_idx is None or email_idx is None:
-        return jsonify({"error": f"Missing required columns: Name and/or Email. Found headers: {header_raw}"}), 400
+    if department_idx is None or name_idx is None or email_idx is None:
+        return jsonify({"error": f"Missing required columns: Department, Name and/or Email. Found headers: {header_raw}"}), 400
 
     results = []
     created_count = 0
     skipped_count = 0
     error_count = 0
     temp_pass_display_enabled = _temp_pass_display_enabled()
+    departments_col = get_collection("academic", "departments")
+
+    def _cell(row, idx):
+        value = row[idx] if idx is not None and idx < len(row) else None
+        return str(value).strip() if value is not None else ""
+
+    def _parse_csv_list(raw_value):
+        if not raw_value:
+            return []
+        return [item.strip() for item in str(raw_value).split(",") if item and str(item).strip()]
+
+    def _find_department(raw_department):
+        if not raw_department:
+            return None
+        escaped = re.escape(raw_department.strip())
+        return departments_col.find_one({
+            "$or": [
+                {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
+                {"code": {"$regex": f"^{escaped}$", "$options": "i"}},
+            ]
+        })
+
+    def _resolve_courses(raw_courses):
+        resolved = []
+        seen_ids = set()
+        for course_code in _parse_csv_list(raw_courses):
+            course = get_course_by_code(course_code)
+            if not course:
+                continue
+            course_id = str(course.get("_id"))
+            if course_id in seen_ids:
+                continue
+            seen_ids.add(course_id)
+            resolved.append(course)
+        return resolved
+
+    def _resolve_papers(raw_papers):
+        resolved = []
+        seen_ids = set()
+        for paper_code in _parse_csv_list(raw_papers):
+            paper = get_paper_by_code(paper_code)
+            if not paper:
+                continue
+            paper_id = str(paper.get("_id"))
+            if paper_id in seen_ids:
+                continue
+            seen_ids.add(paper_id)
+            resolved.append(paper)
+        return resolved
 
     for row_num, row in enumerate(rows[1:], start=2):
-        def _cell(idx):
-            val = row[idx] if idx < len(row) else None
-            return str(val).strip() if val is not None else ""
+        department = _cell(row, department_idx)
+        name = _cell(row, name_idx)
+        email = _cell(row, email_idx)
+        raw_courses = _cell(row, courses_idx)
+        raw_papers = _cell(row, papers_idx)
 
-        name = _cell(name_idx)
-        email = _cell(email_idx)
-
-        if not name or not email:
+        if not department or not name or not email:
             skipped_count += 1
-            results.append({"row": row_num, "status": "skipped", "reason": "Missing Name or Email"})
+            results.append({"row": row_num, "status": "skipped", "reason": "Missing Department, Name, or Email"})
             continue
 
         if find_user_by_email(email):
@@ -2720,21 +2796,70 @@ def import_lecturers_excel(user):
             continue
 
         try:
+            department_doc = _find_department(department)
+            department_value = department_doc.get("name") if department_doc else department
+            department_id_value = department_doc.get("_id") if department_doc else None
+            matched_courses = _resolve_courses(raw_courses)
+            matched_papers = _resolve_papers(raw_papers)
+
             initial_password = _generate_import_temp_password()
-            lec = create_user(name, email, initial_password, "lecturer", "", must_change_password=True)
+            lec = create_user(
+                name,
+                email,
+                initial_password,
+                "lecturer",
+                department_value,
+                must_change_password=True,
+                department_id=department_id_value,
+            )
             log_action(
                 "CREATE_LECTURER",
                 str(user["_id"]),
                 target_user=lec["_id"],
                 rollback=_rb_delete("auth", "users", {"_id": lec.get("_id")}),
             )
+
+            assigned_course_ids = []
+            assigned_paper_ids = []
+            scoped_papers = get_all_papers(["_id", "course_id"], department_id=department_id_value)
+            scoped_paper_map = {}
+            for paper in scoped_papers:
+                scoped_paper_map.setdefault(str(paper.get("course_id") or ""), []).append(str(paper.get("_id")))
+
+            for course in matched_courses:
+                course_id = str(course.get("_id"))
+                course_paper_ids = scoped_paper_map.get(course_id, [])
+                if course_paper_ids:
+                    bulk_assign_lecturer(course_paper_ids, lec["_id"])
+                    assigned_course_ids.append(course_id)
+                    assigned_paper_ids.extend(course_paper_ids)
+
+            direct_paper_ids = [str(paper.get("_id")) for paper in matched_papers]
+            if direct_paper_ids:
+                bulk_assign_lecturer(direct_paper_ids, lec["_id"])
+                assigned_paper_ids.extend(direct_paper_ids)
+
+            assigned_course_ids = sorted(set(assigned_course_ids))
+            assigned_paper_ids = sorted(set(assigned_paper_ids))
+
             created_count += 1
-            row_result = {"row": row_num, "name": name, "email": email, "status": "created"}
+            row_result = {
+                "row": row_num,
+                "name": name,
+                "email": email,
+                "status": "created",
+                "department": department_value,
+                "matched_courses": [course.get("code") for course in matched_courses],
+                "matched_papers": [paper.get("code") for paper in matched_papers],
+                "assigned_course_count": len(assigned_course_ids),
+                "assigned_paper_count": len(assigned_paper_ids),
+            }
+            if not department_doc:
+                row_result["department_warning"] = "Department not found; stored raw department value"
             if temp_pass_display_enabled:
                 row_result["temp_password"] = initial_password
             results.append(row_result)
 
-            # Send welcome email (fire-and-forget)
             send_welcome_email(
                 to_email=email,
                 name=name,

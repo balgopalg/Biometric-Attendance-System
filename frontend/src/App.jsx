@@ -1,4 +1,6 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useState, useEffect } from 'react';
+import { AnimatePresence } from 'framer-motion';
+import SplashScreen from './components/ui/SplashScreen';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
@@ -41,6 +43,32 @@ function LazyPage({ children }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
+function GlobalAppLoader({ children }) {
+  const { loading } = useAuth();
+  const [minDelayPassed, setMinDelayPassed] = useState(false);
+
+  useEffect(() => {
+    // Keep splash on screen for a minimum duration to allow animation to complete
+    const timer = setTimeout(() => {
+      setMinDelayPassed(true);
+    }, 2200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isReady = !loading && minDelayPassed;
+
+  return (
+    <>
+      <AnimatePresence>
+        {!isReady && <SplashScreen key="splash" />}
+      </AnimatePresence>
+      <div style={{ opacity: isReady ? 1 : 0, transition: 'opacity 0.6s ease', pointerEvents: isReady ? 'auto' : 'none', minHeight: '100vh' }}>
+        {isReady && children}
+      </div>
+    </>
+  );
+}
+
 /**
  * Determine the home path for a given role.
  */
@@ -73,11 +101,9 @@ function expandRoles(allowedRoles) {
 }
 
 function ProtectedRoute({ children, allowedRoles }) {
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
   const isAuthenticated = !!user;
   const mustChangePassword = user?.must_change_password;
-
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><StatePanel variant="loading" title="Loading session" description="Checking access rights." compact /></div>;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (mustChangePassword) return <Navigate to="/change-password" replace />;
 
@@ -93,13 +119,9 @@ function ProtectedRoute({ children, allowedRoles }) {
 }
 
 function RootRedirect() {
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
   const isAuthenticated = !!user;
   const mustChangePassword = user?.must_change_password;
-
-  if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><StatePanel variant="loading" title="Loading session" description="Checking access rights." compact /></div>;
-  }
   
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
@@ -120,46 +142,46 @@ export default function App() {
     <BrowserRouter>
       <ThemeProvider>
         <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
-            <Route path="/change-password" element={<LazyPage><ChangePassword /></LazyPage>} />
-            <Route path="/" element={<RootRedirect />} />
+          <GlobalAppLoader>
+            <Routes>
+              <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
+              <Route path="/change-password" element={<LazyPage><ChangePassword /></LazyPage>} />
+              <Route path="/" element={<RootRedirect />} />
 
-            {/* Admin — both super_admin and department_admin */}
-            <Route element={<ProtectedRoute allowedRoles={['department_admin']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
-              <Route path="/admin" element={<LazyPage><AdminDashboard /></LazyPage>} />
-              <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
-              <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
-              <Route path="/admin/lecturers" element={<LazyPage><ManageLecturers /></LazyPage>} />
-              <Route path="/admin/students" element={<LazyPage><ManageStudents /></LazyPage>} />
-              <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />
-              <Route path="/admin/exam-eligibility" element={<LazyPage><ExamEligibility /></LazyPage>} />
-              <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
-              <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
-              <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
-              {/* Super Admin only routes */}
-              <Route path="/admin/departments" element={<LazyPage><ManageDepartments /></LazyPage>} />
-              <Route path="/admin/department-admins" element={<LazyPage><ManageDepartmentAdmins /></LazyPage>} />
-              {/* <Route path="/admin/leaves" element={<LazyPage><ManageLeaves /></LazyPage>} /> */}
-            </Route>
+              {/* Admin — both super_admin and department_admin */}
+              <Route element={<ProtectedRoute allowedRoles={['department_admin']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+                <Route path="/admin" element={<LazyPage><AdminDashboard /></LazyPage>} />
+                <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
+                <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
+                <Route path="/admin/lecturers" element={<LazyPage><ManageLecturers /></LazyPage>} />
+                <Route path="/admin/students" element={<LazyPage><ManageStudents /></LazyPage>} />
+                <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />
+                <Route path="/admin/exam-eligibility" element={<LazyPage><ExamEligibility /></LazyPage>} />
+                <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
+                <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
+                <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
+                {/* Super Admin only routes */}
+                <Route path="/admin/departments" element={<LazyPage><ManageDepartments /></LazyPage>} />
+                <Route path="/admin/department-admins" element={<LazyPage><ManageDepartmentAdmins /></LazyPage>} />
+              </Route>
 
-            {/* Lecturer */}
-            <Route element={<ProtectedRoute allowedRoles={['lecturer']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
-              <Route path="/lecturer" element={<LazyPage><LecturerDashboard /></LazyPage>} />
-              <Route path="/lecturer/session" element={<LazyPage><AttendanceSession /></LazyPage>} />
-              <Route path="/lecturer/progress" element={<LazyPage><LecturerProgress /></LazyPage>} />
-            </Route>
+              {/* Lecturer */}
+              <Route element={<ProtectedRoute allowedRoles={['lecturer']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+                <Route path="/lecturer" element={<LazyPage><LecturerDashboard /></LazyPage>} />
+                <Route path="/lecturer/session" element={<LazyPage><AttendanceSession /></LazyPage>} />
+                <Route path="/lecturer/progress" element={<LazyPage><LecturerProgress /></LazyPage>} />
+              </Route>
 
-            {/* Student */}
-            <Route element={<ProtectedRoute allowedRoles={['student']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
-              <Route path="/student" element={<LazyPage><StudentDashboard /></LazyPage>} />
-              <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
-              <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
-              {/* <Route path="/student/leaves" element={<LazyPage><StudentLeaveRequests /></LazyPage>} /> */}
-            </Route>
+              {/* Student */}
+              <Route element={<ProtectedRoute allowedRoles={['student']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+                <Route path="/student" element={<LazyPage><StudentDashboard /></LazyPage>} />
+                <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
+                <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
+              </Route>
 
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </GlobalAppLoader>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

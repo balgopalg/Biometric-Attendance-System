@@ -2,13 +2,14 @@ import { useState, useEffect, useMemo } from 'react';
 import api from '../../api/axios';
 import useAdminPreference from '../../hooks/useAdminPreference';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { exportToExcel, exportToCSV } from '../../utils/excelExport';
 import Modal from '../../components/ui/Modal';
 import SoftLockWrapper from '../../components/ui/SoftLockWrapper';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil } from 'react-icons/hi';
+import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal } from 'react-icons/hi';
 import { useAuth } from '../../hooks/useAuth';
 
 const EMPTY_FORM = { name: '', code: '', course_id: '', lecturer_id: '', semester: '' };
@@ -36,6 +37,9 @@ export default function ManagePapers() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [loadingPapers, setLoadingPapers] = useState(false);
   const [papersError, setPapersError] = useState('');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [showMobileOptions, setShowMobileOptions] = useState(false);
+  const [exportingPapers, setExportingPapers] = useState(false);
 
   // Fetch departments for Super Admin
   const fetchDepartments = () => {
@@ -243,6 +247,64 @@ export default function ManagePapers() {
     }
   };
 
+  const handleExportPapers = async () => {
+    if (filtered.length === 0) {
+      toast.error('No papers to export');
+      return;
+    }
+
+    setExportingPapers(true);
+    try {
+      const exportData = filtered.map((p) => ({
+        name: p.name || '',
+        code: p.code || '',
+        course: p.course_name || '',
+        semester: p.semester || '',
+        lecturer: p.lecturer_name || '',
+        status: p.is_course_inactive ? 'Inactive Course' : 'Active',
+      }));
+
+      try {
+        await exportToExcel({
+          data: exportData,
+          columns: [
+            { key: 'name', header: 'Paper Name' },
+            { key: 'code', header: 'Code' },
+            { key: 'course', header: 'Course' },
+            { key: 'semester', header: 'Semester' },
+            { key: 'lecturer', header: 'Lecturer' },
+            { key: 'status', header: 'Status' },
+          ],
+          fileName: 'Papers',
+          sheetName: 'Papers',
+        });
+        toast.success(`Exported ${filtered.length} papers to Excel`);
+      } catch (xlsxError) {
+        if (xlsxError.message.includes('xlsx')) {
+          exportToCSV({
+            data: exportData,
+            columns: [
+              { key: 'name', header: 'Paper Name' },
+              { key: 'code', header: 'Code' },
+              { key: 'course', header: 'Course' },
+              { key: 'semester', header: 'Semester' },
+              { key: 'lecturer', header: 'Lecturer' },
+              { key: 'status', header: 'Status' },
+            ],
+            fileName: 'Papers',
+          });
+          toast.success(`Exported ${filtered.length} papers to CSV`);
+        } else {
+          throw xlsxError;
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to export papers');
+    } finally {
+      setExportingPapers(false);
+    }
+  };
+
   const PaperForm = ({ onSubmit, submitLabel }) => (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -316,15 +378,42 @@ export default function ManagePapers() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Papers</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalPapers} papers in current filter</p>
         </div>
-        <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
-          <HiOutlinePlus size={16} /> Add Subject
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" title="Export papers to Excel" onClick={handleExportPapers} disabled={exportingPapers}>
+            <HiOutlineDownload size={16} /> {exportingPapers ? 'Exporting...' : 'Export'}
+          </button>
+          <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
+            <HiOutlinePlus size={16} /> Add Subject
+          </button>
+        </div>
+      </div>
+
+      <div className="mobile-filters-toggle-wrap papers-mobile-filters-toggle-wrap">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title="Options"
+          aria-label="Options"
+          onClick={() => setShowMobileOptions(true)}
+        >
+          <HiOutlineDotsHorizontal size={18} />
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className={`filter-bar papers-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 20 }}>
         <div style={{ position: 'relative' }}>
           <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="search-input" placeholder="Search by name/code/course/lecturer..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="search-input" style={{ maxWidth: '100%' }} placeholder="Search by name/code/course/lecturer..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
 
         {/* Department Filter */}
@@ -365,14 +454,18 @@ export default function ManagePapers() {
         </select>
       </div>
 
-      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
-        <label style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="desktop-fade-rows-control" role="group" aria-label="Faded rows visibility">
+        <span>Fade Rows</span>
+        <label className="rows-toggle-switch">
           <input
             type="checkbox"
             checked={showInactiveRows}
             onChange={(e) => setShowInactiveRows(e.target.checked)}
+            aria-label="Toggle faded rows"
           />
-          Show faded rows (inactive-course subjects)
+          <span className="rows-toggle-track">
+            <span className="rows-toggle-thumb" />
+          </span>
         </label>
       </div>
 
@@ -442,6 +535,51 @@ export default function ManagePapers() {
 
       <Modal isOpen={showEdit} onClose={() => setShowEdit(false)} title="Edit Subject" width={520}>
         {PaperForm({ onSubmit: handleUpdate, submitLabel: 'Save Changes' })}
+      </Modal>
+
+      <Modal isOpen={showMobileOptions} onClose={() => setShowMobileOptions(false)} title="Paper Options" width={420}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div
+            className="btn-secondary"
+            style={{ justifyContent: 'space-between', cursor: 'default' }}
+          >
+            <span>Fade Rows</span>
+            <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showInactiveRows}
+                onChange={(e) => setShowInactiveRows(e.target.checked)}
+                aria-label="Toggle faded rows"
+                style={{ position: 'absolute', opacity: 0, width: 1, height: 1 }}
+              />
+              <span
+                style={{
+                  width: 38,
+                  height: 22,
+                  borderRadius: 999,
+                  background: showInactiveRows ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                  transition: 'background 160ms ease',
+                  position: 'relative',
+                  display: 'inline-block',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: showInactiveRows ? 18 : 2,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 160ms ease',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+                  }}
+                />
+              </span>
+            </label>
+          </div>
+        </div>
       </Modal>
     </div>
   );

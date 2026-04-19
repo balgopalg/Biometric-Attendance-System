@@ -85,131 +85,114 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
 
   return (
     <div style={{
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(0, 0, 0, 0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 9999,
+      position: 'fixed', inset: 0,
+      background: 'rgba(0, 0, 0, 0.65)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 9999, padding: '16px'
     }}>
-      <div style={{
+      <div className="glass-card" style={{
         background: 'var(--bg-secondary)',
         borderRadius: 'var(--radius)',
         border: '1px solid var(--border)',
-        maxWidth: 560,
-        width: '90%',
-        maxHeight: '90vh',
-        overflow: 'auto',
-        padding: 24,
-        position: 'relative',
+        width: '100%', maxWidth: '560px',
+        maxHeight: '95vh', overflowY: 'auto',
+        boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+        position: 'relative', display: 'flex', flexDirection: 'column'
       }}>
-        {/* Close button */}
-        <button
-          onClick={handleClose}
-          style={{
-            position: 'absolute',
-            top: 12,
-            right: 12,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-muted)',
-            padding: 6,
-            fontSize: '1.2rem',
-          }}
-        >
-          <HiOutlineX />
-        </button>
+        <div style={{ padding: '24px' }}>
+          {/* Close button */}
+          <button
+            onClick={handleClose}
+            style={{
+              position: 'absolute', top: 16, right: 16,
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--text-muted)', padding: '4px'
+            }}
+          >
+            <HiOutlineX size={22} />
+          </button>
 
-        <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: 8 }}>
-          Enroll Face for {student?.name}
-        </h2>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: 20 }}>
-          Keep your face clear and slowly move your head in a U-shape or circle while capturing for better side-profile coverage.
-        </p>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, marginBottom: '8px', paddingRight: '24px' }}>
+            Enroll Face for {student?.name}
+          </h2>
+          <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', marginBottom: '20px', lineHeight: 1.5 }}>
+            Keep your face clear and slowly move your head in a U-shape or circle while capturing for better side-profile coverage.
+          </p>
 
-        {/* Webcam Feed */}
-        <WebcamFeed 
-          ref={videoRef} 
-          isActive={isActive} 
-          error={error}
-        />
+          {/* Webcam Feed */}
+          <div style={{ marginBottom: '24px' }}>
+            <WebcamFeed 
+              ref={videoRef} 
+              isActive={isActive} 
+              error={error}
+            />
+          </div>
 
-        {/* Hidden canvas for frame capture */}
-        <canvas ref={canvasRef} style={{ display: 'none' }} />
+          {/* Hidden canvas for frame capture */}
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-        {/* Controls */}
-        <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-          {!isActive ? (
-            <button
-              onClick={handleStartCamera}
-              style={{
-                flex: 1,
-                padding: '10px 16px',
-                background: 'var(--accent-purple)',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 'var(--radius)',
-                fontSize: '0.9rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <HiOutlineCamera size={16} />
-              Start Camera
-            </button>
-          ) : (
-            <>
+          {/* Controls */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            gap: '12px'
+          }}>
+            {!isActive ? (
               <button
-                onClick={handleCapture}
-                disabled={loading}
+                onClick={handleStartCamera}
                 style={{
-                  flex: 1,
-                  padding: '10px 16px',
-                  background: loading ? 'var(--text-muted)' : 'var(--accent-emerald)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 'var(--radius)',
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
+                  padding: '14px 16px', color: '#fff',
+                  background: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)',
+                  border: 'none', borderRadius: 'var(--radius)',
+                  fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                  boxShadow: '0 4px 14px 0 rgba(37, 99, 235, 0.4)'
                 }}
               >
-                <HiOutlineCamera size={16} />
-                {loading ? `Capturing ${captureProgress}/${DATASET_CAPTURE_COUNT}...` : 'Capture 50 & Enroll'}
+                <HiOutlineCamera size={18} />
+                Start Camera
               </button>
-              <button
-                onClick={() => stopCamera()}
-                style={{
-                  padding: '10px 16px',
-                  background: 'var(--bg-tertiary)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)',
-                  fontSize: '0.9rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-              }}
-              >
-                Stop
-              </button>
-            </>
+            ) : (
+              <>
+                <button
+                  onClick={handleCapture}
+                  disabled={loading}
+                  style={{
+                    padding: '14px 16px',
+                    background: loading ? 'var(--text-muted)' : 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
+                    color: '#fff', border: 'none', borderRadius: 'var(--radius)',
+                    fontSize: '0.95rem', fontWeight: 600,
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                    opacity: loading ? 0.7 : 1,
+                    boxShadow: loading ? 'none' : '0 4px 14px 0 rgba(59, 130, 246, 0.4)'
+                  }}
+                >
+                  <HiOutlineCamera size={18} />
+                  {loading ? `Capturing ${captureProgress}...` : 'Capture & Enroll'}
+                </button>
+                <button
+                  onClick={() => stopCamera()}
+                  style={{
+                    padding: '14px 16px', background: 'transparent', color: 'var(--accent-rose)',
+                    border: '1px solid var(--accent-rose)', borderRadius: 'var(--radius)',
+                    fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  Stop
+                </button>
+              </>
+            )}
+          </div>
+          {loading && (
+            <p style={{ marginTop: '16px', fontSize: '0.8rem', color: 'var(--accent-cyan)', textAlign: 'center', fontWeight: 600, letterSpacing: '0.5px' }}>
+              Recording... Please keep moving your head slowly.
+            </p>
           )}
         </div>
-        {loading && (
-          <p style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            Capturing dataset frames. Please keep moving your head slowly for different angles.
-          </p>
-        )}
       </div>
     </div>
   );
