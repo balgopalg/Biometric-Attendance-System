@@ -6,6 +6,7 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from flask_jwt_extended import (
     create_access_token,
@@ -137,7 +138,7 @@ def _revoke_current_token():
                 upsert=True,
             )
     except Exception:
-        pass  # Failsafe: if no token exists, silently pass
+        current_app.logger.warning("Token revocation failed", exc_info=True)
 
 
 @auth_bp.route("/health", methods=["GET"])
@@ -686,8 +687,6 @@ def reset_password_with_otp():
         return jsonify({"error": "New password must be different from current password"}), 400
 
     users = get_collection("auth", "users")
-    import bcrypt
-
     pw_hash = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
     users.update_one(
         {"_id": user["_id"]},

@@ -51,7 +51,11 @@ def get_all_courses(fields: Optional[List[str]] = None, department_id: Any = Non
 
 def get_course_by_id(course_id: str) -> Optional[dict]:
     courses = get_collection("academic", "courses")
-    return courses.find_one({"_id": ObjectId(course_id)})
+    try:
+        oid = ObjectId(course_id)
+    except (InvalidId, Exception):
+        return None
+    return courses.find_one({"_id": oid})
 
 
 def get_course_by_code(code: str) -> Optional[dict]:
@@ -62,18 +66,30 @@ def get_course_by_code(code: str) -> Optional[dict]:
 
 def update_course(course_id: str, fields: dict) -> Optional[dict]:
     courses = get_collection("academic", "courses")
-    courses.update_one({"_id": ObjectId(course_id)}, {"$set": fields})
+    try:
+        oid = ObjectId(course_id)
+    except (InvalidId, Exception):
+        return None
+    courses.update_one({"_id": oid}, {"$set": fields})
     return get_course_by_id(course_id)
 
 
 def delete_course(course_id: str) -> None:
     courses = get_collection("academic", "courses")
-    courses.update_one({"_id": ObjectId(course_id)}, {"$set": {"status": "inactive"}})
+    try:
+        oid = ObjectId(course_id)
+    except (InvalidId, Exception):
+        return
+    courses.update_one({"_id": oid}, {"$set": {"status": "inactive"}})
 
 
 def hard_delete_course(course_id: str) -> None:
     courses = get_collection("academic", "courses")
-    courses.delete_one({"_id": ObjectId(course_id)})
+    try:
+        oid = ObjectId(course_id)
+    except (InvalidId, Exception):
+        return
+    courses.delete_one({"_id": oid})
 
 
 def is_course_active(course_id: str) -> bool:

@@ -49,6 +49,7 @@ dist/
 backend/uploads/
 uploads/
 instance/
+backend/instance/
 backend/dataset/
 backend/perf/results/*
 !backend/perf/results/.gitkeep
@@ -58,6 +59,9 @@ backend/trainer/*.keras
 backend/trainer/*.h5
 !backend/trainer/.gitkeep
 security_verification_results.json
+
+# Scratch / temporary files
+backend/scratch/
 
 # Local environment files
 .env

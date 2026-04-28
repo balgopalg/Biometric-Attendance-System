@@ -2,9 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import '@mediapipe/face_mesh';
 import '@mediapipe/camera_utils';
 
-const FaceMesh = window.FaceMesh;
-const Camera = window.Camera;
-
 const LEFT_EYE = [362, 385, 387, 263, 373, 380];
 const RIGHT_EYE = [33, 160, 158, 133, 153, 144];
 
@@ -45,6 +42,8 @@ export function useDrowsinessDetection(videoRef, isActive) {
   const missingFaceFrames = useRef(0);
   const smoothedEar = useRef(null);
   const baselineEar = useRef(null);
+  // Fix #7: Use a ref to track drowsy state inside callbacks to avoid stale closures
+  const isDrowsyRef = useRef(false);
 
   const resetState = () => {
     drowsyFramesCount.current = 0;
@@ -53,7 +52,13 @@ export function useDrowsinessDetection(videoRef, isActive) {
     missingFaceFrames.current = 0;
     smoothedEar.current = null;
     baselineEar.current = null;
+    isDrowsyRef.current = false;
     setIsDrowsy(false);
+  };
+
+  const updateDrowsy = (value) => {
+    isDrowsyRef.current = value;
+    setIsDrowsy(value);
   };
 
   useEffect(() => {
@@ -72,6 +77,14 @@ export function useDrowsinessDetection(videoRef, isActive) {
         }
       } catch (e) { console.error("FaceMesh close error:", e); }
       resetState();
+      return;
+    }
+
+    // Fix #22: Guard against missing MediaPipe globals
+    const FaceMesh = window.FaceMesh;
+    const Camera = window.Camera;
+    if (!FaceMesh || !Camera) {
+      console.warn('MediaPipe FaceMesh or Camera not loaded — drowsiness detection disabled');
       return;
     }
 
@@ -109,15 +122,15 @@ export function useDrowsinessDetection(videoRef, isActive) {
           smoothedEar.current = (EAR_SMOOTHING_ALPHA * avgEAR) + ((1 - EAR_SMOOTHING_ALPHA) * smoothedEar.current);
         }
 
-        // Keep an adaptive baseline from confidently open-eye frames.
-        if (smoothedEar.current > BASELINE_UPDATE_MIN_EAR && !isDrowsy) {
+        // Fix #7: Use isDrowsyRef instead of stale isDrowsy closure
+        if (smoothedEar.current > BASELINE_UPDATE_MIN_EAR && !isDrowsyRef.current) {
           baselineEar.current = baselineEar.current == null
             ? smoothedEar.current
             : ((0.98 * baselineEar.current) + (0.02 * smoothedEar.current));
         }
 
         if (facePresenceFrames.current < MIN_FACE_PRESENCE_FRAMES) {
-          setIsDrowsy(false);
+          updateDrowsy(false);
           return;
         }
 
@@ -129,13 +142,13 @@ export function useDrowsinessDetection(videoRef, isActive) {
           drowsyFramesCount.current += 1;
           recoveryFramesCount.current = 0;
           if (drowsyFramesCount.current >= DROWSY_CONSECUTIVE_FRAMES) {
-            setIsDrowsy(true);
+            updateDrowsy(true);
           }
         } else {
           drowsyFramesCount.current = Math.max(0, drowsyFramesCount.current - 1);
           recoveryFramesCount.current += 1;
           if (recoveryFramesCount.current >= RECOVERY_CONSECUTIVE_FRAMES) {
-            setIsDrowsy(false);
+            updateDrowsy(false);
           }
         }
       } else {
@@ -146,7 +159,7 @@ export function useDrowsinessDetection(videoRef, isActive) {
             facePresenceFrames.current = 0;
             smoothedEar.current = null;
             baselineEar.current = null;
-            setIsDrowsy(false);
+            updateDrowsy(false);
           }
       }
     });
@@ -181,7 +194,8 @@ export function useDrowsinessDetection(videoRef, isActive) {
       } catch (err) { console.error("Cleanup faceMesh error:", err); }
       resetState();
     };
-  }, [isActive, videoRef]);
+  // Fix #8 & #19: videoRef is stable (useRef), removed from deps. isDrowsy tracked via ref.
+  }, [isActive]);
 
   return isDrowsy;
 }

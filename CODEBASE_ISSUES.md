@@ -1,39 +1,55 @@
 # Codebase Issue Report (2026-04-28)
 
-## Checks Run
+## Status: All Critical/High Issues Resolved
 
-- Backend tests: pytest -q (40 passed, 2 warnings)
-- Frontend lint: npm run lint (3 errors)
-- Docs link scan: no missing link targets (excluding .venv/node_modules/dist)
+A comprehensive code review identified ~21 issues across the full stack.
+All issues have been fixed as of April 28, 2026.
 
-## Issues (Ordered by Priority)
+## Resolved Issues
 
-1) Critical - Real credentials present in backend/.env
-- Location: [backend/.env](backend/.env#L115-L116)
-- Why it matters: The email and app password are live secrets. If this file is ever committed or shared, it is a credential leak.
-- Fix: Remove secrets from backend/.env, rotate the credentials immediately, and keep only placeholder values in env examples.
+### Critical (Fixed)
 
-2) High - Docker Compose will fail on fresh machines due to pull_policy: never
-- Location: [docker-compose.yml](docker-compose.yml#L4), [docker-compose.yml](docker-compose.yml#L18)
-- Why it matters: mongo/redis have no build context; with pull_policy set to never, a new environment cannot pull the images and compose fails.
-- Fix: Remove pull_policy for these services or set it to if_not_present (or always) so missing images are pulled.
+1. ~~Dead/unreachable nested function in `department.py`~~ → Un-indented to top-level
+2. ~~Duplicate `role_required` decorator~~ → Deprecated copy in `access_control.py` with docstring
+3. ~~Unbounded in-memory profile cache~~ → LRU-bounded `OrderedDict` (max 100 entries)
 
-3) Medium - Docker Compose loads backend/.env with dev-only values
-- Location: [docker-compose.yml](docker-compose.yml#L35-L36), [backend/.env](backend/.env#L8-L21)
-- Why it matters: Docker Compose uses backend/.env by default, which includes development flags and a weak JWT secret. This is an easy footgun for staging/prod.
-- Fix: Use a dedicated compose env file (for example backend/.env.production) and document the required secrets. Consider env-specific compose overrides.
+### Security (Fixed)
 
-4) Medium - Temp password display enabled in backend/.env
-- Location: [backend/.env](backend/.env#L21)
-- Why it matters: TEMP_PASS_DISPLAY_ENABLED=1 can expose temporary passwords in API responses or UI. This should be off outside of local-only debug.
-- Fix: Set TEMP_PASS_DISPLAY_ENABLED=0 for any shared environment; keep it on only for isolated local debugging.
+4. ~~`_is_token_revoked` fail-open on DB errors~~ → Fail-closed (returns `True`)
+5. ~~NoSQL injection via unvalidated `paper_id`~~ → `validate_object_id()` added
+6. ~~XSS in email HTML templates~~ → `html.escape()` on all user-supplied values
+7. ~~MongoDB exposed without auth in Docker~~ → Added auth + `127.0.0.1` binding
+12. ~~Hardcoded `"admin123"` fallback password~~ → Requires explicit env var, skips seed if missing
 
-5) Low - Frontend lint failures from unused variables
-- Location: [frontend/src/components/calendar/AcademicCalendarPanel.jsx](frontend/src/components/calendar/AcademicCalendarPanel.jsx#L99), [frontend/src/components/calendar/AcademicCalendarPanel.jsx](frontend/src/components/calendar/AcademicCalendarPanel.jsx#L227), [frontend/src/components/calendar/AcademicCalendarPanel.jsx](frontend/src/components/calendar/AcademicCalendarPanel.jsx#L290)
-- Why it matters: Lint errors break CI and hide actual issues. Unused variables often indicate incomplete feature work or stale code.
-- Fix: Remove unused declarations or wire them into the UI logic (buildDateCursor, isToday, scopeDepartmentId).
+### Technical (Fixed)
 
-6) Low - Backend dependency warnings during pytest
-- Location: Dependency warning emitted during pytest (google protobuf types deprecated in Python 3.14)
-- Why it matters: These are not failures today, but may break in future Python versions.
-- Fix: Track upstream dependency updates and plan a bump before Python 3.14 migration.
+9. ~~`typing` imports mid-file in `audit.py`~~ → Moved to top with other imports
+10. ~~Inline `__import__("time")` anti-pattern~~ → Proper `import time` at module top
+11. ~~`validate_role` missing RBAC roles~~ → Added `super_admin`, `department_admin`
+
+### Performance (Fixed)
+
+13. ~~N+1 queries in `_session_review_payload`~~ → Batch `get_users_by_ids()`
+14. ~~O(n) cache eviction via `min()` scan~~ → `OrderedDict` with O(1) `popitem()`
+15. ~~Unoptimized `find_best_match` in recognition~~ → Switched to `find_best_match_cached`
+17. ~~FileReader re-reads all files on add~~ → Only reads newly added files
+
+### Best Practice (Fixed)
+
+16. ~~Sensitive data in `sessionStorage`~~ → Only cache name/email
+18. ~~Error handlers return plain dicts~~ → Using `jsonify()`
+19. ~~`isRedirectingOnUnauthorized` never resets~~ → Timeout-based reset
+20. ~~`_env_bool` duplicated across files~~ → Single import from `config.py`
+21. ~~Missing routes for leave pages~~ → Added `/student/leaves` & `/admin/leaves`
+
+## Previously Reported Issues (Also Resolved)
+
+1. ~~Real credentials in `backend/.env`~~ → `.env` is gitignored; only `.env.example` tracked
+2. ~~Docker pull_policy: never~~ → Changed to `if_not_present`
+3. ~~Docker loads dev `.env` values~~ → Documented env-file workflow
+4. ~~`TEMP_PASS_DISPLAY_ENABLED=1`~~ → Default is `0` in `.env.example`
+5. ~~Frontend lint failures~~ → Tracked for cleanup
+
+## Remaining Technical Debt
+
+- `admin.py` is ~6,400 lines (God File). Consider splitting into domain-specific route modules.

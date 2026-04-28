@@ -26,18 +26,19 @@ def log_attendance(
     return doc
 
 
-def get_attendance_for_student(user_id: str, paper_id: Optional[str] = None) -> List[dict]:
+def get_attendance_for_student(user_id: str, paper_id: Optional[str] = None, limit: int = 5000) -> List[dict]:
     """Get attendance logs for a student, optionally filtered by paper."""
     query = {"user_id": user_id}
     if paper_id:
         query["paper_id"] = paper_id
     logs = get_collection("attendance", "attendance_logs")
-    return list(logs.find(query))
+    return list(logs.find(query).sort("timestamp", -1).limit(limit))
 
 
-def get_attendance_for_paper(paper_id: str) -> List[dict]:
+def get_attendance_for_paper(paper_id: str, limit: int = 5000) -> List[dict]:
+    """Get attendance logs for a paper with a bounded result set."""
     logs = get_collection("attendance", "attendance_logs")
-    return list(logs.find({"paper_id": paper_id}))
+    return list(logs.find({"paper_id": paper_id}).sort("timestamp", -1).limit(limit))
 
 
 def get_attendance_for_session(session_id: str) -> List[dict]:

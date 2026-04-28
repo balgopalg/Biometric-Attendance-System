@@ -72,7 +72,14 @@ SENSITIVE_OPERATIONS = [
 
 
 def role_required(*allowed_roles):
-    """Decorator: Verify user role is one of allowed_roles (hierarchy-aware)."""
+    """Decorator: Verify user role is one of allowed_roles (hierarchy-aware).
+
+    .. deprecated::
+        This is a **secondary** implementation that does NOT inject ``user``
+        as a positional argument.  All route modules should import from
+        ``app.utils.auth_decorators`` instead.  This copy is retained only
+        for ``permission_required`` / ``owner_or_admin_required`` internal use.
+    """
     roles = effective_allowed_roles(allowed_roles)
 
     def decorator(fn):

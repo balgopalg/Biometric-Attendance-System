@@ -1,7 +1,7 @@
 """Enhanced health checks for API, database, and queue subsystems."""
 
 from datetime import datetime, timezone
-from flask import jsonify, Blueprint
+from flask import jsonify, Blueprint, current_app
 
 health_bp = Blueprint('health', __name__)
 
@@ -58,12 +58,11 @@ class HealthChecker:
         """Check Redis connectivity."""
         try:
             import redis
-            from app.config import Config
+            import time
             
-            redis_url = Config.TASK_QUEUE_REDIS_URL or 'redis://localhost:6379/0'
+            redis_url = current_app.config.get('TASK_QUEUE_REDIS_URL') or 'redis://localhost:6379/0'
             r = redis.from_url(redis_url, socket_connect_timeout=5, socket_keepalive=True)
             
-            import time
             start = time.time()
             r.ping()
             latency_ms = (time.time() - start) * 1000
@@ -88,18 +87,16 @@ class HealthChecker:
     def check_queue():
         """Check task queue health."""
         try:
-            from app.config import Config
-            
-            if not Config.TASK_QUEUE_ENABLED:
+            if not current_app.config.get('TASK_QUEUE_ENABLED', False):
                 return {
                     'status': 'disabled',
                 }
             
             import redis
-            redis_url = Config.TASK_QUEUE_REDIS_URL or 'redis://localhost:6379/0'
+            redis_url = current_app.config.get('TASK_QUEUE_REDIS_URL') or 'redis://localhost:6379/0'
             r = redis.from_url(redis_url)
             
-            queue_name = Config.TASK_QUEUE_NAME or 'biometric:jobs'
+            queue_name = current_app.config.get('TASK_QUEUE_NAME') or 'biometric:jobs'
             
             # Get queue stats
             queue_length = r.llen(f'{queue_name}:queue')
@@ -132,9 +129,8 @@ class HealthChecker:
         """Check file storage availability."""
         try:
             import os
-            from app.config import Config
             
-            upload_dir = Config.get('UPLOADS_ABSOLUTE_PATH', 'uploads')
+            upload_dir = current_app.config.get('UPLOADS_ABSOLUTE_PATH', 'uploads')
             
             # Check if directory exists and is writable
             if not os.path.exists(upload_dir):

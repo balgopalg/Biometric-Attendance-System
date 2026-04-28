@@ -8,9 +8,14 @@ from app.security.rate_limiter import limiter
 from app.utils.helpers import decode_base64_image
 from app.utils.auth_decorators import role_required
 from app.services.face_detection import get_detector
-from app.services.face_recognition import generate_embedding, find_best_match
+from app.services.face_recognition import (
+    generate_embedding,
+    find_best_match_cached,
+    prepare_profile_candidates,
+)
 from app.services.profile_cache import get_profiles_for_paper_cached
 from app.models.user import find_user_by_id
+from app.utils.validation import validate_object_id
 
 recognition_bp = Blueprint("recognition", __name__)
 
@@ -80,17 +85,18 @@ def identify_faces(user):
         return jsonify({"matches": [], "faces_detected": 0})
 
     d = request.get_json(silent=True) or {}
-    paper_id = d.get("paper_id")
-    if not paper_id:
-        return jsonify({"error": "paper_id is required for identification"}), 400
+    paper_id = str(d.get("paper_id", "")).strip()
+    if not paper_id or not validate_object_id(paper_id):
+        return jsonify({"error": "Valid paper_id is required for identification"}), 400
 
     profiles = get_profiles_for_paper_cached(paper_id)
+    candidates = prepare_profile_candidates(profiles)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
 
     matches = []
     for face in faces:
         embedding = generate_embedding(face["crop"])
-        match = find_best_match(embedding, profiles, threshold=threshold)
+        match, _score = find_best_match_cached(embedding, candidates, threshold=threshold)
         if match:
             matched_user = find_user_by_id(match["user_id"])
             match["name"] = matched_user["name"] if matched_user else "Unknown"

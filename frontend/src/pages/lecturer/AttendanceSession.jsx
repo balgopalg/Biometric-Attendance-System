@@ -27,7 +27,7 @@ export default function AttendanceSession() {
   const [params] = useSearchParams();
   const paperIdFromQuery = params.get('paper_id');
 
-  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam();
+  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame, clearError } = useWebcam();
   const [papers, setPapers] = useState([]);
   const [loadingPapers, setLoadingPapers] = useState(true);
   const [papersError, setPapersError] = useState('');
@@ -57,6 +57,7 @@ export default function AttendanceSession() {
   const intervalRef = useRef(null);
   const scanInFlightRef = useRef(false);
   const lastRecognitionToastAtRef = useRef(0);
+  const cameraWarningShownRef = useRef(false);
 
   const selectedPaper = useMemo(
     () => papers.find((p) => p._id === selectedPaperId) || null,
@@ -174,15 +175,20 @@ export default function AttendanceSession() {
       setSessionStartedAt(res.data.started_at || new Date().toISOString());
       setRecognized([]);
       setReview(null);
+      cameraWarningShownRef.current = false;
 
-      try {
-        await startCamera();
+      const cameraStarted = await startCamera();
+      if (cameraStarted) {
         setScanning(true);
         toast.success('Session started');
-      } catch (camErr) {
+      } else {
         setScanning(false);
         toast.success('Session started without camera');
-        toast.error('Webcam undetected or blocked. You may upload a picture manually instead.', { duration: 6000 });
+        if (!cameraWarningShownRef.current) {
+          cameraWarningShownRef.current = true;
+          toast.error('Webcam undetected or blocked. You may upload a picture manually instead.', { duration: 6000 });
+        }
+        clearError();
       }
     } catch (err) {
       if (createdSessionId) {
@@ -210,6 +216,7 @@ export default function AttendanceSession() {
     setRecognized([]);
     setScanError('');
     setDiag({ faces_detected: 0, candidates_count: 0, best_similarity_seen: null, threshold: null });
+    cameraWarningShownRef.current = false;
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
 
@@ -339,6 +346,10 @@ export default function AttendanceSession() {
       return;
     }
 
+    const resumeScan = scanning;
+    if (resumeScan) {
+      setScanning(false);
+    }
     setUploadLoading(true);
     let totalDetected = 0;
     let newMatchesList = [];
@@ -347,26 +358,23 @@ export default function AttendanceSession() {
     let bestSimilaritySeen = 0;
 
     try {
-      const uploadPromises = imageBlobs.map(async (imageBlob) => {
+      for (const imageBlob of imageBlobs) {
         const formData = new FormData();
         formData.append('session_id', sessionId);
         formData.append('image', imageBlob);
-        return api.post('/lecturer/session/recognize-image', formData);
-      });
+        const res = await api.post('/lecturer/session/recognize-image', formData);
 
-      const responses = await Promise.all(uploadPromises);
-
-      responses.forEach(res => {
         totalDetected += (res.data.faces_detected || 0);
         const newMatches = safeMatches(res.data?.new_matches);
         if (newMatches.length > 0) {
           newMatchesList.push(...newMatches);
+          notifyRecognitionBatch(newMatches, 'upload');
         }
-        
+
         candidatesCount = res.data.candidates_count || candidatesCount;
         threshold = res.data.threshold || threshold;
         bestSimilaritySeen = Math.max(bestSimilaritySeen || 0, res.data.best_similarity_seen || 0);
-      });
+      }
 
       const uniqueNewMatchesMap = new Map();
       newMatchesList.forEach(m => {
@@ -384,7 +392,6 @@ export default function AttendanceSession() {
           combined.forEach(m => map.set(m.id || m.user_id, m));
           return Array.from(map.values());
         });
-        notifyRecognitionBatch(uniqueNewMatches, 'upload');
         toast.success(`Successfully recognized ${uniqueNewMatches.length} student(s) from ${imageBlobs.length} image(s)`);
       } else {
         toast.success(`No new students recognized in the ${imageBlobs.length} image(s)`);
@@ -406,6 +413,9 @@ export default function AttendanceSession() {
       toast.error(err.response?.data?.error || err.message || 'Image recognition failed');
     } finally {
       setUploadLoading(false);
+      if (resumeScan) {
+        setScanning(true);
+      }
     }
   };
 
@@ -568,7 +578,7 @@ export default function AttendanceSession() {
         <div className="glass-card" style={{ marginTop: 14, padding: 12 }}>
           <p role="status" aria-live="polite" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             Status: <b>{scanning ? 'Scanning' : 'Paused'}</b> |{' '}
-            Faces detected: <b>{diag.faces_detected}</b> | Candidates in this paper: <b>{diag.candidates_count}</b>
+            Faces detected: <b>{diag.faces_detected}</b> | Candidates in this paper: <b>{diag.candidates_count}</b> | Enrolled candidates: <b>{selectedPaper?.total_enrolled_students ?? 0}</b>
             {diag.best_similarity_seen !== null ? ` | Best similarity: ${diag.best_similarity_seen}` : ''}
             {diag.threshold !== null ? ` | Threshold: ${diag.threshold}` : ''}
           </p>

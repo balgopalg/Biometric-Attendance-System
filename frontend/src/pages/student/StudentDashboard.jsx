@@ -163,6 +163,9 @@ export default function StudentDashboard() {
             <span className={`badge ${avgPct !== null && avgPct >= 75 ? 'badge-success' : 'badge-warning'}`}>
               {avgPct === null ? 'No Lectures yet' : `Overall ${avgPct}%`}
             </span>
+            <span className={`badge ${profile?.profile?.has_face ? 'badge-success' : 'badge-danger'}`}>
+              {profile?.profile?.has_face ? 'Face Enrolled' : 'Face Not Enrolled'}
+            </span>
           </div>
         </div>
       </section>
@@ -175,10 +178,6 @@ export default function StudentDashboard() {
           </p>
         </div>
       )}
-
-      <div style={{ marginBottom: 20 }}>
-        <AcademicCalendarPanel compact />
-      </div>
 
       <div className="student-kpi-grid">
         <StatsCard
@@ -218,6 +217,12 @@ export default function StudentDashboard() {
           <div>
             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Semester</p>
             <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{currentSemester}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Biometrics</p>
+            <p style={{ fontSize: '0.86rem', fontWeight: 700, color: profile?.profile?.has_face ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+              {profile?.profile?.has_face ? 'Enrolled' : 'Pending Enrollment'}
+            </p>
           </div>
         </div>
 
@@ -304,6 +309,10 @@ export default function StudentDashboard() {
             Predictions will appear after attendance data is available.
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <AcademicCalendarPanel compact />
       </div>
     </div>
   );

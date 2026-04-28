@@ -56,8 +56,8 @@ def validate_pin(pin):
 
 
 def validate_role(role):
-    """Validate role is one of allowed values."""
-    allowed = {"admin", "lecturer", "student"}
+    """Validate role is one of allowed values (4-tier RBAC + legacy alias)."""
+    allowed = {"super_admin", "department_admin", "admin", "lecturer", "student"}
     return role in allowed
 
 

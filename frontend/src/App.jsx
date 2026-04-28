@@ -168,6 +168,7 @@ export default function App() {
                 <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
                 <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
                 <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
+                <Route path="/admin/leaves" element={<LazyPage><ManageLeaves /></LazyPage>} />
                 {/* Super Admin only routes */}
                 <Route path="/admin/departments" element={<LazyPage><ManageDepartments /></LazyPage>} />
                 <Route path="/admin/department-admins" element={<LazyPage><ManageDepartmentAdmins /></LazyPage>} />
@@ -187,6 +188,7 @@ export default function App() {
                 <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
                 <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
                 <Route path="/student/timetable" element={<LazyPage><StudentTimetable /></LazyPage>} />
+                <Route path="/student/leaves" element={<LazyPage><StudentLeaveRequests /></LazyPage>} />
               </Route>
 
               <Route path="*" element={<Navigate to="/" replace />} />

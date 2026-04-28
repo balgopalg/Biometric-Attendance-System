@@ -18,7 +18,11 @@ export function AuthProvider({ children }) {
     setUser(u);
     try {
       if (u) {
-        window.sessionStorage.setItem('user', JSON.stringify(u));
+        // Only cache non-sensitive display data to reduce XSS surface.
+        // Full user (including role, department_id) is always re-fetched
+        // from /auth/me on page load and validated server-side via JWT.
+        const safeCache = { name: u.name, email: u.email };
+        window.sessionStorage.setItem('user', JSON.stringify(safeCache));
       } else {
         window.sessionStorage.removeItem('user');
       }
