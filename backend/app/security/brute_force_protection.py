@@ -1,6 +1,5 @@
 """Brute-force protection and account lockout mechanisms."""
 
-import time
 from datetime import datetime, timedelta, timezone
 from flask import current_app
 from app.extensions import get_collection

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import copy
+import os
+import tempfile
 import unittest
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
@@ -10,6 +12,7 @@ from unittest.mock import patch
 
 import bcrypt
 import numpy as np
+from PIL import Image
 from bson import ObjectId
 
 from app.extensions import mongo
@@ -560,6 +563,62 @@ class BaseApiFlowTestCase(unittest.TestCase):
 
 
 class AuthFlowTests(BaseApiFlowTestCase):
+    def test_notifications_inbox_and_mark_read(self):
+        self.login("alice@student.com", "student123")
+
+        inbox = self.client.get("/api/notifications")
+        self.assertEqual(inbox.status_code, 200, inbox.get_data(as_text=True))
+        payload = inbox.get_json()
+        self.assertGreaterEqual(payload["unread_count"], 1)
+        self.assertTrue(payload["items"])
+        self.assertEqual(payload["items"][0]["title"], "Welcome to your student inbox")
+
+        mark_all = self.client.post("/api/notifications/read-all", headers=self._csrf_headers())
+        self.assertEqual(mark_all.status_code, 200, mark_all.get_data(as_text=True))
+        self.assertGreaterEqual(mark_all.get_json()["updated_count"], 1)
+
+        inbox_after = self.client.get("/api/notifications")
+        self.assertEqual(inbox_after.status_code, 200, inbox_after.get_data(as_text=True))
+        self.assertEqual(inbox_after.get_json()["unread_count"], 0)
+
+    def test_profile_picture_upload_enforces_size_bounds(self):
+        self.login("admin@system.com", "admin123")
+
+        noisy_rgb = np.random.randint(0, 256, (1100, 1500, 3), dtype=np.uint8)
+        image = Image.fromarray(noisy_rgb, mode="RGB")
+        payload = BytesIO()
+        image.save(payload, format="PNG")
+        payload.seek(0)
+
+        with tempfile.TemporaryDirectory() as tmp_upload_dir:
+            self.app.config["UPLOADS_ABSOLUTE_PATH"] = tmp_upload_dir
+
+            response = self.client.post(
+                "/api/auth/profile-picture",
+                data={
+                    "profile_picture": (payload, "profile.png"),
+                },
+                content_type="multipart/form-data",
+                headers=self._csrf_headers(),
+            )
+
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            body = response.get_json()
+            profile_url = body["user"]["profile_picture_url"]
+            self.assertTrue(profile_url)
+
+            stored_name = os.path.basename(profile_url.split("?", 1)[0])
+            stored_path = os.path.join(tmp_upload_dir, "profile_pictures", stored_name)
+            self.assertTrue(os.path.exists(stored_path), stored_path)
+            self.assertTrue(stored_name.lower().endswith(".jpg"), stored_name)
+
+            stored_size = os.path.getsize(stored_path)
+            self.assertGreaterEqual(stored_size, 100 * 1024)
+            self.assertLessEqual(stored_size, 300 * 1024)
+
+            with Image.open(stored_path) as saved_image:
+                self.assertEqual(saved_image.format, "JPEG")
+
     def test_login_me_and_change_password(self):
         login_payload = self.login("admin@system.com", "admin123")
         self.assertEqual(login_payload["user"]["role"], "super_admin")
@@ -612,6 +671,61 @@ class AuthFlowTests(BaseApiFlowTestCase):
 
         # (Optional) Simulate lockout expiry and verify unlock
         # This would require patching datetime or the protector logic for a full test
+
+
+class CalendarFlowTests(BaseApiFlowTestCase):
+    def test_calendar_extract_publish_and_current(self):
+        self.login("deptadmin@system.com", "deptadmin123")
+
+        with patch("app.routes.calendar.extract_calendar_draft") as mocked_extract:
+            mocked_extract.return_value = {
+                "year": 2026,
+                "source_filename": "calendar.png",
+                "raw_text": "Academic calendar draft",
+                "holidays": [{"date": "2026-01-26", "label": "Republic Day", "month": "January", "is_optional": False}],
+                "optional_holidays": [{"date": "2026-03-08", "label": "Holi", "month": "March", "is_optional": True}],
+                "optional_holiday_lines": ["Optional holidays"],
+                "sundays": ["2026-01-04", "2026-01-11"],
+                "source_dimensions": {"width": 1200, "height": 1600},
+            }
+
+            extract_response = self.client.post(
+                "/api/calendar/extract",
+                data={
+                    "department_id": self.seed["dept_id"],
+                    "year": "2026",
+                    "image": (BytesIO(PNG_1X1), "calendar.png"),
+                },
+                content_type="multipart/form-data",
+                headers=self._csrf_headers(),
+            )
+
+        self.assertEqual(extract_response.status_code, 200, extract_response.get_data(as_text=True))
+        draft = extract_response.get_json()
+        self.assertEqual(draft["department_id"], "")
+        self.assertEqual(draft["year"], 2026)
+        self.assertEqual(draft["holidays"][0]["label"], "Republic Day")
+
+        save_response = self.client.post(
+            "/api/calendar/save",
+            json={
+                **draft,
+                "title": "Academic Calendar 2026",
+                "notes": "Verified by department admin",
+            },
+            headers=self._csrf_headers(),
+        )
+        self.assertEqual(save_response.status_code, 200, save_response.get_data(as_text=True))
+        payload = save_response.get_json()
+        self.assertEqual(payload["calendar"]["status"], "published")
+        self.assertEqual(payload["calendar"]["title"], "Academic Calendar 2026")
+
+        current_response = self.client.get("/api/calendar/current?year=2026")
+        self.assertEqual(current_response.status_code, 200, current_response.get_data(as_text=True))
+        current_payload = current_response.get_json()
+        self.assertIsNotNone(current_payload["calendar"])
+        self.assertEqual(current_payload["calendar"]["title"], "Academic Calendar 2026")
+        self.assertIn(current_payload["calendar"].get("department_id"), (None, ""))
 
 
 class StudentFlowTests(BaseApiFlowTestCase):
@@ -695,6 +809,42 @@ class LecturerFlowTests(BaseApiFlowTestCase):
 
 
 class AdminFlowTests(BaseApiFlowTestCase):
+    def test_admin_upload_student_photo_applies_exif_orientation(self):
+        self.login("admin@system.com", "admin123")
+
+        # Build a landscape image tagged with EXIF orientation=6 (rotate 90deg CW).
+        noisy_rgb = np.random.randint(0, 256, (1000, 1400, 3), dtype=np.uint8)
+        image = Image.fromarray(noisy_rgb, mode="RGB")
+        exif = image.getexif()
+        exif[274] = 6
+        payload = BytesIO()
+        image.save(payload, format="JPEG", exif=exif.tobytes())
+        payload.seek(0)
+
+        with tempfile.TemporaryDirectory() as tmp_upload_dir:
+            self.app.config["UPLOAD_FOLDER"] = tmp_upload_dir
+
+            response = self.client.post(
+                "/api/admin/students/upload-photo",
+                data={
+                    "student_name": "Exif Student",
+                    "image": (payload, "orientation.jpg"),
+                },
+                content_type="multipart/form-data",
+                headers=self._csrf_headers(),
+            )
+
+            self.assertEqual(response.status_code, 201, response.get_data(as_text=True))
+            saved_path = response.get_json()["file_path"]
+            self.assertTrue(os.path.exists(saved_path), saved_path)
+            saved_size = os.path.getsize(saved_path)
+            self.assertGreaterEqual(saved_size, 100 * 1024)
+            self.assertLessEqual(saved_size, 300 * 1024)
+
+            with Image.open(saved_path) as saved_image:
+                # EXIF transpose should make the final stored image portrait.
+                self.assertGreater(saved_image.height, saved_image.width)
+
     def test_admin_face_enrollment_rejects_invalid_image(self):
         self.login("admin@system.com", "admin123")
 

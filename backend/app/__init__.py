@@ -136,6 +136,8 @@ def create_app(config_class=Config, seed_default_admin=False):
     from .routes.student import student_bp
     from .routes.recognition import recognition_bp
     from .routes.timetable import timetable_bp
+    from .routes.calendar import calendar_bp
+    from .routes.notifications import notifications_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
@@ -143,6 +145,8 @@ def create_app(config_class=Config, seed_default_admin=False):
     app.register_blueprint(student_bp, url_prefix="/api/student")
     app.register_blueprint(recognition_bp, url_prefix="/api/recognition")
     app.register_blueprint(timetable_bp, url_prefix="/api/timetable")
+    app.register_blueprint(calendar_bp, url_prefix="/api/calendar")
+    app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
 
     with app.app_context():
         _bootstrap_isolated_databases(mongo, app.config)
@@ -294,11 +298,21 @@ def _ensure_indexes(mongo, config):
     ip_rate_limits = client[config["MONGO_DB_AUTH"]]["ip_rate_limits"]
     _create_index_safe(ip_rate_limits, [("ttl", ASCENDING)], name="ix_ip_rate_limits_ttl", expireAfterSeconds=0)
 
+    notifications = client[config["MONGO_DB_AUTH"]]["notifications"]
+    _create_index_safe(notifications, [("user_id", ASCENDING), ("is_read", ASCENDING), ("created_at", DESCENDING)], name="ix_notifications_user_read_created")
+
+    calendars = client[config["MONGO_DB_ACADEMIC"]]["calendars"]
+    _create_index_safe(calendars, [("department_id", ASCENDING), ("year", ASCENDING), ("status", ASCENDING)], name="ix_calendars_department_year_status")
+    _create_index_safe(calendars, [("published_at", DESCENDING)], name="ix_calendars_published_at")
+
     pin_failures = client[config["MONGO_DB_ATTENDANCE"]]["pin_failures"]
     _create_index_safe(pin_failures, [("ttl", ASCENDING)], name="ix_pin_failures_ttl", expireAfterSeconds=0)
 
     revoked_jwts = client[config["MONGO_DB_AUTH"]]["revoked_jwts"]
     _create_index_safe(revoked_jwts, [("expires_at", ASCENDING)], name="ix_revoked_jwts_expires_at", expireAfterSeconds=0)
+
+    password_reset_otps = client[config["MONGO_DB_AUTH"]]["password_reset_otps"]
+    _create_index_safe(password_reset_otps, [("expires_at", ASCENDING)], name="ix_password_reset_otps_expires_at", expireAfterSeconds=0)
 
 
 def _seed_admin(mongo):
@@ -351,6 +365,8 @@ def _run_startup_health_checks(app):
         (app.config["MONGO_DB_ATTENDANCE"], "exam_eligibility_overrides"): {"uq_overrides_student_paper"},
         (app.config["MONGO_DB_AUTH"], "failed_login_attempts"): {"ix_failed_logins_ttl"},
         (app.config["MONGO_DB_AUTH"], "ip_rate_limits"): {"ix_ip_rate_limits_ttl"},
+        (app.config["MONGO_DB_AUTH"], "notifications"): {"ix_notifications_user_read_created"},
+        (app.config["MONGO_DB_ACADEMIC"], "calendars"): {"ix_calendars_department_year_status", "ix_calendars_published_at"},
         (app.config["MONGO_DB_ATTENDANCE"], "pin_failures"): {"ix_pin_failures_ttl"},
         (app.config["MONGO_DB_AUTH"], "revoked_jwts"): {"ix_revoked_jwts_expires_at"},
     }

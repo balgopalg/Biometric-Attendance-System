@@ -16,6 +16,14 @@ const lecturerUser = {
   must_change_password: false,
 };
 
+const studentUser = {
+  _id: 'student-1',
+  name: 'Alice Student',
+  email: 'alice@student.com',
+  role: 'student',
+  must_change_password: false,
+};
+
 const course = {
   _id: 'course-1',
   name: 'Master of Computer Applications',
@@ -112,7 +120,11 @@ async function installCommonApiMocks(page) {
 
     if (path === '/api/auth/login' && method === 'POST') {
       const body = request.postDataJSON() || {};
-      const user = String(body.email || '').includes('lecturer') ? lecturerUser : adminUser;
+      const user = String(body.email || '').includes('lecturer')
+        ? lecturerUser
+        : String(body.email || '').includes('student')
+          ? studentUser
+          : adminUser;
       await route.fulfill({ status: 200, json: { user } });
       return;
     }
@@ -160,6 +172,44 @@ async function installCommonApiMocks(page) {
 
     if (path === '/api/lecturer/papers') {
       await route.fulfill({ status: 200, json: [paper] });
+      return;
+    }
+
+    if (path === '/api/student/attendance') {
+      await route.fulfill({
+        status: 200,
+        json: [
+          {
+            paper_id: paper._id,
+            paper_name: paper.name,
+            paper_code: paper.code,
+            attended: 1,
+            total_classes: 2,
+            percentage: 50,
+            sessions: [],
+          },
+        ],
+      });
+      return;
+    }
+
+    if (path === '/api/student/predictions') {
+      await route.fulfill({
+        status: 200,
+        json: [
+          {
+            paper_id: paper._id,
+            paper_name: paper.name,
+            paper_code: paper.code,
+            current_percentage: 50,
+            overall_attendance_percentage: 50,
+            overall_attended_classes: 1,
+            overall_total_classes: 2,
+            classes_needed_for_75: 2,
+            safe_bunks_remaining: 0,
+          },
+        ],
+      });
       return;
     }
 
@@ -310,5 +360,51 @@ test.describe('UX and accessibility hardening checks', () => {
 
     expect(pageAudit.hasOverflow).toBeFalsy();
     expect(pageAudit.tapTargetsTooSmall.length).toBe(0);
+  });
+
+  test('keeps admin dashboard tap targets finger-friendly', async ({ page }) => {
+    await installCommonApiMocks(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/login');
+
+    await page.fill('#login-email', adminUser.email);
+    await page.fill('#login-password', 'admin123');
+    await page.click('#login-submit');
+    await expect(page).toHaveURL(/\/admin$/);
+
+    const tapAudit = await page.evaluate(() => {
+      const targets = Array.from(document.querySelectorAll('button.btn-primary, button.btn-secondary, button.btn-danger, a.btn-primary, a.btn-secondary, a.btn-danger'));
+      const sizes = targets.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { text: (node.textContent || '').trim(), height: rect.height };
+      });
+
+      return sizes.filter((item) => item.height > 0 && item.height < 36);
+    });
+
+    expect(tapAudit.length).toBe(0);
+  });
+
+  test('keeps student actions reachable on mobile', async ({ page }) => {
+    await installCommonApiMocks(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/login');
+
+    await page.fill('#login-email', studentUser.email);
+    await page.fill('#login-password', 'student123');
+    await page.click('#login-submit');
+    await expect(page).toHaveURL(/\/student$/);
+
+    const tapAudit = await page.evaluate(() => {
+      const targets = Array.from(document.querySelectorAll('button.btn-primary, button.btn-secondary, button.btn-danger, a.btn-primary, a.btn-secondary, a.btn-danger'));
+      const sizes = targets.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { text: (node.textContent || '').trim(), height: rect.height };
+      });
+
+      return sizes.filter((item) => item.height > 0 && item.height < 36);
+    });
+
+    expect(tapAudit.length).toBe(0);
   });
 });

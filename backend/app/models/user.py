@@ -12,7 +12,6 @@ from bson.errors import InvalidId
 from app.extensions import get_collection
 from app.repositories import find_many_by_ids
 from app.security.brute_force_protection import BruteForceProtector
-from app.utils.helpers import sanitise_mongo_doc
 from app.utils.validation import validate_password_strength
 import re
 

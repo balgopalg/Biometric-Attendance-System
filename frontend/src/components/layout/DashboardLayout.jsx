@@ -13,6 +13,7 @@ const titleMap = {
   '/admin/courses': 'Manage Courses',
   '/admin/papers': 'Manage Papers',
   '/admin/timetable': 'Manage Timetable',
+  '/admin/calendar': 'Academic Calendar',
   '/admin/lecturers': 'Manage Lecturers',
   '/admin/students': 'Manage Students',
   '/admin/enrollment': 'Student Enrollment',

@@ -1,6 +1,6 @@
 """Enhanced health checks for API, database, and queue subsystems."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from flask import jsonify, Blueprint
 
 health_bp = Blueprint('health', __name__)

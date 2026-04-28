@@ -4,11 +4,27 @@ import logging
 import os
 
 import cv2
+from flask import current_app, has_app_context
 
 from app.utils.timezone import india_timestamp_token
+from app.utils.helpers import save_jpeg_with_size_bounds
 
 
 logger = logging.getLogger(__name__)
+
+
+def _photo_size_bounds():
+    """Resolve image size bounds from config with safe defaults."""
+    min_kb = 100
+    max_kb = 300
+    if has_app_context():
+        min_kb = int(current_app.config.get("PHOTO_MIN_KB", min_kb) or min_kb)
+        max_kb = int(current_app.config.get("PHOTO_MAX_KB", max_kb) or max_kb)
+    if min_kb <= 0:
+        min_kb = 1
+    if max_kb < min_kb:
+        max_kb = min_kb
+    return min_kb, max_kb
 
 
 def _safe_name(raw_value):
@@ -24,6 +40,17 @@ def _ensure_directory(path):
         os.makedirs(path, exist_ok=True)
     except OSError as exc:
         raise RuntimeError(f"Failed to create directory: {path}") from exc
+
+
+def _save_bounded_jpeg(file_path, image):
+    """Persist image as JPEG within configured storage bounds."""
+    min_kb, max_kb = _photo_size_bounds()
+    save_jpeg_with_size_bounds(
+        file_path,
+        image,
+        min_kb=min_kb,
+        max_kb=max_kb,
+    )
 
 
 def _to_grayscale_image(image):
@@ -77,8 +104,10 @@ def capture_faces_for_user(user_name, dataset_root="dataset", total_images=50, d
             file_name = f"{safe_user_name}_{idx}.jpg"
             file_path = os.path.join(user_dir, file_name)
 
-            if not cv2.imwrite(file_path, gray):
-                raise RuntimeError(f"Failed to save image: {file_path}")
+            try:
+                _save_bounded_jpeg(file_path, gray)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to save image: {file_path}") from exc
 
             saved_paths.append(file_path)
 
@@ -111,8 +140,10 @@ def save_student_upload(student_name, image, uploads_dir="uploads"):
 
     image_to_save = _to_grayscale_image(image)
 
-    if not cv2.imwrite(file_path, image_to_save):
-        raise RuntimeError(f"Failed to save student upload: {file_path}")
+    try:
+        _save_bounded_jpeg(file_path, image_to_save)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to save student upload: {file_path}") from exc
 
     return file_path
 
@@ -130,8 +161,10 @@ def save_classroom_upload(image, uploads_dir="uploads"):
 
     image_to_save = _to_grayscale_image(image)
 
-    if not cv2.imwrite(file_path, image_to_save):
-        raise RuntimeError(f"Failed to save classroom upload: {file_path}")
+    try:
+        _save_bounded_jpeg(file_path, image_to_save)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to save classroom upload: {file_path}") from exc
 
     return file_path
 
@@ -158,8 +191,10 @@ def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", max
         file_name = f"{safe_user_name}_{idx}.jpg"
         file_path = os.path.join(user_dir, file_name)
 
-        if not cv2.imwrite(file_path, image_to_save):
-            raise RuntimeError(f"Failed to save dataset image: {file_path}")
+        try:
+            _save_bounded_jpeg(file_path, image_to_save)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to save dataset image: {file_path}") from exc
 
         saved_paths.append(file_path)
 
@@ -182,8 +217,10 @@ def save_classroom_upload_bundle(subject_label, image, face_crops, uploads_dir="
     original_path = os.path.join(folder_path, "original.jpg")
     image_to_save = _to_grayscale_image(image)
 
-    if not cv2.imwrite(original_path, image_to_save):
-        raise RuntimeError(f"Failed to save original classroom image: {original_path}")
+    try:
+        _save_bounded_jpeg(original_path, image_to_save)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to save original classroom image: {original_path}") from exc
 
     saved_faces = []
     for idx, crop in enumerate(face_crops or [], start=1):
@@ -193,8 +230,10 @@ def save_classroom_upload_bundle(subject_label, image, face_crops, uploads_dir="
         crop_to_save = _to_grayscale_image(crop)
 
         face_path = os.path.join(folder_path, f"face_{idx:02d}.jpg")
-        if not cv2.imwrite(face_path, crop_to_save):
-            raise RuntimeError(f"Failed to save classroom face crop: {face_path}")
+        try:
+            _save_bounded_jpeg(face_path, crop_to_save)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to save classroom face crop: {face_path}") from exc
 
         saved_faces.append(face_path)
 

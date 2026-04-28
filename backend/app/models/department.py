@@ -1,7 +1,7 @@
 """Department model helpers — thin wrappers around PyMongo operations."""
 
 from datetime import datetime, timezone
-from typing import Any, Optional, List
+from typing import Optional, List
 
 from bson import ObjectId
 from bson.errors import InvalidId

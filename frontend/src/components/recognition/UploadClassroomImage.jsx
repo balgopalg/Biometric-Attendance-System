@@ -1,27 +1,37 @@
 import { useState, useRef } from 'react';
 import { HiOutlinePhotograph, HiOutlineCheckCircle, HiOutlineExclamationCircle } from 'react-icons/hi';
+import toast from 'react-hot-toast';
 
 const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
-  const [preview, setPreview] = useState(null);
+  const [previews, setPreviews] = useState([]);
   const [dragActive, setDragActive] = useState(false);
-  const [fileName, setFileName] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const fileInputRef = useRef(null);
 
-  const handleFile = (file) => {
-    if (!file.type.startsWith('image/')) {
-      alert('Please select an image file');
+  const handleFiles = (filesList) => {
+    const validFiles = Array.from(filesList).filter(f => f.type.startsWith('image/'));
+    
+    if (validFiles.length === 0) {
+      toast?.error ? toast.error('Please select image files only') : alert('Please select image files only');
       return;
     }
 
-    setFileName(file.name);
-    setSelectedFile(file);
+    const totalFiles = selectedFiles.length + validFiles.length;
+    if (totalFiles > 5) {
+      toast?.error ? toast.error('You can only upload a maximum of 5 images at a time') : alert('You can only upload a maximum of 5 images at a time');
+      return;
+    }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreview(e.target.result);
-    };
-    reader.readAsDataURL(file);
+    const newFiles = [...selectedFiles, ...validFiles].slice(0, 5);
+    setSelectedFiles(newFiles);
+
+    Promise.all(newFiles.map(file => {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve({ name: file.name, url: e.target.result });
+        reader.readAsDataURL(file);
+      });
+    })).then(results => setPreviews(results));
   };
 
   const handleDrag = (e) => {
@@ -39,25 +49,39 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
     e.stopPropagation();
     setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
     }
   };
 
   const handleChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
+    }
+  };
+
+  const handleRemoveImage = (e, index) => {
+    e.stopPropagation();
+    const newFiles = [...selectedFiles];
+    newFiles.splice(index, 1);
+    setSelectedFiles(newFiles);
+
+    const newPreviews = [...previews];
+    newPreviews.splice(index, 1);
+    setPreviews(newPreviews);
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
   const handleUpload = () => {
-    if (!selectedFile) {
-      alert('Please select an image first');
+    if (selectedFiles.length === 0) {
+      alert('Please select at least one image');
       return;
     }
 
-    // Use the original file object directly
-    onUpload(selectedFile);
+    onUpload(selectedFiles);
   };
 
   return (
@@ -115,11 +139,12 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
             ref={fileInputRef}
             type="file"
             accept="image/*"
+            multiple
             onChange={handleChange}
             style={{ display: 'none' }}
           />
 
-          {!preview ? (
+          {previews.length === 0 ? (
             <>
               <div style={{
                 fontSize: 32,
@@ -129,28 +154,59 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
                 <HiOutlinePhotograph style={{ display: 'inline-block' }} />
               </div>
               <p style={{ fontWeight: 600, marginBottom: 4 }}>
-                {dragActive ? 'Drop your image here' : 'Drag and drop or click to select'}
+                {dragActive ? 'Drop your images here' : 'Drag and drop or click to select'}
               </p>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                PNG, JPG, or WebP (max 10MB)
+                Upload 1 to 5 classroom photos (PNG, JPG, WebP)
               </p>
             </>
           ) : (
-            <>
-              <img
-                src={preview}
-                alt="preview"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: 300,
-                  borderRadius: 'var(--radius)',
-                  marginBottom: 12,
-                }}
-              />
+            <div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', marginBottom: 12 }}>
+                {previews.map((prev, idx) => (
+                  <div key={idx} style={{ position: 'relative' }}>
+                    <img
+                      src={prev.url}
+                      alt={`preview ${idx + 1}`}
+                      style={{
+                        width: 80,
+                        height: 80,
+                        objectFit: 'cover',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--border-glass)'
+                      }}
+                    />
+                    <button
+                      onClick={(e) => handleRemoveImage(e, idx)}
+                      style={{
+                        position: 'absolute',
+                        top: -6,
+                        right: -6,
+                        width: 20,
+                        height: 20,
+                        borderRadius: '50%',
+                        background: '#ef4444',
+                        color: 'white',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        padding: 0,
+                      }}
+                      title="Remove image"
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                {fileName}
+                {previews.length} image{previews.length > 1 ? 's' : ''} selected. Click or drag to replace.
               </p>
-            </>
+            </div>
           )}
         </div>
 
@@ -195,7 +251,7 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
           <button
             className="btn-primary"
             onClick={handleUpload}
-            disabled={!preview || isLoading}
+            disabled={previews.length === 0 || isLoading}
             style={{ minWidth: 100 }}
           >
             {isLoading ? 'Processing...' : 'Upload & Recognize'}

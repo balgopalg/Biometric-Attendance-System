@@ -216,6 +216,22 @@ export default function Login() {
               </button>
             </div>
           </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -4 }}>
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password')}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--accent-cyan)',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Forgot password?
+            </button>
+          </div>
           <button type="submit" disabled={loading}
             style={{
               width: '100%',

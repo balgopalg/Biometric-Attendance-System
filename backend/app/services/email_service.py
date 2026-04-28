@@ -256,6 +256,50 @@ def _password_reset_html(name: str, email: str, temp_password: str, role: str) -
 </html>"""
 
 
+def _password_recovery_otp_html(name: str, otp: str, expires_in_minutes: int) -> str:
+    login_url = _get_login_url()
+    return f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Password Recovery OTP</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f8fafc;">
+    <tr>
+      <td align="center" style="padding:28px 12px;">
+        <table role="presentation" width="620" cellspacing="0" cellpadding="0" border="0" style="width:620px;max-width:620px;background:#ffffff;border:1px solid #dbe4ee;border-radius:14px;overflow:hidden;">
+          <tr>
+            <td style="padding:26px 30px;background:linear-gradient(135deg,#1e293b,#2563eb);">
+              <p style="margin:0 0 8px;color:#bfdbfe;font-size:12px;letter-spacing:0.12em;text-transform:uppercase;font-weight:700;">Account Recovery</p>
+              <h1 style="margin:0;color:#ffffff;font-size:26px;line-height:1.2;">One-Time Password</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 30px;">
+              <p style="margin:0 0 16px;color:#334155;font-size:16px;line-height:1.6;">Hi <strong>{name}</strong>, use this OTP to reset your password:</p>
+              <div style="margin:0 0 18px;padding:16px;border:1px dashed #93c5fd;border-radius:10px;background:#eff6ff;text-align:center;">
+                <span style="font-family:'Courier New',monospace;font-size:34px;letter-spacing:8px;color:#1d4ed8;font-weight:800;">{otp}</span>
+              </div>
+              <p style="margin:0 0 12px;color:#475569;font-size:14px;line-height:1.6;">This OTP expires in <strong>{expires_in_minutes} minutes</strong> and can be used only once.</p>
+              <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">If you did not request this, you can safely ignore this email.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 30px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+              <a href="{login_url}" target="_blank" style="display:inline-block;padding:10px 22px;border-radius:8px;background:#1e293b;color:#ffffff;text-decoration:none;font-weight:700;">Open Login</a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+
 def _shortage_alert_html(name: str, paper_name: str, percentage: float, classes_needed: int) -> str:
     login_url = _get_login_url()
     return f"""\
@@ -397,6 +441,33 @@ def send_password_reset_email(
             logger.info("Password reset email sent to %s", to_email)
         except Exception:
             logger.exception("Failed to send password reset email to %s", to_email)
+
+    Thread(target=_send, daemon=True).start()
+    return True
+
+
+def send_password_recovery_otp_email(
+    to_email: str,
+    name: str,
+    otp: str,
+    expires_in_minutes: int,
+):
+    """Send forgot-password OTP email. Non-blocking and fire-and-forget."""
+    if not _YAGMAIL_READY:
+        logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
+        return False
+
+    def _send():
+        try:
+            mailer = _get_mailer()
+            mailer.send(
+                to=to_email,
+                subject="Password Recovery OTP — Biometric Attendance System",
+                contents=_password_recovery_otp_html(name, otp, expires_in_minutes),
+            )
+            logger.info("Password recovery OTP email sent to %s", to_email)
+        except Exception:
+            logger.exception("Failed to send password recovery OTP email to %s", to_email)
 
     Thread(target=_send, daemon=True).start()
     return True

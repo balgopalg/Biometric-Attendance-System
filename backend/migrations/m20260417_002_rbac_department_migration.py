@@ -13,9 +13,7 @@ Idempotent: safe to re-run — checks for existing department_id before overwrit
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 
-from bson import ObjectId
 from app.extensions import get_collection
 from app.models.department import find_or_create_department_by_name
 

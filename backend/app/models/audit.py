@@ -10,7 +10,7 @@ from app.extensions import get_collection
 ROLLBACK_WINDOW_HOURS = 24
 
 
-from typing import Any, Optional, Tuple, Dict
+from typing import Any, Optional, Tuple
 
 def log_action(
     action: Optional[str] = None,

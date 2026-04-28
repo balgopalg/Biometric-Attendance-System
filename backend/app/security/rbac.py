@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional, Set
 
 from bson import ObjectId
-from flask import g, has_request_context, request
+from flask import has_request_context, request
 
 
 # ---------------------------------------------------------------------------

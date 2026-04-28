@@ -328,7 +328,7 @@ export default function AttendanceSession() {
     }
   }, [sessionId, selectedPaperId, captureFrame, notifyRecognitionBatch]);
 
-  const handleUploadImage = async (imageBlob) => {
+  const handleUploadImage = async (imageBlobs) => {
     if (!selectedPaperId) {
       toast.error('Please select a paper first');
       return;
@@ -340,59 +340,68 @@ export default function AttendanceSession() {
     }
 
     setUploadLoading(true);
+    let totalDetected = 0;
+    let newMatchesList = [];
+    let candidatesCount = 0;
+    let threshold = 0;
+    let bestSimilaritySeen = 0;
+
     try {
-      const formData = new FormData();
-      formData.append('session_id', sessionId);
-      formData.append('image', imageBlob);
-
-      if (RECOGNITION_DEBUG) {
-        console.debug('[Image Upload] FormData ready', {
-          sessionId,
-          fileName: imageBlob.name,
-          fileSize: imageBlob.size,
-          fileType: imageBlob.type,
-        });
-      }
-
-      const res = await api.post('/lecturer/session/recognize-image', formData);
-      
-      if (RECOGNITION_DEBUG) {
-        console.debug('[Image Upload] Response received', {
-          facesDetected: res.data.faces_detected,
-          newMatches: res.data.new_matches?.length,
-          savedFolder: res.data.saved_folder,
-          facePaths: res.data.face_paths?.length,
-        });
-      }
-
-      if (res.data.saved_folder) {
-        toast.success(`Saved classroom bundle: ${res.data.saved_folder}`);
-      }
-
-      const newMatches = safeMatches(res.data?.new_matches);
-      if (newMatches.length > 0) {
-        setRecognized((prev) => [...prev, ...newMatches]);
-        notifyRecognitionBatch(newMatches, 'upload');
-        toast.success(`Successfully recognized ${newMatches.length} student(s)`);
-      } else {
-        toast.success('No new students recognized in this image');
-      }
-
-      setDiag({
-        faces_detected: res.data.faces_detected || 0,
-        candidates_count: res.data.candidates_count || 0,
-        best_similarity_seen: res.data.best_similarity_seen,
-        threshold: res.data.threshold,
+      const uploadPromises = imageBlobs.map(async (imageBlob) => {
+        const formData = new FormData();
+        formData.append('session_id', sessionId);
+        formData.append('image', imageBlob);
+        return api.post('/lecturer/session/recognize-image', formData);
       });
+
+      const responses = await Promise.all(uploadPromises);
+
+      responses.forEach(res => {
+        totalDetected += (res.data.faces_detected || 0);
+        const newMatches = safeMatches(res.data?.new_matches);
+        if (newMatches.length > 0) {
+          newMatchesList.push(...newMatches);
+        }
+        
+        candidatesCount = res.data.candidates_count || candidatesCount;
+        threshold = res.data.threshold || threshold;
+        bestSimilaritySeen = Math.max(bestSimilaritySeen || 0, res.data.best_similarity_seen || 0);
+      });
+
+      const uniqueNewMatchesMap = new Map();
+      newMatchesList.forEach(m => {
+        const id = m.id || m.user_id;
+        if (!uniqueNewMatchesMap.has(id)) {
+          uniqueNewMatchesMap.set(id, m);
+        }
+      });
+      const uniqueNewMatches = Array.from(uniqueNewMatchesMap.values());
+
+      if (uniqueNewMatches.length > 0) {
+        setRecognized((prev) => {
+          const combined = [...prev, ...uniqueNewMatches];
+          const map = new Map();
+          combined.forEach(m => map.set(m.id || m.user_id, m));
+          return Array.from(map.values());
+        });
+        notifyRecognitionBatch(uniqueNewMatches, 'upload');
+        toast.success(`Successfully recognized ${uniqueNewMatches.length} student(s) from ${imageBlobs.length} image(s)`);
+      } else {
+        toast.success(`No new students recognized in the ${imageBlobs.length} image(s)`);
+      }
+
+      setDiag(prev => ({
+        ...prev,
+        faces_detected: prev.faces_detected + totalDetected,
+        candidates_count: candidatesCount || prev.candidates_count,
+        best_similarity_seen: bestSimilaritySeen || prev.best_similarity_seen,
+        threshold: threshold || prev.threshold,
+      }));
 
       setShowUploadModal(false);
     } catch (err) {
       if (RECOGNITION_DEBUG) {
-        console.error('[Image Recognition] Failed', {
-          status: err.response?.status,
-          error: err.response?.data?.error,
-          message: err.message,
-        });
+        console.error('[Image Recognition] Failed', err);
       }
       toast.error(err.response?.data?.error || err.message || 'Image recognition failed');
     } finally {

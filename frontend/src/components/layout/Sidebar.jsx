@@ -17,6 +17,7 @@ const navMap = {
     { to: '/admin/courses', icon: HiOutlineBookOpen, label: 'Courses' },
     { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
     { to: '/admin/timetable', icon: HiOutlineClipboardList, label: 'Timetable' },
+    { to: '/admin/calendar', icon: HiOutlineShieldCheck, label: 'Academic Calendar' },
     { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
     { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
     { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
@@ -30,6 +31,7 @@ const navMap = {
     { to: '/admin/courses', icon: HiOutlineBookOpen, label: 'Courses' },
     { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
     { to: '/admin/timetable', icon: HiOutlineClipboardList, label: 'Timetable' },
+    { to: '/admin/calendar', icon: HiOutlineShieldCheck, label: 'Academic Calendar' },
     { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
     { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
     { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
@@ -44,6 +46,7 @@ const navMap = {
     { to: '/admin/courses', icon: HiOutlineBookOpen, label: 'Courses' },
     { to: '/admin/papers', icon: HiOutlineDocumentText, label: 'Papers' },
     { to: '/admin/timetable', icon: HiOutlineClipboardList, label: 'Timetable' },
+    { to: '/admin/calendar', icon: HiOutlineShieldCheck, label: 'Academic Calendar' },
     { to: '/admin/enrollment', icon: HiOutlineCamera, label: 'Enrollment' },
     { to: '/admin/exam-eligibility', icon: HiOutlineCheckCircle, label: 'Exam Eligibility' },
     { to: '/admin/attendance-matrix', icon: HiOutlineChartBar, label: 'Attendance Matrix' },
@@ -68,6 +71,38 @@ const navMap = {
 function getAdminBasePath(role) {
   if (role === 'super_admin' || role === 'department_admin' || role === 'admin') return '/admin';
   return `/${role}`;
+}
+
+function SidebarAvatar({ user, initials, size = 44 }) {
+  const baseStyle = {
+    width: size,
+    height: size,
+    borderRadius: '50%',
+    marginLeft: 'auto',
+    marginRight: 'auto',
+    marginBottom: 10,
+    border: '2px solid rgba(255,255,255,0.3)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  };
+
+  if (user?.profile_picture_url) {
+    return (
+      <img
+        src={user.profile_picture_url}
+        alt={`${user?.name || 'User'} avatar`}
+        style={{ ...baseStyle, objectFit: 'cover' }}
+      />
+    );
+  }
+
+  return (
+    <div style={{ ...baseStyle, background: 'rgba(255,255,255,0.2)', fontWeight: 700, fontSize: '0.9rem', color: '#fff' }}>
+      {initials}
+    </div>
+  );
 }
 
 export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen = true, onNavigate = () => {} }) {
@@ -115,7 +150,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
       }}
     >
       {/* Logo */}
-      <div style={{ padding: isCollapsed ? '20px 12px 0' : '20px 20px 0', display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start', gap: 10, flexShrink: 0 }}>
+      <div style={{ padding: isCollapsed ? '20px 12px 0' : '20px 20px 0', display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start', gap: isCollapsed ? 0 : 10, flexShrink: 0 }}>
         <div style={{
           width: 34, height: 34, borderRadius: 10,
           background: 'linear-gradient(160deg, rgba(34,211,238,0.34), rgba(14,165,233,0.3))',
@@ -149,18 +184,7 @@ export default function Sidebar({ isCollapsed = false, isMobile = false, isOpen 
 
       {/* User Profile */}
       <div style={{ padding: isCollapsed ? '20px 12px 16px' : '20px 20px 16px', borderBottom: '1px solid var(--sidebar-divider)', textAlign: 'center', flexShrink: 0 }}>
-        <div style={{
-          width: 44, height: 44, borderRadius: '50%',
-          background: 'rgba(255,255,255,0.2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 700, fontSize: '0.9rem', color: '#fff',
-          marginBottom: isCollapsed ? 0 : 10,
-          marginLeft: 'auto',
-          marginRight: 'auto',
-          border: '2px solid rgba(255,255,255,0.3)',
-        }}>
-          {initials}
-        </div>
+        <SidebarAvatar user={user} initials={initials} />
         <div
           style={{
             opacity: textVisible ? 1 : 0,

@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator, HiOutlineSparkles, HiOutlineBookOpen } from 'react-icons/hi';
 import { useAuth } from '../../hooks/useAuth';
+import AcademicCalendarPanel from '../../components/calendar/AcademicCalendarPanel';
 
 function parseSemesterValue(value) {
   if (value === null || value === undefined) return null;
@@ -174,6 +175,10 @@ export default function StudentDashboard() {
           </p>
         </div>
       )}
+
+      <div style={{ marginBottom: 20 }}>
+        <AcademicCalendarPanel compact />
+      </div>
 
       <div className="student-kpi-grid">
         <StatsCard
