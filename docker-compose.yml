@@ -3,8 +3,11 @@ services:
     image: mongo:7.0
     pull_policy: if_not_present
     restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:?MONGO_PASS must be set}
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -37,7 +40,7 @@ services:
     environment:
       FLASK_ENV: production
       FLASK_DEBUG: "0"
-      MONGO_URI: mongodb://mongo:27017/biometric_attendance
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS}@mongo:27017/biometric_attendance?authSource=admin
       # Database isolation for specific features
       MONGO_DB_AUTH: biometric_auth
       MONGO_DB_ACADEMIC: biometric_academic
@@ -78,7 +81,7 @@ services:
     environment:
       FLASK_ENV: production
       FLASK_DEBUG: "0"
-      MONGO_URI: mongodb://mongo:27017/biometric_attendance
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS}@mongo:27017/biometric_attendance?authSource=admin
       MONGO_DB_AUTH: biometric_auth
       MONGO_DB_ACADEMIC: biometric_academic
       MONGO_DB_ATTENDANCE: biometric_attendance_ops

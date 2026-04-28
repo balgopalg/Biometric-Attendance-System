@@ -10,6 +10,35 @@ import mediapipe as mp
 class FaceDetector:
     """Detect and crop faces from an image using MediaPipe Face Detection."""
 
+    @staticmethod
+    def _resize_with_letterbox(image: np.ndarray, size: int = 160) -> np.ndarray | None:
+        if image is None or not hasattr(image, "shape"):
+            return None
+        h, w = image.shape[:2]
+        if h <= 0 or w <= 0:
+            return None
+
+        scale = size / float(max(h, w))
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+        resized = cv2.resize(image, (new_w, new_h), interpolation=interp)
+
+        top = (size - new_h) // 2
+        bottom = size - new_h - top
+        left = (size - new_w) // 2
+        right = size - new_w - left
+
+        return cv2.copyMakeBorder(
+            resized,
+            top,
+            bottom,
+            left,
+            right,
+            cv2.BORDER_CONSTANT,
+            value=(0, 0, 0),
+        )
+
     def __init__(self, min_confidence=0.5, fallback_min_faces=4):
         self.mp_face = mp.solutions.face_detection
         self.detector = self.mp_face.FaceDetection(
@@ -34,7 +63,9 @@ class FaceDetector:
         if crop.size == 0:
             return None
 
-        crop_resized = cv2.resize(crop, (160, 160))
+        crop_resized = self._resize_with_letterbox(crop, size=160)
+        if crop_resized is None:
+            return None
         return {
             "bbox": (x, y, bw, bh),
             "confidence": float(confidence),
@@ -92,16 +123,25 @@ class FaceDetector:
         if self.haar.empty():
             return []
 
+        if image_rgb is None or not hasattr(image_rgb, "shape") or image_rgb.size == 0:
+            return []
+
         h, w, _ = image_rgb.shape
+        if min(h, w) < 40:
+            return []
+
         gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
         gray = cv2.equalizeHist(gray)
 
-        raw_faces = self.haar.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=6,
-            minSize=(60, 60),
-        )
+        try:
+            raw_faces = self.haar.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=6,
+                minSize=(60, 60),
+            )
+        except cv2.error:
+            return []
 
         faces = []
         for (x, y, bw, bh) in raw_faces:

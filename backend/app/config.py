@@ -13,6 +13,22 @@ def _env_bool(name, default=False):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name, default=0):
+    """Safely parse an integer env var, returning default on invalid values."""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
+def _env_float(name, default=0.0):
+    """Safely parse a float env var, returning default on invalid values."""
+    try:
+        return float(os.getenv(name, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
 class Config:
     """Application configuration loaded from environment variables."""
     # Feature flag: Enable leave-adjusted attendance (exclude approved leaves from denominator)
@@ -56,7 +72,7 @@ class Config:
     JWT_COOKIE_CSRF_PROTECT = _env_bool("JWT_COOKIE_CSRF_PROTECT", True)
     JWT_ACCESS_COOKIE_PATH = "/api/"
     JWT_COOKIE_DOMAIN = os.getenv("JWT_COOKIE_DOMAIN") or None
-    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES_SECONDS", "3600"))
+    JWT_ACCESS_TOKEN_EXPIRES = _env_int("JWT_ACCESS_TOKEN_EXPIRES_SECONDS", 3600)
 
     ENABLE_DEFAULT_ADMIN_SEED = _env_bool("ENABLE_DEFAULT_ADMIN_SEED", False)
     LECTURER_AUTH_MODE = os.getenv("LECTURER_AUTH_MODE", "pin").lower()
@@ -73,28 +89,28 @@ class Config:
     
     # Brute Force Protection
     BRUTE_FORCE_PROTECTION_ENABLED = _env_bool("BRUTE_FORCE_PROTECTION_ENABLED", True)
-    LOGIN_LOCKOUT_THRESHOLD = int(os.getenv("LOGIN_LOCKOUT_THRESHOLD", "5"))
-    LOGIN_LOCKOUT_DURATION_MINUTES = int(os.getenv("LOGIN_LOCKOUT_DURATION_MINUTES", "15"))
-    LOGIN_ATTEMPT_WINDOW_MINUTES = int(os.getenv("LOGIN_ATTEMPT_WINDOW_MINUTES", "15"))
+    LOGIN_LOCKOUT_THRESHOLD = _env_int("LOGIN_LOCKOUT_THRESHOLD", 5)
+    LOGIN_LOCKOUT_DURATION_MINUTES = _env_int("LOGIN_LOCKOUT_DURATION_MINUTES", 15)
+    LOGIN_ATTEMPT_WINDOW_MINUTES = _env_int("LOGIN_ATTEMPT_WINDOW_MINUTES", 15)
     
-    PIN_MAX_ATTEMPTS = int(os.getenv("PIN_MAX_ATTEMPTS", "3"))
-    PIN_LOCKOUT_DURATION_MINUTES = int(os.getenv("PIN_LOCKOUT_DURATION_MINUTES", "5"))
+    PIN_MAX_ATTEMPTS = _env_int("PIN_MAX_ATTEMPTS", 3)
+    PIN_LOCKOUT_DURATION_MINUTES = _env_int("PIN_LOCKOUT_DURATION_MINUTES", 5)
     
     # IP-based Rate Limiting
-    IP_RATELIMIT_THRESHOLD = int(os.getenv("IP_RATELIMIT_THRESHOLD", "100"))
-    IP_RATELIMIT_WINDOW_MINUTES = int(os.getenv("IP_RATELIMIT_WINDOW_MINUTES", "10"))
+    IP_RATELIMIT_THRESHOLD = _env_int("IP_RATELIMIT_THRESHOLD", 100)
+    IP_RATELIMIT_WINDOW_MINUTES = _env_int("IP_RATELIMIT_WINDOW_MINUTES", 10)
     
     # Password Policy
-    PASSWORD_MIN_LENGTH = int(os.getenv("PASSWORD_MIN_LENGTH", "8"))
+    PASSWORD_MIN_LENGTH = _env_int("PASSWORD_MIN_LENGTH", 8)
     PASSWORD_REQUIRE_UPPERCASE = _env_bool("PASSWORD_REQUIRE_UPPERCASE", True)
     PASSWORD_REQUIRE_LOWERCASE = _env_bool("PASSWORD_REQUIRE_LOWERCASE", True)
     PASSWORD_REQUIRE_DIGITS = _env_bool("PASSWORD_REQUIRE_DIGITS", True)
     PASSWORD_REQUIRE_SPECIAL = _env_bool("PASSWORD_REQUIRE_SPECIAL", True)
-    PASSWORD_RESET_OTP_TTL_MINUTES = int(os.getenv("PASSWORD_RESET_OTP_TTL_MINUTES", "10"))
-    PASSWORD_RESET_OTP_MAX_ATTEMPTS = int(os.getenv("PASSWORD_RESET_OTP_MAX_ATTEMPTS", "5"))
+    PASSWORD_RESET_OTP_TTL_MINUTES = _env_int("PASSWORD_RESET_OTP_TTL_MINUTES", 10)
+    PASSWORD_RESET_OTP_MAX_ATTEMPTS = _env_int("PASSWORD_RESET_OTP_MAX_ATTEMPTS", 5)
     
     # Session Security
-    SECURE_SESSION_TIMEOUT_MINUTES = int(os.getenv("SECURE_SESSION_TIMEOUT_MINUTES", "30"))
+    SECURE_SESSION_TIMEOUT_MINUTES = _env_int("SECURE_SESSION_TIMEOUT_MINUTES", 30)
     REQUIRE_CSRF_ON_MUTATION = _env_bool("REQUIRE_CSRF_ON_MUTATION", True)
     CONTENT_SECURITY_POLICY = os.getenv(
         "CONTENT_SECURITY_POLICY",
@@ -103,14 +119,14 @@ class Config:
         "font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     )
     HSTS_ENABLED = _env_bool("HSTS_ENABLED", ENV in {"production", "prod", "staging"})
-    HSTS_MAX_AGE_SECONDS = int(os.getenv("HSTS_MAX_AGE_SECONDS", "31536000"))
+    HSTS_MAX_AGE_SECONDS = _env_int("HSTS_MAX_AGE_SECONDS", 31536000)
     HSTS_INCLUDE_SUBDOMAINS = _env_bool("HSTS_INCLUDE_SUBDOMAINS", True)
     HSTS_PRELOAD = _env_bool("HSTS_PRELOAD", False)
     
     # Audit Logging
     AUDIT_LOGGING_ENABLED = _env_bool("AUDIT_LOGGING_ENABLED", True)
     LOG_SENSITIVE_OPERATIONS = _env_bool("LOG_SENSITIVE_OPERATIONS", True)
-    AUDIT_LOG_RETENTION_DAYS = int(os.getenv("AUDIT_LOG_RETENTION_DAYS", "90"))
+    AUDIT_LOG_RETENTION_DAYS = _env_int("AUDIT_LOG_RETENTION_DAYS", 90)
 
     # ============ OBSERVABILITY SETTINGS ============
 
@@ -121,12 +137,12 @@ class Config:
     # Error Tracking
     ERROR_TRACKING_ENABLED = _env_bool("ERROR_TRACKING_ENABLED", ENV in {"production", "prod", "staging"})
     SENTRY_DSN = os.getenv("SENTRY_DSN", "")
-    SENTRY_SAMPLE_RATE = float(os.getenv("SENTRY_SAMPLE_RATE", "1.0"))
-    SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+    SENTRY_SAMPLE_RATE = _env_float("SENTRY_SAMPLE_RATE", 1.0)
+    SENTRY_TRACES_SAMPLE_RATE = _env_float("SENTRY_TRACES_SAMPLE_RATE", 0.1)
 
     # Metrics Collection
     METRICS_ENABLED = _env_bool("METRICS_ENABLED", True)
-    METRICS_PORT = int(os.getenv("METRICS_PORT", "9090"))
+    METRICS_PORT = _env_int("METRICS_PORT", 9090)
 
     # Health Checks
     HEALTH_CHECK_ENABLED = _env_bool("HEALTH_CHECK_ENABLED", True)
@@ -135,28 +151,29 @@ class Config:
     # Higher = stricter matching, fewer false positives (absent marked as present)
     # Lower = lenient matching, may have false positives
     
-    FACENET_THRESHOLD = float(os.getenv("FACENET_THRESHOLD", "0.60"))
-    DROWSINESS_EAR_THRESHOLD = float(os.getenv("DROWSINESS_EAR_THRESHOLD", "0.25"))
-    DROWSINESS_MAR_THRESHOLD = float(os.getenv("DROWSINESS_MAR_THRESHOLD", "0.60"))
+    FACENET_THRESHOLD = _env_float("FACENET_THRESHOLD", 0.60)
+    DROWSINESS_EAR_THRESHOLD = _env_float("DROWSINESS_EAR_THRESHOLD", 0.25)
+    DROWSINESS_MAR_THRESHOLD = _env_float("DROWSINESS_MAR_THRESHOLD", 0.60)
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
-    PHOTO_MIN_KB = int(os.getenv("PHOTO_MIN_KB", "100"))
-    PHOTO_MAX_KB = int(os.getenv("PHOTO_MAX_KB", "300"))
-    SLOW_REQUEST_THRESHOLD_MS = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "500"))
-    QUERY_CACHE_MAX_ENTRIES = int(os.getenv("QUERY_CACHE_MAX_ENTRIES", "500"))
+    PHOTO_MIN_KB = _env_int("PHOTO_MIN_KB", 100)
+    PHOTO_MAX_KB = _env_int("PHOTO_MAX_KB", 300)
+    SLOW_REQUEST_THRESHOLD_MS = _env_int("SLOW_REQUEST_THRESHOLD_MS", 500)
+    QUERY_CACHE_MAX_ENTRIES = _env_int("QUERY_CACHE_MAX_ENTRIES", 500)
     TASK_QUEUE_ENABLED = _env_bool("TASK_QUEUE_ENABLED", False)
     TASK_QUEUE_REDIS_URL = os.getenv("TASK_QUEUE_REDIS_URL", "redis://localhost:6379/0")
     TASK_QUEUE_NAME = os.getenv("TASK_QUEUE_NAME", "biometric:jobs")
-    TASK_QUEUE_MAX_RETRIES = int(os.getenv("TASK_QUEUE_MAX_RETRIES", "3"))
-    TASK_QUEUE_BASE_BACKOFF_SECONDS = int(os.getenv("TASK_QUEUE_BASE_BACKOFF_SECONDS", "10"))
-    TASK_QUEUE_MAX_BACKOFF_SECONDS = int(os.getenv("TASK_QUEUE_MAX_BACKOFF_SECONDS", "300"))
-    TASK_QUEUE_BACKOFF_JITTER_RATIO = float(os.getenv("TASK_QUEUE_BACKOFF_JITTER_RATIO", "0.25"))
-    TASK_QUEUE_RUNNING_TIMEOUT_SECONDS = int(os.getenv("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", "900"))
-    ACTIVE_SESSION_TIMEOUT_MINUTES = int(os.getenv("ACTIVE_SESSION_TIMEOUT_MINUTES", "180"))
+    TASK_QUEUE_MAX_RETRIES = _env_int("TASK_QUEUE_MAX_RETRIES", 3)
+    TASK_QUEUE_BASE_BACKOFF_SECONDS = _env_int("TASK_QUEUE_BASE_BACKOFF_SECONDS", 10)
+    TASK_QUEUE_MAX_BACKOFF_SECONDS = _env_int("TASK_QUEUE_MAX_BACKOFF_SECONDS", 300)
+    TASK_QUEUE_BACKOFF_JITTER_RATIO = _env_float("TASK_QUEUE_BACKOFF_JITTER_RATIO", 0.25)
+    TASK_QUEUE_RUNNING_TIMEOUT_SECONDS = _env_int("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900)
+    ACTIVE_SESSION_TIMEOUT_MINUTES = _env_int("ACTIVE_SESSION_TIMEOUT_MINUTES", 180)
 
     # Data lifecycle retention defaults
-    UPLOAD_RETENTION_DAYS = int(os.getenv("UPLOAD_RETENTION_DAYS", "14"))
-    DATASET_RETENTION_DAYS = int(os.getenv("DATASET_RETENTION_DAYS", "365"))
-    TRAINER_ARTIFACT_RETENTION_DAYS = int(os.getenv("TRAINER_ARTIFACT_RETENTION_DAYS", "30"))
-    BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
+    UPLOAD_RETENTION_DAYS = _env_int("UPLOAD_RETENTION_DAYS", 14)
+    DATASET_RETENTION_DAYS = _env_int("DATASET_RETENTION_DAYS", 365)
+    TRAINER_ARTIFACT_RETENTION_DAYS = _env_int("TRAINER_ARTIFACT_RETENTION_DAYS", 30)
+    BACKUP_RETENTION_DAYS = _env_int("BACKUP_RETENTION_DAYS", 30)
 
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB max upload
+

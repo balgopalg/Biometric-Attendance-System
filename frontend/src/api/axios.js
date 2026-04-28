@@ -66,6 +66,8 @@ api.interceptors.response.use(
       // Avoid reload loops: /auth/me can naturally return 401 before login.
       if (!isAuthBootstrapCall && !alreadyOnLogin && !isRedirectingOnUnauthorized) {
         isRedirectingOnUnauthorized = true;
+        // Reset the guard after navigation so future 401s can trigger redirect
+        setTimeout(() => { isRedirectingOnUnauthorized = false; }, 3000);
         window.location.assign('/login');
       }
     }

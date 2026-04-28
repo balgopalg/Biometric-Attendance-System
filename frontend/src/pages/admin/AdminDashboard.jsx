@@ -444,10 +444,6 @@ export default function AdminDashboard() {
         <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
       </div>
 
-      <div style={{ marginBottom: 20 }}>
-        <AcademicCalendarPanel scopeDepartmentId={isDepartmentAdmin ? departmentId : ''} scopeDepartmentName={isDepartmentAdmin ? departmentName : ''} compact />
-      </div>
-
       {/* ─── Attendance Summary (primary focus) ─── */}
       <Suspense fallback={<div className="glass-card" style={{ padding: 18, marginTop: 10, minHeight: 460 }} />}>
         <DashboardInsightsPanel
@@ -524,6 +520,10 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <AcademicCalendarPanel scopeDepartmentId={isDepartmentAdmin ? departmentId : ''} scopeDepartmentName={isDepartmentAdmin ? departmentName : ''} compact />
       </div>
 
       {/* ─── Bottom Panel: Recent Dead-Letter Jobs ─── */}

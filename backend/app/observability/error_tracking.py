@@ -3,7 +3,7 @@
 import logging
 import traceback
 from datetime import datetime, timezone
-from flask import request, g, current_app, has_app_context
+from flask import request, g, current_app, has_app_context, jsonify
 from pymongo.errors import PyMongoError
 
 
@@ -177,11 +177,11 @@ class ErrorHandler:
     @staticmethod
     def api_error_response(error, status_code=500, error_id=None):
         """Generate standardized error response."""
-        return {
+        return jsonify({
             "error": str(error),
             "error_id": error_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        }, status_code
+        }), status_code
     
     @staticmethod
     def handle_exception(func):

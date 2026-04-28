@@ -21,11 +21,22 @@ export function useWebcam() {
         await videoRef.current.play();
       }
       setIsActive(true);
+      return true;
     } catch (err) {
-      setError('Camera access denied. Please allow camera permissions.');
+      const name = String(err?.name || '').toLowerCase();
+      if (name.includes('notfound')) {
+        setError('Failed to acquire camera feed: NotFoundError: Requested device not found');
+      } else if (name.includes('notallowed') || name.includes('security')) {
+        setError('Camera access denied. Please allow camera permissions.');
+      } else {
+        setError('Failed to acquire camera feed. Please check your device settings.');
+      }
       setIsActive(false);
+      return false;
     }
   }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   const stopCamera = useCallback(() => {
     if (streamRef.current) {
@@ -67,5 +78,5 @@ export function useWebcam() {
     return () => stopCamera();
   }, [stopCamera]);
 
-  return { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame };
+  return { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame, clearError };
 }

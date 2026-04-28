@@ -5,7 +5,7 @@ Flask-CORS==6.0.0
 Flask-Limiter==3.5.0
 pymongo==4.11.3
 bcrypt==4.2.1
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 Pillow==12.2.0
 pytesseract==0.3.13
 numpy==1.26.4

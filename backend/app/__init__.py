@@ -1,6 +1,7 @@
 """Flask application factory."""
 
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 from flask import Flask, g, request
@@ -49,7 +50,7 @@ def create_app(config_class=Config, seed_default_admin=False):
             current_session_version = int(user.get("session_version", 1) or 1)
             return token_session_version != current_session_version
         except Exception:
-            return False
+            return True  # Fail-closed: deny access if revocation check fails
 
     cors.init_app(
         app,
@@ -109,13 +110,13 @@ def create_app(config_class=Config, seed_default_admin=False):
 
     @app.before_request
     def _start_request_timer():
-        g.request_started_at = __import__("time").perf_counter()
+        g.request_started_at = time.perf_counter()
 
     @app.after_request
     def _log_request_duration(response):
         started_at = getattr(g, "request_started_at", None)
         if started_at is not None:
-            elapsed_ms = round((__import__("time").perf_counter() - started_at) * 1000, 2)
+            elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
             response.headers["X-Response-Time-Ms"] = str(elapsed_ms)
             threshold_ms = int(app.config.get("SLOW_REQUEST_THRESHOLD_MS", 500))
             if elapsed_ms >= threshold_ms and request.endpoint:
@@ -314,14 +315,23 @@ def _ensure_indexes(mongo, config):
     password_reset_otps = client[config["MONGO_DB_AUTH"]]["password_reset_otps"]
     _create_index_safe(password_reset_otps, [("expires_at", ASCENDING)], name="ix_password_reset_otps_expires_at", expireAfterSeconds=0)
 
+    # Leave requests: compound index for get_approved_leave_dates query pattern
+    leave_requests = client[config["MONGO_DB_ACADEMIC"]]["leave_requests"]
+    _create_index_safe(leave_requests, [("user_id", ASCENDING), ("status", ASCENDING)], name="ix_leave_requests_user_status")
+    _create_index_safe(leave_requests, [("created_at", DESCENDING)], name="ix_leave_requests_created")
+
 
 def _seed_admin(mongo):
     """Create a default super admin account only when explicit seed credentials are provided."""
     import bcrypt
+    import logging
 
-    admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "superadmin@system.com").strip().lower()
-    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "admin123")
+    admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "").strip().lower()
+    admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
     if not admin_email or not admin_password:
+        logging.getLogger(__name__).warning(
+            "DEFAULT_ADMIN_EMAIL or DEFAULT_ADMIN_PASSWORD not set; skipping admin seed."
+        )
         return
 
     users = get_collection("auth", "users")
@@ -338,7 +348,7 @@ def _seed_admin(mongo):
                 "department": "Administration",
                 "department_id": None,
                 "session_version": 1,
-                "created_at": __import__("datetime").datetime.now(timezone.utc),
+                "created_at": datetime.now(timezone.utc),
             }
         )
 

@@ -17,7 +17,7 @@ from app.models.attendance import log_attendance
 from app.models.course import get_course_by_id
 from app.models.enrollment import get_profiles_for_paper, get_profile_by_user
 from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
-from app.models.user import find_user_by_id, set_user_pin, verify_user_pin
+from app.models.user import find_user_by_id, set_user_pin, verify_user_pin, get_users_by_ids
 from app.services.face_detection import get_detector
 from app.services.face_recognition import (
     generate_embedding,
@@ -25,7 +25,7 @@ from app.services.face_recognition import (
     find_best_match_cached,
     prepare_profile_candidates,
 )
-from app.services.capture_upload import save_classroom_upload_bundle
+from app.services.capture_upload import build_session_upload_folder, save_classroom_upload_bundle
 from app.security.brute_force_protection import BruteForceProtector
 from app.security.rate_limiter import limiter
 from app.observability.logging import attendance_logger
@@ -264,9 +264,17 @@ def _replace_session_attendance(session_id, paper_id, lecturer_id, user_ids, met
 
 def _session_review_payload(session_doc):
     present_ids = session_doc.get("user_ids", [])
+    profiles = get_profiles_for_paper(session_doc.get("paper_id"))
+
+    # Batch-fetch all users in one query to avoid N+1
+    all_uids = list(set(
+        list(present_ids) + [p.get("user_id") for p in profiles if p.get("user_id")]
+    ))
+    users_map = get_users_by_ids(all_uids)
+
     present_students = []
     for uid in present_ids:
-        u = find_user_by_id(uid)
+        u = users_map.get(uid)
         if u:
             present_students.append({
                 "user_id": uid,
@@ -274,11 +282,10 @@ def _session_review_payload(session_doc):
                 "email": u.get("email", ""),
             })
 
-    profiles = get_profiles_for_paper(session_doc.get("paper_id"))
     candidates = []
     for profile in profiles:
         uid = profile.get("user_id")
-        u = find_user_by_id(uid)
+        u = users_map.get(uid)
         if u:
             candidates.append({
                 "user_id": uid,
@@ -380,6 +387,31 @@ def _clear_cached_session_candidates(session_id):
 
 def _extract_classroom_faces(img_rgb, img_bgr=None):
     """Extract classroom face crops using MediaPipe first, then Haar cascade fallback."""
+    def _resize_with_letterbox(image, size=160):
+        if image is None or not hasattr(image, "shape"):
+            return None
+        h, w = image.shape[:2]
+        if h <= 0 or w <= 0:
+            return None
+        scale = size / float(max(h, w))
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
+        resized = cv2.resize(image, (new_w, new_h), interpolation=interp)
+        top = (size - new_h) // 2
+        bottom = size - new_h - top
+        left = (size - new_w) // 2
+        right = size - new_w - left
+        return cv2.copyMakeBorder(
+            resized,
+            top,
+            bottom,
+            left,
+            right,
+            cv2.BORDER_CONSTANT,
+            value=(0, 0, 0),
+        )
+
     detector = get_detector()
     faces = detector.detect_faces(img_rgb) or []
 
@@ -409,7 +441,9 @@ def _extract_classroom_faces(img_rgb, img_bgr=None):
         crop = img_rgb[y1:y2, x1:x2]
         if crop.size == 0:
             continue
-        crop_resized = cv2.resize(crop, (160, 160))
+        crop_resized = _resize_with_letterbox(crop, size=160)
+        if crop_resized is None:
+            continue
         fallback_faces.append({
             "bbox": (x, y, w, h),
             "confidence": 1.0,
@@ -439,7 +473,9 @@ def _extract_classroom_faces(img_rgb, img_bgr=None):
         crop = img_rgb[y1:y2, x1:x2]
         if crop.size == 0:
             continue
-        crop_resized = cv2.resize(crop, (160, 160))
+        crop_resized = _resize_with_letterbox(crop, size=160)
+        if crop_resized is None:
+            continue
         people_faces.append({
             "bbox": (x, y, w, h),
             "confidence": 0.5,
@@ -547,8 +583,7 @@ def recognize_frame(user):
         img = decode_base64_image(frame_b64)
     except ValueError as e:
         return jsonify({"error": f"Invalid image data: {e}"}), 400
-    detector = get_detector()
-    faces = detector.detect_faces(img)
+    faces = _extract_classroom_faces(img)
 
     if not faces:
         return jsonify({"new_matches": [], "faces_detected": 0, "candidates_count": 0, "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60), "best_similarity_seen": None})
@@ -661,17 +696,32 @@ def recognize_image(user):
         )
         return jsonify({"error": f"Failed to process image: {str(e)}"}), 400
     
-    detector = get_detector()
-    faces = detector.detect_faces(img)
+    faces = _extract_classroom_faces(img, img_bgr=img_raw)
 
     uploads_dir = current_app.config.get("UPLOADS_ABSOLUTE_PATH") or os.path.abspath(
         os.path.join(current_app.root_path, "..", current_app.config.get("UPLOAD_FOLDER", "uploads"))
     )
+
+    session_folder = session.get("upload_folder")
+    if not session_folder:
+        session_started_at = session.get("started_at")
+        session_folder, _ = build_session_upload_folder(
+            subject_label,
+            uploads_dir=uploads_dir,
+            session_started_at=session_started_at,
+        )
+        _active_sessions_collection().update_one(
+            {"session_id": str(session_id)},
+            {"$set": {"upload_folder": session_folder}},
+        )
+
     saved_bundle = save_classroom_upload_bundle(
         subject_label=subject_label,
         image=img_raw,
         face_crops=[face["crop"] for face in faces],
         uploads_dir=uploads_dir,
+        folder_path=session_folder,
+        session_started_at=session.get("started_at"),
     )
 
     attendance_logger.debug(

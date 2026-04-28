@@ -60,7 +60,11 @@ def get_all_papers(fields: Optional[List[str]] = None, department_id: Any = None
 
 def get_paper_by_id(paper_id: str) -> Optional[dict]:
     papers = get_collection("academic", "papers")
-    return papers.find_one({"_id": ObjectId(paper_id)})
+    try:
+        oid = ObjectId(paper_id)
+    except (InvalidId, Exception):
+        return None
+    return papers.find_one({"_id": oid})
 
 
 def get_paper_by_code(code: str) -> Optional[dict]:
@@ -81,13 +85,21 @@ def get_papers_by_lecturer(lecturer_id: str) -> List[dict]:
 
 def update_paper(paper_id: str, fields: dict) -> Optional[dict]:
     papers = get_collection("academic", "papers")
-    papers.update_one({"_id": ObjectId(paper_id)}, {"$set": fields})
+    try:
+        oid = ObjectId(paper_id)
+    except (InvalidId, Exception):
+        return None
+    papers.update_one({"_id": oid}, {"$set": fields})
     return get_paper_by_id(paper_id)
 
 
 def delete_paper(paper_id: str) -> None:
     papers = get_collection("academic", "papers")
-    papers.delete_one({"_id": ObjectId(paper_id)})
+    try:
+        oid = ObjectId(paper_id)
+    except (InvalidId, Exception):
+        return
+    papers.delete_one({"_id": oid})
 
 
 def bulk_assign_lecturer(paper_ids: List[str], lecturer_id: str) -> None:

@@ -133,10 +133,6 @@ export default function LecturerDashboard() {
         </div>
       </div>
 
-      <div style={{ marginBottom: 28 }}>
-        <AcademicCalendarPanel compact />
-      </div>
-
       <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Your Papers</h3>
       <div className="lecturer-papers-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
         {papers.map((p) => (
@@ -214,6 +210,10 @@ export default function LecturerDashboard() {
           <button className="btn-primary" onClick={handleSetPin}>Save PIN</button>
         </div>
       </Modal>
+
+      <div style={{ marginTop: 28 }}>
+        <AcademicCalendarPanel compact />
+      </div>
     </div>
   );
 }

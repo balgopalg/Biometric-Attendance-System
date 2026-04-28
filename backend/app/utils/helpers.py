@@ -6,7 +6,39 @@ from datetime import datetime, timezone
 
 import cv2
 import numpy as np
+from bson import ObjectId
 from PIL import Image, ImageOps
+
+
+def _as_text(value) -> str:
+    return str(value or "").strip()
+
+
+def _to_int(value, default=0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _as_text(value).lower() in {"1", "true", "yes", "y"}
+
+
+def _id_variants(value) -> list:
+    variants = []
+    text = _as_text(value)
+    if text:
+        variants.append(text)
+    try:
+        oid = ObjectId(text)
+        if oid not in variants:
+            variants.append(oid)
+    except Exception:
+        pass  # nosec B110
+    return variants
 
 
 def decode_image_bytes(img_bytes: bytes) -> np.ndarray:

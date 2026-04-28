@@ -169,8 +169,12 @@ def find_best_match_cached(query_embedding: list, prepared_candidates: list, thr
 
 
 def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6):
-    """
-    Compare a query embedding against all stored student profiles.
+    """Compare a query embedding against all stored student profiles.
+
+    .. deprecated::
+        Prefer ``find_best_match_cached`` which pre-normalizes embeddings for
+        O(1) cosine similarity per comparison. This function re-normalizes on
+        every call and should only be used for single-profile verification.
 
     Parameters
     ----------

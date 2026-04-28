@@ -17,6 +17,7 @@ fails.
 
 import logging
 import os
+from html import escape as html_escape
 from threading import Thread
 
 logger = logging.getLogger(__name__)
@@ -26,11 +27,7 @@ logger = logging.getLogger(__name__)
 _YAGMAIL_READY = False
 
 
-def _env_bool(name, default=False):
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+from app.config import _env_bool
 
 try:
     import yagmail
@@ -75,7 +72,10 @@ def is_email_delivery_enabled() -> bool:
 # ─── HTML templates ──────────────────────────────────────────────────────────
 
 def _welcome_html(name: str, email: str, temp_password: str, role: str) -> str:
-    role_label = role.capitalize()
+    safe_name = html_escape(name)
+    safe_email = html_escape(email)
+    safe_pw = html_escape(temp_password)
+    role_label = html_escape(role.capitalize())
     login_url = _get_login_url()
     return f"""\
 <!DOCTYPE html>
@@ -113,7 +113,7 @@ def _welcome_html(name: str, email: str, temp_password: str, role: str) -> str:
           <tr>
             <td class="pad" style="padding:30px 34px 32px;">
               <p style="margin:0 0 22px;font-size:16px;line-height:1.7;color:#334155;">
-                Hi <strong>{name}</strong>,<br>
+                Hi <strong>{safe_name}</strong>,<br>
                 Your <strong>{role_label}</strong> account is now active. Use the credentials below to sign in and complete your first-time security setup.
               </p>
 
@@ -121,10 +121,10 @@ def _welcome_html(name: str, email: str, temp_password: str, role: str) -> str:
                 <tr>
                   <td style="padding:22px;">
                     <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:0.12em;color:#64748b;text-transform:uppercase;">User ID</p>
-                    <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#0f172a;word-break:break-all;">{email}</p>
+                    <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#0f172a;word-break:break-all;">{safe_email}</p>
 
                     <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:0.12em;color:#64748b;text-transform:uppercase;">Temporary Key</p>
-                    <p class="key" style="margin:0;font-family:'Courier New',Courier,monospace;font-size:20px;font-weight:800;color:#2563eb;letter-spacing:0.9px;word-break:break-all;">{temp_password}</p>
+                    <p class="key" style="margin:0;font-family:'Courier New',Courier,monospace;font-size:20px;font-weight:800;color:#2563eb;letter-spacing:0.9px;word-break:break-all;">{safe_pw}</p>
                   </td>
                 </tr>
               </table>
@@ -166,7 +166,10 @@ def _welcome_html(name: str, email: str, temp_password: str, role: str) -> str:
 
 
 def _password_reset_html(name: str, email: str, temp_password: str, role: str) -> str:
-    role_label = role.capitalize()
+    safe_name = html_escape(name)
+    safe_email = html_escape(email)
+    safe_pw = html_escape(temp_password)
+    role_label = html_escape(role.capitalize())
     login_url = _get_login_url()
     return f"""\
 <!DOCTYPE html>
@@ -204,7 +207,7 @@ def _password_reset_html(name: str, email: str, temp_password: str, role: str) -
           <tr>
             <td class="pad" style="padding:30px 34px 32px;">
               <p style="margin:0 0 22px;font-size:16px;line-height:1.7;color:#334155;">
-                Hi <strong>{name}</strong>,<br>
+                Hi <strong>{safe_name}</strong>,<br>
                 Your <strong>{role_label}</strong> account password has been reset. Sign in with the temporary key below, then set a new permanent password.
               </p>
 
@@ -212,10 +215,10 @@ def _password_reset_html(name: str, email: str, temp_password: str, role: str) -
                 <tr>
                   <td style="padding:22px;">
                     <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:0.12em;color:#64748b;text-transform:uppercase;">User ID</p>
-                    <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#0f172a;word-break:break-all;">{email}</p>
+                    <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#0f172a;word-break:break-all;">{safe_email}</p>
 
                     <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:0.12em;color:#64748b;text-transform:uppercase;">Reset Key</p>
-                    <p class="key" style="margin:0;font-family:'Courier New',Courier,monospace;font-size:20px;font-weight:800;color:#dc2626;letter-spacing:0.9px;word-break:break-all;">{temp_password}</p>
+                    <p class="key" style="margin:0;font-family:'Courier New',Courier,monospace;font-size:20px;font-weight:800;color:#dc2626;letter-spacing:0.9px;word-break:break-all;">{safe_pw}</p>
                   </td>
                 </tr>
               </table>
@@ -257,6 +260,8 @@ def _password_reset_html(name: str, email: str, temp_password: str, role: str) -
 
 
 def _password_recovery_otp_html(name: str, otp: str, expires_in_minutes: int) -> str:
+    safe_name = html_escape(name)
+    safe_otp = html_escape(otp)
     login_url = _get_login_url()
     return f"""\
 <!DOCTYPE html>
@@ -279,9 +284,9 @@ def _password_recovery_otp_html(name: str, otp: str, expires_in_minutes: int) ->
           </tr>
           <tr>
             <td style="padding:28px 30px;">
-              <p style="margin:0 0 16px;color:#334155;font-size:16px;line-height:1.6;">Hi <strong>{name}</strong>, use this OTP to reset your password:</p>
+              <p style="margin:0 0 16px;color:#334155;font-size:16px;line-height:1.6;">Hi <strong>{safe_name}</strong>, use this OTP to reset your password:</p>
               <div style="margin:0 0 18px;padding:16px;border:1px dashed #93c5fd;border-radius:10px;background:#eff6ff;text-align:center;">
-                <span style="font-family:'Courier New',monospace;font-size:34px;letter-spacing:8px;color:#1d4ed8;font-weight:800;">{otp}</span>
+                <span style="font-family:'Courier New',monospace;font-size:34px;letter-spacing:8px;color:#1d4ed8;font-weight:800;">{safe_otp}</span>
               </div>
               <p style="margin:0 0 12px;color:#475569;font-size:14px;line-height:1.6;">This OTP expires in <strong>{expires_in_minutes} minutes</strong> and can be used only once.</p>
               <p style="margin:0;color:#64748b;font-size:13px;line-height:1.6;">If you did not request this, you can safely ignore this email.</p>
@@ -301,6 +306,8 @@ def _password_recovery_otp_html(name: str, otp: str, expires_in_minutes: int) ->
 
 
 def _shortage_alert_html(name: str, paper_name: str, percentage: float, classes_needed: int) -> str:
+    safe_name = html_escape(name)
+    safe_paper = html_escape(paper_name)
     login_url = _get_login_url()
     return f"""\
 <!DOCTYPE html>
@@ -336,8 +343,8 @@ def _shortage_alert_html(name: str, paper_name: str, percentage: float, classes_
           <tr>
             <td class="pad" style="padding:30px 34px 32px;">
               <p style="margin:0 0 22px;font-size:16px;line-height:1.7;color:#334155;">
-                Hi <strong>{name}</strong>,<br>
-                This is an automated notification regarding your attendance for <strong>{paper_name}</strong>.
+                Hi <strong>{safe_name}</strong>,<br>
+                This is an automated notification regarding your attendance for <strong>{safe_paper}</strong>.
               </p>
 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="18" border="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;margin-bottom:24px;">

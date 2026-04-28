@@ -1,4 +1,14 @@
-"""Admin CRUD routes — Courses, Papers, Lecturers, Students, Enrollment, Audit."""
+"""Admin CRUD routes — Courses, Papers, Lecturers, Students, Enrollment, Audit.
+
+NOTE: This is currently a "god file" (>6,000 lines). Future refactoring should 
+decompose this into domain-specific blueprints:
+- `admin_courses.py`
+- `admin_papers.py` 
+- `admin_lecturers.py`
+- `admin_students.py`
+- `admin_attendance.py`
+- `admin_jobs.py`
+"""
 
 import re
 import random
@@ -12,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 import cv2
 import numpy as np
 from threading import Lock, Thread
+from collections import OrderedDict
 from uuid import uuid4
 
 from flask import Blueprint, request, jsonify, current_app, send_file, has_app_context
@@ -86,7 +97,15 @@ from app.models.department import (
     update_department,
     delete_department as soft_delete_department,
 )
-from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image, decode_image_bytes
+from app.utils.helpers import (
+    sanitise_mongo_doc, 
+    sanitise_many, 
+    decode_base64_image, 
+    decode_image_bytes,
+    _to_int,
+    _as_text,
+    _id_variants
+)
 from app.utils.timezone import india_timestamp_token
 from app.utils.validation import validate_password_strength
 from app.services.email_service import (
@@ -98,7 +117,7 @@ from app.services.email_service import (
 
 admin_bp = Blueprint("admin", __name__)
 
-_QUERY_CACHE = {}
+_QUERY_CACHE = OrderedDict()
 _QUERY_CACHE_LOCK = Lock()
 _QUERY_CACHE_TTL_SECONDS = 30
 _QUERY_CACHE_MAX_ENTRIES_DEFAULT = 500
@@ -180,6 +199,8 @@ def _cache_get(key):
         if item.get("expires_at", 0) <= now:
             _QUERY_CACHE.pop(key, None)
             return None
+        # Move to end on access for LRU ordering
+        _QUERY_CACHE.move_to_end(key)
         return item.get("value")
 
 
@@ -193,18 +214,15 @@ def _cache_set(key, value, ttl_seconds):
             max_entries = _QUERY_CACHE_MAX_ENTRIES_DEFAULT
 
     with _QUERY_CACHE_LOCK:
-        # Evict the oldest cache entries first to keep memory bounded.
+        # O(1) LRU eviction using OrderedDict
         while len(_QUERY_CACHE) >= max_entries:
-            oldest_key = min(
-                _QUERY_CACHE,
-                key=lambda cache_key: _QUERY_CACHE.get(cache_key, {}).get("expires_at", float("inf")),
-            )
-            _QUERY_CACHE.pop(oldest_key, None)
+            _QUERY_CACHE.popitem(last=False)
 
         _QUERY_CACHE[key] = {
             "value": value,
             "expires_at": time.monotonic() + ttl,
         }
+        _QUERY_CACHE.move_to_end(key)
 
 
 def _cache_payload(key, ttl_seconds, builder):
@@ -622,22 +640,12 @@ def _launch_background_job(app, job_type, payload):
     return job_id
 
 
-def _as_text(value):
-    return str(value or "").strip()
-
-
 def _normalise_year(value):
     if value is None:
         return ""
     text = _as_text(value)
     return text
 
-
-def _to_int(value, default=0):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _to_float(value, default=0.0):
@@ -658,17 +666,6 @@ def _as_object_id(value):
     except Exception:
         return None
 
-
-def _id_variants(value):
-    """Return equivalent ID representations to handle mixed string/ObjectId legacy data."""
-    variants = []
-    text = _as_text(value)
-    if text:
-        variants.append(text)
-    oid = _as_object_id(value)
-    if oid is not None and oid not in variants:
-        variants.append(oid)
-    return variants
 
 
 def _normalise_filter_ids(filter_doc):

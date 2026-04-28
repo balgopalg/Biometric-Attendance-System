@@ -2,6 +2,7 @@
 
 import logging
 import os
+import uuid
 
 import cv2
 from flask import current_app, has_app_context
@@ -201,20 +202,40 @@ def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", max
     return saved_paths
 
 
-def save_classroom_upload_bundle(subject_label, image, face_crops, uploads_dir="uploads"):
-    """Save classroom original and extracted face crops into uploads/<subject>_<timestamp>/ in grayscale."""
+def build_session_upload_folder(subject_label, uploads_dir="uploads", session_started_at=None):
+    """Return a stable folder path for a session based on subject + session start time."""
+    safe_subject = _safe_name(subject_label)
+    session_token = india_timestamp_token(session_started_at)
+    folder_name = f"{safe_subject}_{session_token}"
+    folder_path = os.path.join(uploads_dir, folder_name)
+    return folder_path, folder_name
+
+
+def save_classroom_upload_bundle(
+    subject_label,
+    image,
+    face_crops,
+    uploads_dir="uploads",
+    folder_path=None,
+    session_started_at=None,
+):
+    """Save classroom original and face crops into a session folder in grayscale."""
     if image is None:
         raise ValueError("image is required")
 
     _ensure_directory(uploads_dir)
 
-    safe_subject = _safe_name(subject_label)
-    timestamp = india_timestamp_token()
-    folder_name = f"{safe_subject}_{timestamp}"
-    folder_path = os.path.join(uploads_dir, folder_name)
+    if not folder_path:
+        folder_path, _folder_name = build_session_upload_folder(
+            subject_label,
+            uploads_dir=uploads_dir,
+            session_started_at=session_started_at,
+        )
+
     _ensure_directory(folder_path)
 
-    original_path = os.path.join(folder_path, "original.jpg")
+    upload_token = f"{india_timestamp_token()}_{uuid.uuid4().hex[:6]}"
+    original_path = os.path.join(folder_path, f"original_{upload_token}.jpg")
     image_to_save = _to_grayscale_image(image)
 
     try:
@@ -229,7 +250,7 @@ def save_classroom_upload_bundle(subject_label, image, face_crops, uploads_dir="
 
         crop_to_save = _to_grayscale_image(crop)
 
-        face_path = os.path.join(folder_path, f"face_{idx:02d}.jpg")
+        face_path = os.path.join(folder_path, f"face_{upload_token}_{idx:02d}.jpg")
         try:
             _save_bounded_jpeg(face_path, crop_to_save)
         except Exception as exc:

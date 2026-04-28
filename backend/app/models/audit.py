@@ -1,6 +1,8 @@
 """Audit trail logger."""
 
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional, Tuple
+
 from bson import ObjectId
 from flask import g, has_request_context
 from pymongo import ReturnDocument
@@ -10,7 +12,6 @@ from app.extensions import get_collection
 ROLLBACK_WINDOW_HOURS = 24
 
 
-from typing import Any, Optional, Tuple
 
 def log_action(
     action: Optional[str] = None,

@@ -2,7 +2,6 @@ import threading
 import mediapipe as mp
 import numpy as np
 from scipy.spatial import distance as dist
-from app.config import Config
 
 class DrowsinessDetector:
     """Service to detect drowsiness (eyes closed or yawning) from an RGB frame."""
@@ -84,8 +83,11 @@ def get_drowsiness_detector() -> DrowsinessDetector:
     if _detector is None:
         with _detector_lock:
             if _detector is None:
+                from flask import current_app
+                ear = current_app.config.get("DROWSINESS_EAR_THRESHOLD", 0.25)
+                mar = current_app.config.get("DROWSINESS_MAR_THRESHOLD", 0.60)
                 _detector = DrowsinessDetector(
-                    ear_threshold=Config.DROWSINESS_EAR_THRESHOLD,
-                    mar_threshold=Config.DROWSINESS_MAR_THRESHOLD
+                    ear_threshold=ear,
+                    mar_threshold=mar,
                 )
     return _detector

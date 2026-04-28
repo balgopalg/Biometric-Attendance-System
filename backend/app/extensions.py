@@ -1,12 +1,17 @@
 """Shared Flask extensions — initialised once, imported everywhere."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from flask import current_app
 from flask_pymongo import PyMongo
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
-from pymongo.database import Database
-from pymongo.collection import Collection
+
+if TYPE_CHECKING:
+    from pymongo.database import Database
+    from pymongo.collection import Collection
 
 mongo = PyMongo()
 jwt = JWTManager()

@@ -25,13 +25,16 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
     const newFiles = [...selectedFiles, ...validFiles].slice(0, 5);
     setSelectedFiles(newFiles);
 
-    Promise.all(newFiles.map(file => {
+    // Only read newly added files, then merge with existing previews
+    Promise.all(validFiles.map(file => {
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve({ name: file.name, url: e.target.result });
         reader.readAsDataURL(file);
       });
-    })).then(results => setPreviews(results));
+    })).then(newPreviews => {
+      setPreviews(prev => [...prev, ...newPreviews].slice(0, 5));
+    });
   };
 
   const handleDrag = (e) => {

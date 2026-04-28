@@ -2,46 +2,49 @@
 
 This folder is the single source of truth for project documentation.
 
-## Latest Updates
-
-- Timetable workflows documented for admin generation/editing, lecturer view, and student view.
-- Export documentation now covers both client-side table export and backend attendance matrix export endpoints.
-- Testing docs aligned with current execution baseline (backend `pytest`, frontend Playwright over HTTPS with serial-safe config).
-
 ## Structure
 
-- governance/
-  - API lifecycle, workflow standards, release policy, and compliance baseline.
-- operations/
-  - Deployment, docker runbook, CLI runbook, operations manual, incident response.
-- security/
-  - Security hardening guide, implementation summary, and quick reference.
-- testing/
-  - End-to-end testing strategy, quickstart, backend and frontend test guides.
-- observability/
-  - Observability architecture, quickstart, and implementation summary.
-- backend/
-  - Backend-specific lifecycle and migration documents.
-- frontend/
-  - Frontend-specific setup and operational notes.
-- reports/
-  - Delivery summaries, readiness checklist, and project review records.
-- EXCEL_EXPORT_GUIDE.md
-  - Frontend export utility usage and backend matrix export integration.
+| Directory | Contents |
+|---|---|
+| `governance/` | API lifecycle, workflow standards, release policy, compliance baseline |
+| `operations/` | Deployment guide, Docker runbook, CLI reference, incident response |
+| `security/` | Security hardening guide, implementation summary, quick reference |
+| `testing/` | E2E testing strategy, backend/frontend test guides |
+| `observability/` | Observability architecture, metrics, structured logging |
+| `backend/` | Backend lifecycle and migration documents |
+| `frontend/` | Frontend setup and operational notes |
+| `reports/` | Delivery summaries, readiness checklist, project reviews |
 
-## Start Here
+## Key Documents
 
-1. System operators: /docs/operations/SYSTEM_OPERATIONS_MANUAL.md
-2. API integrators: /docs/governance/API_WORKFLOW_GUIDE.md
-3. Deployment owners: /docs/operations/DEPLOYMENT_PRODUCTION.md
-4. Security reviewers: /docs/security/SECURITY_HARDENING.md
-5. QA engineers: /docs/testing/TESTING_QUICKSTART.md
-6. Frontend implementers: /docs/frontend/FRONTEND_README.md
-7. Export workflows: /docs/EXCEL_EXPORT_GUIDE.md
+| Audience | Document |
+|---|---|
+| System operators | `operations/SYSTEM_OPERATIONS_MANUAL.md` |
+| API integrators | `governance/API_WORKFLOW_GUIDE.md` |
+| Deployment owners | `operations/DEPLOYMENT_PRODUCTION.md` |
+| Security reviewers | `security/SECURITY_HARDENING.md` |
+| QA engineers | `testing/TESTING_QUICKSTART.md` |
+| Frontend implementers | `frontend/FRONTEND_README.md` |
+| Export workflows | `EXCEL_EXPORT_GUIDE.md` |
+
+## API Specifications
+
+- `openapi.yaml` — Core API contract (routes, schemas)
+- `openapi.full.yaml` — Extended API contract with all endpoints
+
+## Recent Updates (April 2026)
+
+- All 21 code review issues resolved (security, performance, technical debt)
+- MongoDB authentication enabled in Docker Compose
+- Email templates hardened against XSS via `html.escape()`
+- N+1 query patterns eliminated in session review endpoints
+- LRU-bounded caching for profile and query caches
+- Leave management routes added for students and admins
+- 4-tier RBAC documentation updated (`student → lecturer → department_admin → super_admin`)
 
 ## Documentation Standards
 
-- Keep all Markdown documentation under /docs.
-- Prefer absolute repo-root links like /docs/<section>/<file>.md to avoid broken relative links.
-- Keep implementation scripts and runtime assets outside /docs.
-- Keep operational commands synchronized with /docs/operations/CLI_COMMAND_RUNBOOK.md.
+- Keep all Markdown documentation under `/docs`
+- Use absolute repo-root links like `/docs/<section>/<file>.md`
+- Keep implementation scripts and runtime assets outside `/docs`
+- Keep operational commands synchronized with `operations/CLI_COMMAND_RUNBOOK.md`

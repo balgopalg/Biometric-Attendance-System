@@ -2,6 +2,8 @@
 
 
 import json
+import logging
+import logging.handlers
 import os
 import shutil
 from datetime import datetime, timezone
@@ -29,21 +31,43 @@ _DEDUPED_BIOMETRIC_ACTIONS = {
     "student_profiles_bulk_read",
 }
 
+# Fix #10: Use Python logging with RotatingFileHandler instead of
+# synchronous open/write/close on every profile read.
+_noisy_logger = logging.getLogger("biometric.noisy_profile")
+_noisy_logger.setLevel(logging.DEBUG)
+_noisy_logger.propagate = False  # Don't send to root logger
+_noisy_handler_initialized = False
 
-def _append_noisy_profile_log(payload: dict) -> None:
-    """Persist high-volume profile access telemetry to backend/logs/logs.txt."""
+
+def _ensure_noisy_handler():
+    """Lazily attach a RotatingFileHandler once the app context is available."""
+    global _noisy_handler_initialized
+    if _noisy_handler_initialized or not has_app_context():
+        return
     try:
         backend_dir = os.path.dirname(current_app.root_path)
         logs_dir = os.path.join(backend_dir, "logs")
         os.makedirs(logs_dir, exist_ok=True)
         logs_file = os.path.join(logs_dir, "logs.txt")
+        handler = logging.handlers.RotatingFileHandler(
+            logs_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        )
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        _noisy_logger.addHandler(handler)
+        _noisy_handler_initialized = True
+    except Exception:
+        pass  # Fail silently — logging should never break the app
 
+
+def _append_noisy_profile_log(payload: dict) -> None:
+    """Persist high-volume profile access telemetry via rotating log handler."""
+    try:
+        _ensure_noisy_handler()
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{stamp}] {json.dumps(payload, default=str, separators=(',', ':'))}"
-        with open(logs_file, "a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        _noisy_logger.debug(line)
     except Exception:
-        current_app.logger.debug("noisy profile file logging skipped", exc_info=True)
+        pass  # Telemetry logging should never fail the request
 
 
 def _current_env() -> str:

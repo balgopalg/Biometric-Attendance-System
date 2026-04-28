@@ -7,7 +7,8 @@ from bson import ObjectId
 
 from app.extensions import get_collection
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_mongo_doc, sanitise_many
+from app.utils.helpers import sanitise_mongo_doc, sanitise_many, _to_int, _as_text, _to_bool, _id_variants
+from app.repositories import find_many_by_ids
 from app.models.enrollment import get_profile_by_user
 from app.models.paper import get_paper_by_id
 from app.models.course import get_course_by_id
@@ -39,39 +40,49 @@ def _format_datetime_india(value, with_time=True):
     return local_dt.strftime("%d/%m/%Y, %H:%M:%S") if with_time else local_dt.strftime("%d/%m/%Y")
 
 
-# Leave-math is now handled by centralized functions in app.models.attendance
-# or handled inline using those helpers.
 
 
-def _to_int(value, default=0):
+
+def _paper_id_variants(paper_id_text):
+    """Return [str, ObjectId] variants for a paper_id."""
+    variants = [paper_id_text]
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _as_text(value):
-    return str(value or "").strip()
-
-
-def _to_bool(value):
-    if isinstance(value, bool):
-        return value
-    return _as_text(value).lower() in {"1", "true", "yes", "y"}
-
-
-def _id_variants(value):
-    variants = []
-    text = _as_text(value)
-    if text:
-        variants.append(text)
-    try:
-        oid = ObjectId(text)
-        if oid not in variants:
-            variants.append(oid)
+        variants.append(ObjectId(paper_id_text))
     except Exception:
         pass  # nosec B110
     return variants
+
+
+def _compute_paper_attendance(uid, paper_id_text, sessions_col, leave_dates):
+    """Compute attendance for a single paper. Returns (attended, effective_total, leave_sessions, sessions)."""
+    paper_id_variants = _paper_id_variants(paper_id_text)
+
+    committed_sessions = list(
+        sessions_col.find(
+            {"paper_id": {"$in": paper_id_variants}},
+            {"session_id": 1, "user_ids": 1, "committed_at": 1,
+             "last_updated_at": 1, "finalized": 1},
+        )
+    )
+    committed_sessions.sort(
+        key=lambda d: d.get("committed_at") or d.get("last_updated_at") or datetime.min,
+        reverse=True,
+    )
+
+    attended = 0
+    effective_total = 0
+    leave_sessions = 0
+
+    for sess in committed_sessions:
+        sess_date = session_date_str(sess)
+        if leave_dates and sess_date and sess_date in leave_dates:
+            leave_sessions += 1
+            continue
+        effective_total += 1
+        if uid in [str(sid) for sid in (sess.get("user_ids") or [])]:
+            attended += 1
+
+    return attended, effective_total, leave_sessions, committed_sessions
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
@@ -88,10 +99,13 @@ def my_profile(user):
     if profile.get("course_id"):
         course = get_course_by_id(profile.get("course_id"))
 
+    enrolled = profile.get("enrolled_papers", [])
+    paper_map = find_many_by_ids("academic", "papers", enrolled)
+
     subjects = []
     paper_semesters = []
-    for pid in profile.get("enrolled_papers", []):
-        paper = get_paper_by_id(pid)
+    for pid in enrolled:
+        paper = paper_map.get(str(pid))
         if not paper:
             continue
         sem = _to_int(paper.get("semester"), 0) or None
@@ -99,7 +113,7 @@ def my_profile(user):
             paper_semesters.append(sem)
         subjects.append(
             {
-                "paper_id": pid,
+                "paper_id": str(pid),
                 "paper_name": paper.get("name", ""),
                 "paper_code": paper.get("code", ""),
                 "semester": sem,
@@ -124,6 +138,7 @@ def my_profile(user):
                 "academic_year": profile.get("academic_year") or profile.get("year", ""),
                 "current_semester": current_semester,
                 "course_id": profile.get("course_id", ""),
+                "has_face": bool(profile.get("face_embeddings")),
             },
             "course": sanitise_mongo_doc(course) if course else None,
             "course_status": _as_text((course or {}).get("status") or "active").lower() or "active",
@@ -157,48 +172,20 @@ def attendance_summary(user):
     else:
         leave_map = {str(pid): set() for pid in enrolled}
 
+    # Batch-fetch papers in one query
+    paper_map = find_many_by_ids("academic", "papers", enrolled)
+
     summary = []
     for paper_id in enrolled:
         paper_id_text = str(paper_id)
-        paper = get_paper_by_id(paper_id_text)
+        paper = paper_map.get(paper_id_text)
         if not paper:
             continue
 
-        paper_id_variants = [paper_id_text]
-        try:
-            paper_id_variants.append(ObjectId(paper_id_text))
-        except Exception:
-            pass  # nosec B110
-
-        committed_sessions = list(
-            sessions_col.find(
-                {"paper_id": {"$in": paper_id_variants}},
-                {"session_id": 1, "user_ids": 1, "committed_at": 1,
-                 "last_updated_at": 1, "finalized": 1},
-            )
-        )
-        committed_sessions.sort(
-            key=lambda d: d.get("committed_at") or d.get("last_updated_at") or datetime.min,
-            reverse=True,
-        )
-
-        # Approved leave dates for this specific paper (also check paper_id as string).
-        leave_dates = leave_map.get(paper_id_text, set())
-
-        # Calculate attendance counts, optionally excluding approved leaves
         paper_leave_dates = leave_map.get(paper_id_text, set())
-        attended        = 0
-        effective_total = 0
-        leave_sessions  = 0
-
-        for sess in committed_sessions:
-            sess_date = session_date_str(sess)
-            if leave_adjusted and sess_date and sess_date in paper_leave_dates:
-                leave_sessions += 1
-                continue
-            effective_total += 1
-            if uid in [str(sid) for sid in (sess.get("user_ids") or [])]:
-                attended += 1
+        attended, effective_total, leave_sessions, committed_sessions = _compute_paper_attendance(
+            uid, paper_id_text, sessions_col, paper_leave_dates if leave_adjusted else None
+        )
 
         # Build per-session rows, tagging leave-covered sessions.
         class_rows = []
@@ -267,39 +254,22 @@ def predictions(user):
     # One DB call for all approved leaves.
     leave_map = get_approved_leave_dates(uid, enrolled_papers)
 
+    # Batch-fetch papers in one query
+    paper_map = find_many_by_ids("academic", "papers", enrolled_papers)
+
     total_attended = 0
     total_classes  = 0
 
     for paper_id in enrolled_papers:
         paper_id_text = str(paper_id)
-        paper = get_paper_by_id(paper_id_text)
+        paper = paper_map.get(paper_id_text)
         if not paper:
             continue
 
-        paper_id_variants = [paper_id_text]
-        try:
-            paper_id_variants.append(ObjectId(paper_id_text))
-        except Exception:
-            pass  # nosec B110
-
-        committed_sessions = list(
-            sessions_col.find(
-                {"paper_id": {"$in": paper_id_variants}},
-                {"user_ids": 1, "committed_at": 1, "last_updated_at": 1},
-            )
-        )
-        leave_dates = leave_map.get(paper_id_text, set())
         paper_leave_dates = leave_map.get(paper_id_text, set())
-        # Manual counts for predictions
-        attended = 0
-        effective_total = 0
-        for sess in committed_sessions:
-            sess_date = session_date_str(sess)
-            if sess_date and sess_date in paper_leave_dates:
-                continue
-            effective_total += 1
-            if uid in [str(sid) for sid in (sess.get("user_ids") or [])]:
-                attended += 1
+        attended, effective_total, _, committed_sessions = _compute_paper_attendance(
+            uid, paper_id_text, sessions_col, paper_leave_dates
+        )
 
         total_attended += attended
         # Use effective session count when available; fall back to paper metadata.
@@ -318,7 +288,7 @@ def predictions(user):
 
     result = []
     for paper_id in enrolled_papers:
-        paper = get_paper_by_id(paper_id)
+        paper = paper_map.get(str(paper_id))
         if not paper:
             continue
         result.append({
@@ -374,40 +344,23 @@ def exam_eligibility(user):
     # Pre-fetch approved leave dates in one DB call.
     leave_map = get_approved_leave_dates(uid, enrolled_papers)
 
+    # Batch-fetch papers in one query
+    paper_map = find_many_by_ids("academic", "papers", enrolled_papers)
+
     total_attended = 0
     total_classes  = 0
     total_leave_sessions = 0
 
     for paper_id in enrolled_papers:
         paper_id_text = str(paper_id)
-        paper = get_paper_by_id(paper_id_text)
+        paper = paper_map.get(paper_id_text)
         if not paper:
             continue
 
-        paper_id_variants = [paper_id_text]
-        try:
-            paper_id_variants.append(ObjectId(paper_id_text))
-        except Exception:
-            pass  # nosec B110
-
-        committed_sessions = list(
-            sessions_col.find(
-                {"paper_id": {"$in": paper_id_variants}},
-                {"user_ids": 1, "committed_at": 1, "last_updated_at": 1},
-            )
-        )
         paper_leave_dates = leave_map.get(paper_id_text, set())
-        attended        = 0
-        effective_total = 0
-        leave_sessions  = 0
-        for sess in committed_sessions:
-            sess_date = session_date_str(sess)
-            if sess_date and sess_date in paper_leave_dates:
-                leave_sessions += 1
-                continue
-            effective_total += 1
-            if uid in [str(sid) for sid in (sess.get("user_ids") or [])]:
-                attended += 1
+        attended, effective_total, leave_sessions, committed_sessions = _compute_paper_attendance(
+            uid, paper_id_text, sessions_col, paper_leave_dates
+        )
 
         total_attended       += attended
         total_leave_sessions += leave_sessions
@@ -419,7 +372,7 @@ def exam_eligibility(user):
 
     result = []
     for paper_id in enrolled_papers:
-        paper = get_paper_by_id(paper_id)
+        paper = paper_map.get(str(paper_id))
         if not paper:
             continue
 
