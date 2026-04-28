@@ -8,7 +8,6 @@ import os
 from threading import Lock
 
 import cv2
-import numpy as np
 from flask import Blueprint, request, jsonify, current_app
 from bson import ObjectId
 
@@ -16,9 +15,9 @@ from app.extensions import get_collection
 from app.models.audit import log_action
 from app.models.attendance import log_attendance
 from app.models.course import get_course_by_id
-from app.models.enrollment import get_profiles_for_paper, count_profiles_for_paper, get_profile_by_user
+from app.models.enrollment import get_profiles_for_paper, get_profile_by_user
 from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
-from app.models.user import find_user_by_id, update_user, set_user_pin, verify_user_pin
+from app.models.user import find_user_by_id, set_user_pin, verify_user_pin
 from app.services.face_detection import get_detector
 from app.services.face_recognition import (
     generate_embedding,
@@ -31,7 +30,7 @@ from app.security.brute_force_protection import BruteForceProtector
 from app.security.rate_limiter import limiter
 from app.observability.logging import attendance_logger
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_mongo_doc, decode_base64_image
+from app.utils.helpers import sanitise_mongo_doc, decode_base64_image, decode_image_bytes
 
 lecturer_bp = Blueprint("lecturer", __name__)
 
@@ -225,14 +224,19 @@ def _touch_active_session(session_id):
 
 
 def _save_recognized_students(session_id, recognized_ids):
+    update_doc = {
+        "$set": {
+            "updated_at": datetime.now(timezone.utc),
+        }
+    }
+    if recognized_ids:
+        update_doc["$addToSet"] = {
+            "recognized": {"$each": list(recognized_ids)}
+        }
+        
     _active_sessions_collection().update_one(
         {"session_id": str(session_id)},
-        {
-            "$set": {
-                "recognized": list(recognized_ids),
-                "updated_at": datetime.now(timezone.utc),
-            }
-        },
+        update_doc,
     )
 
 
@@ -645,22 +649,10 @@ def recognize_image(user):
         if not (is_jpeg or is_png or is_bmp or is_webp):
             return jsonify({"error": "Invalid image signature"}), 400
 
-        arr = np.frombuffer(file_bytes, dtype=np.uint8)
-        img_raw = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-        if img_raw is None:
-            return jsonify({"error": "Invalid image format"}), 400
+        img = decode_image_bytes(file_bytes)
+        img_raw = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
         uploads_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
-
-        # Convert to RGB for detector/recognition pipeline.
-        if len(img_raw.shape) == 2:
-            img = cv2.cvtColor(img_raw, cv2.COLOR_GRAY2RGB)
-        elif len(img_raw.shape) == 3 and img_raw.shape[2] == 4:
-            img = cv2.cvtColor(img_raw, cv2.COLOR_BGRA2RGB)
-        elif len(img_raw.shape) == 3 and img_raw.shape[2] == 3:
-            img = cv2.cvtColor(img_raw, cv2.COLOR_BGR2RGB)
-        else:
-            return jsonify({"error": f"Invalid image format: unexpected shape {img_raw.shape}"}), 400
     except Exception as e:
         attendance_logger.error(
             "recognize_image_processing_failed",
@@ -836,8 +828,10 @@ def commit_session(user):
         try:
             # Read and decode the image
             img_bytes = image.read()
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if not img_bytes:
+                return jsonify({"error": "Invalid image file"}), 400
+
+            img = decode_image_bytes(img_bytes)
             if img is None:
                 return jsonify({"error": "Invalid image file"}), 400
             

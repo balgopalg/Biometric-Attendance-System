@@ -46,6 +46,16 @@
   --soft-lock-opacity: 0.5;
   --soft-lock-grayscale: 1;
   --calendar-invert: 1;
+  --calendar-shell-bg: linear-gradient(160deg, rgba(15, 23, 42, 0.95), rgba(2, 6, 23, 0.92));
+  --calendar-panel-bg: rgba(15, 23, 42, 0.62);
+  --calendar-day-border-default: rgba(148, 163, 184, 0.24);
+  --calendar-day-default-bg: rgba(148, 163, 184, 0.08);
+  --calendar-holiday-bg: rgba(239, 68, 68, 0.15);
+  --calendar-holiday-border: rgba(239, 68, 68, 0.4);
+  --calendar-holiday-text: #f87171;
+  --calendar-optional-bg: rgba(245, 158, 11, 0.15);
+  --calendar-optional-border: rgba(245, 158, 11, 0.4);
+  --calendar-optional-text: #fbbf24;
 }
 
 /* ─── Light Mode ─── */
@@ -86,6 +96,79 @@
   --soft-lock-opacity: 0.5;
   --soft-lock-grayscale: 1;
   --calendar-invert: 0;
+  --calendar-shell-bg: linear-gradient(160deg, #f8fafc, #eef2ff);
+  --calendar-panel-bg: rgba(255, 255, 255, 0.92);
+  --calendar-day-border-default: #dbe2ea;
+  --calendar-day-default-bg: rgba(148, 163, 184, 0.08);
+  --calendar-holiday-bg: rgba(220, 38, 38, 0.1);
+  --calendar-holiday-border: rgba(220, 38, 38, 0.3);
+  --calendar-holiday-text: #b91c1c;
+  --calendar-optional-bg: rgba(217, 119, 6, 0.1);
+  --calendar-optional-border: rgba(217, 119, 6, 0.3);
+  --calendar-optional-text: #b45309;
+}
+
+.academic-calendar-panel {
+  color: var(--text-primary);
+}
+
+.academic-calendar-panel .ac-calendar-board {
+  background: var(--calendar-shell-bg);
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.academic-calendar-panel .ac-month-card {
+  background: var(--calendar-panel-bg);
+}
+
+.academic-calendar-panel .ac-day-cell {
+  min-height: 36px;
+}
+
+.academic-calendar-panel .ac-day-cell:hover {
+  transform: translateY(-1px);
+}
+
+.academic-calendar-panel .ac-event-row {
+  color: var(--text-primary);
+}
+
+@media (max-width: 900px) {
+  .academic-calendar-panel .ac-summary-grid,
+  .academic-calendar-panel .ac-side-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .academic-calendar-panel .ac-calendar-board {
+    padding: 10px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .academic-calendar-panel {
+    padding: 12px !important;
+  }
+
+  .academic-calendar-panel .ac-board-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .academic-calendar-panel .ac-day-cell {
+    min-height: 36px;
+  }
+
+  .academic-calendar-panel .ac-event-row {
+    grid-template-columns: 1fr !important;
+    gap: 4px !important;
+    align-items: flex-start !important;
+    padding-bottom: 10px !important;
+  }
+
+  .academic-calendar-panel .ac-month-nav {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
 }
 
 /* ─── Global Reset ─── */

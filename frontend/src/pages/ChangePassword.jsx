@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import api from '../api/axios';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlineLockClosed, HiOutlineCheckCircle, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 
@@ -77,11 +78,19 @@ export default function ChangePassword() {
   const hasNumber = /\d/.test(form.new_password);
   const hasSpecial = /[!@#$%^&*()_+\-=[\]{};:'",.<>?/\\|`~]/.test(form.new_password);
   const passwordsMatch = form.new_password && form.new_password === form.confirm_password;
-  const allValid = hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecial && passwordsMatch && form.current_password;
+  const allValid = hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecial && form.current_password;
+  const isFirstLoginReset = Boolean(user?.must_change_password);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!allValid) return;
+    if (!passwordsMatch) {
+      toast.error('New passwords do not match');
+      return;
+    }
+    if (!allValid) {
+      toast.error('Please satisfy all password requirements');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
@@ -102,6 +111,7 @@ export default function ChangePassword() {
       });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to change password');
+      toast.error(err.response?.data?.error || 'Failed to change password');
     } finally {
       setSubmitting(false);
     }
@@ -139,8 +149,10 @@ export default function ChangePassword() {
             <HiOutlineLockClosed size={20} />
           </div>
           <div>
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 800 }}>Set your password</h2>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>First login — please change your temporary password</p>
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 800 }}>{isFirstLoginReset ? 'Set your password' : 'Change your password'}</h2>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              {isFirstLoginReset ? 'First login - please change your temporary password' : 'Use your current password to set a new secure password'}
+            </p>
           </div>
         </div>
 
@@ -213,6 +225,7 @@ export default function ChangePassword() {
           >
             {submitting ? 'Saving...' : 'Save New Password'}
           </button>
+
         </form>
       </div>
     </div>

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from functools import wraps
 
-from flask import g, jsonify, request
+from flask import g, jsonify
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
 
 from app.extensions import get_collection

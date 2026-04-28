@@ -154,6 +154,26 @@ copy .env.example .env
 
 Update `backend/.env` for your environment.
 
+### Safe Environment Workflow
+
+1) Copy the template and keep secrets local:
+
+```powershell
+copy backend\.env.example backend\.env
+```
+
+2) For Docker Compose, select the env file explicitly:
+
+```powershell
+$env:BACKEND_ENV_FILE="./backend/.env"
+docker-compose up -d
+```
+
+Notes:
+
+- `backend/.env` is ignored by git and must never contain real secrets in source control.
+- For production/staging, use a separate env file outside the repo and set `BACKEND_ENV_FILE` to its path.
+
 Optional email delivery configuration (for welcome/reset emails):
 
 ```dotenv

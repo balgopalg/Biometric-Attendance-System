@@ -20,6 +20,8 @@ import {
   HiOutlineDocumentAdd,
   HiOutlineDownload,
   HiOutlineDotsHorizontal,
+  HiOutlineChevronDown,
+  HiOutlineChevronUp,
 } from 'react-icons/hi';
 
 const EMPTY_FORM = { name: '', email: '' };
@@ -82,6 +84,8 @@ export default function ManageLecturers() {
   const [excelFile, setExcelFile] = useState(null);
   const [excelImporting, setExcelImporting] = useState(false);
   const [excelResults, setExcelResults] = useState(null);
+  const [openDepartmentPopover, setOpenDepartmentPopover] = useState({ lecturerId: '', department: '' });
+  const [activePopoverCourses, setActivePopoverCourses] = useState({});
   const excelFileInputRef = useRef(null);
   const hasFetchedLecturersRef = useRef(false);
   const previousQueryRef = useRef({
@@ -149,6 +153,20 @@ export default function ManageLecturers() {
   }, [filters.department_id]);
 
   useEffect(() => {
+    if (!openDepartmentPopover.lecturerId || !openDepartmentPopover.department) return undefined;
+
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.lecturer-dept-popover-surface')) return;
+      setOpenDepartmentPopover({ lecturerId: '', department: '' });
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [openDepartmentPopover]);
+
+  useEffect(() => {
     const previous = previousQueryRef.current;
     const searchChanged = previous.search !== search;
     const filtersChanged =
@@ -190,6 +208,88 @@ export default function ManageLecturers() {
       return matchCourse && matchSemester;
     });
   }, [papers, filters.course_id, filters.semester]);
+
+  const courseMap = useMemo(() => {
+    const map = new Map();
+    courses.forEach((course) => {
+      map.set(String(course._id || ''), course);
+    });
+    return map;
+  }, [courses]);
+
+  const paperMap = useMemo(() => {
+    const map = new Map();
+    papers.forEach((paper) => {
+      map.set(String(paper._id || ''), paper);
+    });
+    return map;
+  }, [papers]);
+
+  const getLecturerDepartmentGroups = (lecturer) => {
+    const groups = new Map();
+    const assignedPaperIds = Array.isArray(lecturer?.assigned_paper_ids) ? lecturer.assigned_paper_ids : [];
+
+    assignedPaperIds.forEach((paperId) => {
+      const paper = paperMap.get(String(paperId || ''));
+      if (!paper) return;
+      const course = courseMap.get(String(paper.course_id || ''));
+      const deptName = String(course?.department || lecturer?.department || 'Unassigned Department').trim();
+      const subjectLabel = `${paper.name || 'Untitled Paper'}${paper.code ? ` (${paper.code})` : ''}`;
+      const courseCode = String(course?.code || course?.name || 'GEN').trim().toUpperCase();
+
+      if (!groups.has(deptName)) groups.set(deptName, new Map());
+      const departmentCourses = groups.get(deptName);
+      if (!departmentCourses.has(courseCode)) departmentCourses.set(courseCode, []);
+      departmentCourses.get(courseCode).push(subjectLabel);
+    });
+
+    if (groups.size === 0) {
+      const fallbackSubjects = Array.isArray(lecturer?.assigned_papers) ? lecturer.assigned_papers.filter(Boolean) : [];
+      if (fallbackSubjects.length > 0) {
+        const fallbackDept = String(lecturer?.department || 'Unassigned Department').trim();
+        groups.set(fallbackDept, new Map([['General', fallbackSubjects]]));
+      } else if (lecturer?.department) {
+        groups.set(String(lecturer.department).trim(), new Map([['General', []]]));
+      }
+    }
+
+    return Array.from(groups.entries()).map(([department, courseGroups]) => {
+      const coursesList = Array.from(courseGroups.entries()).map(([courseCode, subjects]) => ({
+        courseCode,
+        subjects,
+      }));
+      return {
+      department,
+      courses: coursesList,
+      }; 
+    });
+  };
+
+  const getDefaultCourseName = (coursesList) => {
+    if (!Array.isArray(coursesList) || coursesList.length === 0) return '';
+    const preferredMca = coursesList.find((course) => String(course.courseCode || '').toLowerCase().includes('mca'));
+    if (preferredMca) return preferredMca.courseCode;
+    return coursesList[0].courseCode;
+  };
+
+  const openDepartmentWithDefaultCourse = (lecturerId, group) => {
+    const department = group?.department || '';
+    if (!department) return;
+
+    const isAlreadyOpen = openDepartmentPopover.lecturerId === lecturerId && openDepartmentPopover.department === department;
+    if (isAlreadyOpen) {
+      setOpenDepartmentPopover({ lecturerId: '', department: '' });
+      return;
+    }
+
+    const popoverKey = `${lecturerId}::${department}`;
+    const defaultCourse = getDefaultCourseName(group?.courses || []);
+    setActivePopoverCourses((prev) => ({
+      ...prev,
+      [popoverKey]: defaultCourse,
+    }));
+    setOpenDepartmentPopover({ lecturerId, department });
+  };
 
   const handleAdd = async () => {
     if (!form.name?.trim() || !form.email?.trim()) {
@@ -481,12 +581,14 @@ export default function ManageLecturers() {
             <tr>
               <th>Name</th>
               <th>Email</th>
-              <th>Assigned Papers</th>
+              <th>Department</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {lecturers.map((l) => (
+            {lecturers.map((l) => {
+              const departmentGroups = getLecturerDepartmentGroups(l);
+              return (
               <tr key={l._id}>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -509,14 +611,112 @@ export default function ManageLecturers() {
                   </div>
                 </td>
                 <td>{l.email}</td>
-                <td>
-                  {(l.assigned_papers || []).length === 0 ? (
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No papers</span>
+                <td style={{ position: 'relative' }}>
+                  {departmentGroups.length === 0 ? (
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No department</span>
                   ) : (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {l.assigned_papers.map((paper, idx) => (
-                        <span key={`${l._id}-paper-${idx}`} className="badge badge-info">{paper}</span>
-                      ))}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      {departmentGroups.map((group, groupIndex) => {
+                        const isOpen = openDepartmentPopover.lecturerId === l._id && openDepartmentPopover.department === group.department;
+                        const popoverKey = `${l._id}::${group.department}`;
+                        const activeCourseName = activePopoverCourses[popoverKey] || getDefaultCourseName(group.courses);
+                        const activeCourse = (group.courses || []).find((course) => course.courseCode === activeCourseName) || group.courses?.[0] || { subjects: [] };
+                        return (
+                          <div key={`${l._id}-dept-${group.department}-${groupIndex}`} style={{ position: 'relative' }} className="lecturer-dept-popover-surface">
+                            <button
+                              type="button"
+                              className="badge badge-info"
+                              style={{
+                                border: '1px solid var(--accent-cyan)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                cursor: 'pointer',
+                              }}
+                              onClick={() => openDepartmentWithDefaultCourse(l._id, group)}
+                              title={isOpen ? 'Hide assigned subjects' : 'Show assigned subjects'}
+                            >
+                              {group.department}
+                              {isOpen ? <HiOutlineChevronUp size={12} /> : <HiOutlineChevronDown size={12} />}
+                            </button>
+
+                            {isOpen ? (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  top: 'calc(100% + 8px)',
+                                  left: 0,
+                                  minWidth: 260,
+                                  maxWidth: 340,
+                                  maxHeight: 220,
+                                  overflowY: 'auto',
+                                  zIndex: 8,
+                                  padding: 10,
+                                  borderRadius: 10,
+                                  border: '1px solid var(--border-glass)',
+                                  background: 'var(--bg-card)',
+                                  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.22)',
+                                }}
+                              >
+                                <p style={{ fontSize: '0.72rem', fontWeight: 700, marginBottom: 8 }}>{group.department} - Assigned Subjects</p>
+                                {(group.courses || []).length > 0 ? (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, rowGap: 8, marginBottom: 10 }}>
+                                    {group.courses.map((course, courseIndex) => {
+                                      const selected = course.courseCode === activeCourseName;
+                                      return (
+                                        <button
+                                          key={`${popoverKey}-course-${courseIndex}`}
+                                          type="button"
+                                          onClick={() => {
+                                            setActivePopoverCourses((prev) => ({
+                                              ...prev,
+                                              [popoverKey]: course.courseCode,
+                                            }));
+                                          }}
+                                          style={{
+                                            padding: '5px 12px',
+                                            borderRadius: 999,
+                                            border: selected ? '1px solid var(--accent-cyan)' : '1px solid var(--border-glass)',
+                                            background: selected ? 'rgba(34, 211, 238, 0.12)' : 'var(--bg-glass)',
+                                            fontSize: '0.74rem',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                            color: 'var(--text-primary)',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {course.courseCode}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+
+                                {(activeCourse.subjects || []).length === 0 ? (
+                                  <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>No assigned subjects</p>
+                                ) : (
+                                  <div style={{ display: 'grid', gap: 6 }}>
+                                    {activeCourse.subjects.map((subject, subjectIndex) => (
+                                      <div
+                                        key={`${l._id}-dept-subject-${group.department}-${subjectIndex}`}
+                                        style={{
+                                          fontSize: '0.76rem',
+                                          padding: '6px 8px',
+                                          borderRadius: 8,
+                                          border: '1px solid var(--border-glass)',
+                                          background: 'var(--bg-glass)',
+                                        }}
+                                      >
+                                        {subject}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </td>
@@ -537,7 +737,8 @@ export default function ManageLecturers() {
                   </div>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
         </div>

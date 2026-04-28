@@ -75,6 +75,35 @@ const studentRow = {
   mobile_no: '9999999999',
 };
 
+const notificationSeed = [
+  {
+    _id: 'note-1',
+    title: 'Welcome to your lecturer inbox',
+    body: 'Session reminders and attendance actions will appear here.',
+    category: 'system',
+    priority: 'normal',
+    is_read: false,
+    created_at: new Date().toISOString(),
+    action_url: '/lecturer',
+  },
+];
+
+const calendarDraft = {
+  year: 2026,
+  title: 'Academic Calendar 2026',
+  source_filename: 'calendar.png',
+  holidays: [{ date: '2026-01-26', label: 'Republic Day' }],
+  optional_holidays: [{ date: '2026-03-08', label: 'Holi' }],
+  sundays: ['2026-01-04'],
+  status: 'draft',
+};
+
+const calendarPublished = {
+  ...calendarDraft,
+  status: 'published',
+  published_at: new Date().toISOString(),
+};
+
 function installCameraStubs(page) {
   return page.addInitScript((pngBase64) => {
     const fakeStream = {
@@ -196,6 +225,8 @@ async function installApiMocks(page) {
     lecturerRecognized: false,
     sessionId: 'sess-lecturer-1',
     enrollmentSubmitted: false,
+    currentUser: null,
+    notifications: notificationSeed.map((note) => ({ ...note })),
   };
 
   await page.route('**/api/**', async (route) => {
@@ -210,7 +241,11 @@ async function installApiMocks(page) {
     }
 
     if (path === '/api/auth/me') {
-      await route.fulfill({ status: 401, json: { error: 'Unauthorized' } });
+      if (sessionState.currentUser) {
+        await route.fulfill({ status: 200, json: sessionState.currentUser });
+      } else {
+        await route.fulfill({ status: 401, json: { error: 'Unauthorized' } });
+      }
       return;
     }
 
@@ -218,17 +253,79 @@ async function installApiMocks(page) {
       const body = request.postDataJSON() || {};
       const loginRole = String(body.email || '').includes('lecturer') ? 'lecturer' : String(body.email || '').includes('student') ? 'student' : 'admin';
       const user = loginRole === 'lecturer' ? lecturerUser : loginRole === 'student' ? studentUser : adminUser;
+      sessionState.currentUser = { ...user };
       await route.fulfill({ status: 200, json: { user } });
       return;
     }
 
     if (path === '/api/auth/logout') {
+      sessionState.currentUser = null;
       await route.fulfill({ status: 200, json: { message: 'Logged out' } });
+      return;
+    }
+
+    if (path === '/api/auth/profile-picture' && method === 'POST') {
+      if (sessionState.currentUser) {
+        sessionState.currentUser = {
+          ...sessionState.currentUser,
+          profile_picture_url: '/api/auth/profile-picture/demo.jpg?v=1',
+        };
+      }
+      await route.fulfill({ status: 200, json: { message: 'Profile picture updated', user: sessionState.currentUser } });
+      return;
+    }
+
+    if (path === '/api/auth/forgot-password/request-otp' && method === 'POST') {
+      await route.fulfill({
+        status: 200,
+        json: { message: 'If an account exists, a recovery OTP has been sent.', email_delivery_enabled: false },
+      });
+      return;
+    }
+
+    if (path === '/api/auth/forgot-password/reset' && method === 'POST') {
+      await route.fulfill({ status: 200, json: { message: 'Password reset successful.' } });
+      return;
+    }
+
+    if (path === '/api/notifications' && method === 'GET') {
+      const unreadCount = sessionState.notifications.filter((note) => !note.is_read).length;
+      await route.fulfill({ status: 200, json: { items: sessionState.notifications, unread_count: unreadCount } });
+      return;
+    }
+
+    if (path.match(/^\/api\/notifications\/[^/]+\/read$/) && method === 'POST') {
+      const noteId = path.split('/').slice(-2)[0];
+      sessionState.notifications = sessionState.notifications.map((note) => (
+        note._id === noteId ? { ...note, is_read: true } : note
+      ));
+      await route.fulfill({ status: 200, json: { message: 'Notification marked as read' } });
+      return;
+    }
+
+    if (path === '/api/notifications/read-all' && method === 'POST') {
+      sessionState.notifications = sessionState.notifications.map((note) => ({ ...note, is_read: true }));
+      await route.fulfill({ status: 200, json: { message: 'All notifications marked as read', updated_count: sessionState.notifications.length } });
       return;
     }
 
     if (path === '/api/admin/stats') {
       await route.fulfill({ status: 200, json: createAdminDashboardPayload() });
+      return;
+    }
+
+    if (path === '/api/calendar/current' && method === 'GET') {
+      await route.fulfill({ status: 200, json: { calendar: calendarPublished } });
+      return;
+    }
+
+    if (path === '/api/calendar/extract' && method === 'POST') {
+      await route.fulfill({ status: 200, json: calendarDraft });
+      return;
+    }
+
+    if (path === '/api/calendar/save' && method === 'POST') {
+      await route.fulfill({ status: 200, json: { message: 'Calendar published successfully', calendar: calendarPublished } });
       return;
     }
 
@@ -763,6 +860,30 @@ test.describe('Project end-to-end flows', () => {
     await expect(page.getByRole('button', { name: 'Re-commit Adjustments' })).toBeVisible({ timeout: 15000 });
   });
 
+  test('attendance session supports pause, resume, and stop', async ({ page }) => {
+    await installCameraStubs(page);
+    await installApiMocks(page);
+    await loginAs(page, 'lecturer');
+
+    await page.getByRole('link', { name: 'Take Attendance' }).click();
+    await expect(page.getByRole('heading', { name: 'Take Attendance' })).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('combobox', { name: 'Select course' }).selectOption({ index: 1 });
+    await page.getByRole('combobox', { name: 'Select paper' }).selectOption({ index: 1 });
+
+    await page.getByRole('button', { name: 'Start Session' }).click();
+    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('button', { name: 'Pause' }).click();
+    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('button', { name: 'Resume' }).click();
+    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('button', { name: 'Stop Session' }).click();
+    await expect(page.getByRole('button', { name: 'Start Session' })).toBeVisible({ timeout: 15000 });
+  });
+
   test('enrollment, exports, and rollback flows', async ({ page }) => {
     await installCameraStubs(page);
     await installApiMocks(page);
@@ -806,5 +927,62 @@ test.describe('Project end-to-end flows', () => {
     const excelResponse = await excelResponsePromise;
     expect(excelResponse.ok()).toBeTruthy();
     await expect(page.getByText('Excel generated successfully')).toBeVisible({ timeout: 15000 });
+  });
+
+  test('notifications inbox and profile picture upload', async ({ page }) => {
+    await installCameraStubs(page);
+    await installApiMocks(page);
+    await loginAs(page, 'lecturer');
+
+    await page.getByRole('button', { name: /View notifications/i }).click();
+    await expect(page.getByRole('heading', { name: 'Notification Inbox' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText('1 unread')).toBeVisible();
+    await page.getByRole('button', { name: 'Mark all read' }).click();
+    await expect(page.getByText('0 unread')).toBeVisible({ timeout: 15000 });
+    await page.getByRole('button', { name: 'Close notification inbox' }).click();
+
+    await page.getByRole('button', { name: /Open profile menu/i }).click();
+    const profileButton = page.getByRole('menuitem', { name: 'My Profile' });
+    await expect(profileButton).toBeVisible({ timeout: 15000 });
+    await profileButton.click();
+    await expect(page.getByText('Upload Profile Picture')).toBeVisible({ timeout: 15000 });
+
+    const profileInput = page.locator('input[type="file"]').first();
+    await profileInput.setInputFiles({ name: 'profile.png', mimeType: 'image/png', buffer: ONE_BY_ONE_PNG_BUFFER });
+    await page.getByRole('button', { name: 'Save Photo' }).click();
+    await expect(page.getByText('Profile picture updated')).toBeVisible({ timeout: 15000 });
+  });
+
+  test('forgot-password OTP flow', async ({ page }) => {
+    await installCameraStubs(page);
+    await installApiMocks(page);
+
+    await page.goto('/forgot-password');
+    await page.getByLabel('Linked Email').fill('lecturer@system.com');
+    await page.getByRole('button', { name: /Send Recovery OTP/i }).click();
+    await expect(page.getByLabel('Recovery OTP')).toBeVisible({ timeout: 15000 });
+
+    await page.getByLabel('Recovery OTP').fill('123456');
+    await page.locator('#recovery-new-password').fill('StrongPass!123');
+    await page.locator('#recovery-confirm-password').fill('StrongPass!123');
+    await page.getByRole('button', { name: /Reset Password/i }).click();
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test('admin calendar extract and publish', async ({ page }) => {
+    await installCameraStubs(page);
+    await installApiMocks(page);
+    await loginAs(page, 'admin');
+
+    await page.getByRole('link', { name: 'Academic Calendar' }).click();
+    await expect(page.getByRole('heading', { name: 'Academic Calendar Management' })).toBeVisible({ timeout: 15000 });
+
+    const calendarInput = page.locator('input[type="file"]').first();
+    await calendarInput.setInputFiles({ name: 'calendar.png', mimeType: 'image/png', buffer: ONE_BY_ONE_PNG_BUFFER });
+    await page.getByRole('button', { name: /Extract Data/i }).click();
+    await expect(page.getByText('Calendar Verification Draft')).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole('button', { name: /Publish Calendar/i }).click();
+    await expect(page.getByText('Calendar published successfully')).toBeVisible({ timeout: 15000 });
   });
 });

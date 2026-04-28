@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 from datetime import datetime, timezone
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List
 from bson import ObjectId
 from flask import current_app, has_app_context, has_request_context, request, g
 from app.extensions import get_collection

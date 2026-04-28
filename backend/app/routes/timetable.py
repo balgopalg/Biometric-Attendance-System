@@ -17,7 +17,6 @@ from app.models.timetable import (
     create_timeslots,
     create_timetable,
     delete_timeslots_for_timetable,
-    get_timeslot_by_id,
     get_timetable_by_id,
     list_timeslots_for_timetable,
     list_timetables,

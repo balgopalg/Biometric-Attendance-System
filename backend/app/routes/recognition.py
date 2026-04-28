@@ -9,7 +9,6 @@ from app.utils.helpers import decode_base64_image
 from app.utils.auth_decorators import role_required
 from app.services.face_detection import get_detector
 from app.services.face_recognition import generate_embedding, find_best_match
-from app.models.enrollment import get_all_profiles
 from app.services.profile_cache import get_profiles_for_paper_cached
 from app.models.user import find_user_by_id
 

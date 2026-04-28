@@ -76,11 +76,7 @@ from app.utils.auth_decorators import role_required, super_admin_required, valid
 from app.security.rbac import (
     dept_scope_filter,
     is_super_admin,
-    is_any_admin,
-    validate_department_access,
-    validate_role_assignment,
     get_user_department_id,
-    ADMIN_ROLES,
 )
 from app.models.department import (
     create_department,
@@ -89,9 +85,8 @@ from app.models.department import (
     get_department_by_code,
     update_department,
     delete_department as soft_delete_department,
-    hard_delete_department,
 )
-from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image
+from app.utils.helpers import sanitise_mongo_doc, sanitise_many, decode_base64_image, decode_image_bytes
 from app.utils.timezone import india_timestamp_token
 from app.utils.validation import validate_password_strength
 from app.services.email_service import (
@@ -1980,13 +1975,46 @@ def list_students(user):
     else:
         dept_id = _user_dept_id(user)
 
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year", "department_id"], department_id=dept_id))
+    # Fetch all courses first; then apply department scoping with legacy fallback
+    # so old records without department_id still appear under the correct department.
+    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year", "department_id"], department_id=None))
+
+    if dept_id:
+        selected_dept_id = _as_text(dept_id).strip()
+        selected_dept_name = ""
+        selected_dept = None
+        try:
+            selected_dept = get_department_by_id(selected_dept_id)
+        except Exception:
+            selected_dept = None
+        if selected_dept:
+            selected_dept_name = _as_text(selected_dept.get("name", "")).strip().lower()
+
+        scoped_courses = []
+        scoped_course_ids = set()
+        for course in courses:
+            course_dept_id = _as_text(course.get("department_id", "")).strip()
+            course_dept_name = _as_text(course.get("department", "")).strip().lower()
+            if course_dept_id and course_dept_id == selected_dept_id:
+                scoped_courses.append(course)
+                scoped_course_ids.update(_id_variants(course.get("_id")))
+                continue
+            # Legacy fallback for old course records linked only by department name.
+            if selected_dept_name and course_dept_name and course_dept_name == selected_dept_name:
+                scoped_courses.append(course)
+                scoped_course_ids.update(_id_variants(course.get("_id")))
+
+        courses = scoped_courses
     papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id"]))
+    if dept_id:
+        papers = [paper for paper in papers if _as_text(paper.get("course_id")) in {_as_text(cid) for cid in scoped_course_ids if _as_text(cid)}]
     course_map = {c.get("_id"): c for c in courses}
     paper_map = {p.get("_id"): p for p in papers}
 
     # Set of course IDs visible to this user (enforces dept isolation)
-    visible_course_ids = set(course_map.keys())
+    visible_course_ids = set()
+    for cid in course_map.keys():
+        visible_course_ids.update(_id_variants(cid))
 
     department_filter = _as_text(request.args.get("department", ""))
     q = _as_text(request.args.get("q", "")).lower()
@@ -2004,21 +2032,22 @@ def list_students(user):
     # Always restrict to courses visible to this user (dept admin isolation)
     filters.append({"course_id": {"$in": list(visible_course_ids)}})
 
-    # Filter by department name (super admin picks a specific dept from the dropdown)
-    if department_filter:
+    # Optional legacy department-name filter (only when department_id is not supplied).
+    if department_filter and not dept_filter_id:
         dept_course_ids = [
-            _as_text(c.get("_id"))
+            variant
             for c in courses
             if _as_text(c.get("department") or "").lower() == department_filter.lower()
+            for variant in _id_variants(c.get("_id"))
         ]
         if dept_course_ids:
             filters.append({"course_id": {"$in": dept_course_ids}})
         else:
             filters.append({"course_id": "never_match"})
     if course_id:
-        filters.append({"course_id": course_id})
+        filters.append({"course_id": {"$in": _id_variants(course_id)}})
     if paper_id:
-        filters.append({"enrolled_papers": paper_id})
+        filters.append({"enrolled_papers": {"$in": _id_variants(paper_id)}})
     if academic_session:
         filters.append(
             {
@@ -2033,7 +2062,12 @@ def list_students(user):
     if semester:
         semester_int = _to_int(semester, 0)
         if semester_int > 0:
-            semester_paper_ids = [p.get("_id") for p in papers if _to_int(p.get("semester"), 0) == semester_int]
+            semester_paper_ids = [
+                variant
+                for p in papers
+                if _to_int(p.get("semester"), 0) == semester_int
+                for variant in _id_variants(p.get("_id"))
+            ]
             semester_or = [{"current_semester": semester_int}]
             if semester_paper_ids:
                 semester_or.append({"enrolled_papers": {"$in": semester_paper_ids}})
@@ -2041,9 +2075,10 @@ def list_students(user):
 
     if not include_inactive:
         active_course_ids = {
-            _as_text(c.get("_id"))
+            variant
             for c in courses
             if _as_text(c.get("status") or "active").lower() == "active"
+            for variant in _id_variants(c.get("_id"))
         }
         filters.append({"course_id": {"$in": list(active_course_ids)}})
 
@@ -3214,10 +3249,12 @@ def upload_student_photo(user):
     if not file_bytes:
         return jsonify({"error": "Uploaded image is empty"}), 400
 
-    arr = np.frombuffer(file_bytes, dtype=np.uint8)
-    image = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-    if image is None:
+    try:
+        image_rgb = decode_image_bytes(file_bytes)
+    except ValueError:
         return jsonify({"error": "Invalid image file"}), 400
+
+    image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
     uploads_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
     saved_path = save_student_upload(student_name, image, uploads_dir=uploads_dir)

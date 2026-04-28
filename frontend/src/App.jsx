@@ -10,12 +10,14 @@ import StatePanel from './components/ui/StatePanel';
 const DashboardLayout = lazy(() => import('./components/layout/DashboardLayout'));
 const Login = lazy(() => import('./pages/Login'));
 const ChangePassword = lazy(() => import('./pages/ChangePassword'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const ManageCourses = lazy(() => import('./pages/admin/ManageCourses'));
 const ManagePapers = lazy(() => import('./pages/admin/ManagePapers'));
 const ManageLecturers = lazy(() => import('./pages/admin/ManageLecturers'));
 const ManageStudents = lazy(() => import('./pages/admin/ManageStudents'));
 const ManageTimetable = lazy(() => import('./pages/admin/ManageTimetable'));
+const ManageCalendar = lazy(() => import('./pages/admin/ManageCalendar'));
 const StudentEnrollment = lazy(() => import('./pages/admin/StudentEnrollment'));
 const ExamEligibility = lazy(() => import('./pages/admin/ExamEligibility'));
 const AttendanceMatrix = lazy(() => import('./pages/admin/AttendanceMatrix'));
@@ -149,6 +151,7 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
               <Route path="/change-password" element={<LazyPage><ChangePassword /></LazyPage>} />
+              <Route path="/forgot-password" element={<LazyPage><ForgotPassword /></LazyPage>} />
               <Route path="/" element={<RootRedirect />} />
 
               {/* Admin — both super_admin and department_admin */}
@@ -157,6 +160,7 @@ export default function App() {
                 <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
                 <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
                 <Route path="/admin/timetable" element={<LazyPage><ManageTimetable /></LazyPage>} />
+                <Route path="/admin/calendar" element={<LazyPage><ManageCalendar /></LazyPage>} />
                 <Route path="/admin/lecturers" element={<LazyPage><ManageLecturers /></LazyPage>} />
                 <Route path="/admin/students" element={<LazyPage><ManageStudents /></LazyPage>} />
                 <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />

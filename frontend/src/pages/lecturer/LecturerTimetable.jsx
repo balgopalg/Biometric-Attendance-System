@@ -115,6 +115,11 @@ export default function LecturerTimetable() {
               slots={slots}
               title="My Teaching Timetable"
               emptyMessage="No active timetable slots are assigned to you yet."
+              classStartTime="09:00"
+              classEndTime="17:00"
+              classDurationMinutes={60}
+              recessStartTime="12:00"
+              recessEndTime="13:00"
             />
           </div>
         </>

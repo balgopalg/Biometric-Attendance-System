@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { HiOutlineBookOpen, HiOutlineCamera, HiOutlineKey } from 'react-icons/hi';
 import { formatCourseName } from '../../utils/courseDisplay';
 import { useAuth } from '../../hooks/useAuth';
+import AcademicCalendarPanel from '../../components/calendar/AcademicCalendarPanel';
 
 export default function LecturerDashboard() {
   const { user } = useAuth();
@@ -130,6 +131,10 @@ export default function LecturerDashboard() {
             <HiOutlineKey size={16} /> Manage PIN
           </button>
         </div>
+      </div>
+
+      <div style={{ marginBottom: 28 }}>
+        <AcademicCalendarPanel compact />
       </div>
 
       <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Your Papers</h3>

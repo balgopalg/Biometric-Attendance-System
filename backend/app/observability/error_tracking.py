@@ -1,7 +1,6 @@
 """Centralized error tracking and reporting."""
 
 import logging
-import json
 import traceback
 from datetime import datetime, timezone
 from flask import request, g, current_app, has_app_context

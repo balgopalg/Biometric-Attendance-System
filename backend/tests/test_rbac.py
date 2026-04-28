@@ -13,7 +13,6 @@ from app.security.rbac import (
     dept_scope_filter,
     validate_department_access,
     validate_role_assignment,
-    ROLE_HIERARCHY,
     ALL_ROLES,
     ADMIN_ROLES,
 )

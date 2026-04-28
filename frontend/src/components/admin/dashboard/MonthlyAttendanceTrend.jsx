@@ -1,6 +1,11 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 
+function getPointRenderKey(point, index) {
+  const base = point?.key || point?.label || 'point';
+  return `${String(base)}-${index}`;
+}
+
 function AttendanceBars({ points, maxValue, width, height }) {
   const padding = { top: 8, right: 10, bottom: 24, left: 10 };
   const innerWidth = width - padding.left - padding.right;
@@ -27,6 +32,7 @@ function AttendanceBars({ points, maxValue, width, height }) {
       })}
 
       {points.map((point, index) => {
+        const pointRenderKey = getPointRenderKey(point, index);
         const value = Number(point.total) || 0;
         const ratio = value / maxValue;
         const barHeight = ratio * innerHeight;
@@ -35,7 +41,7 @@ function AttendanceBars({ points, maxValue, width, height }) {
         const y = padding.top + innerHeight - barHeight;
 
         return (
-          <g key={point.key}>
+          <g key={pointRenderKey}>
             <rect
               x={x}
               y={y}
@@ -43,8 +49,8 @@ function AttendanceBars({ points, maxValue, width, height }) {
               height={Math.max(0, barHeight)}
               rx="6"
               fill="url(#attendanceBarGradient)"
-              onMouseEnter={() => setHoveredBar({ key: point.key, x: x + barWidth / 2, y, value })}
-              onMouseLeave={() => setHoveredBar((prev) => (prev?.key === point.key ? null : prev))}
+              onMouseEnter={() => setHoveredBar({ key: pointRenderKey, x: x + barWidth / 2, y, value })}
+              onMouseLeave={() => setHoveredBar((prev) => (prev?.key === pointRenderKey ? null : prev))}
             />
             <text x={x + barWidth / 2} y={height - 8} textAnchor="middle" fontSize="11" fill="var(--text-muted)">{point.label}</text>
             <title>{`${point.label}: ${value}`}</title>
@@ -181,8 +187,8 @@ export default function MonthlyAttendanceTrend({
             <path d={areaPath} fill="url(#attendanceAreaGradient)" />
             <path d={linePath} fill="none" stroke="url(#attendanceLineGradient)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
 
-            {mapped.map((p) => (
-              <g key={p.key}>
+            {mapped.map((p, index) => (
+              <g key={getPointRenderKey(p, index)}>
                 <circle cx={p.x} cy={p.y} r="5" fill="var(--bg-card)" stroke="#06b6d4" strokeWidth="2" />
                 <text x={p.x} y={height - 8} textAnchor="middle" fontSize="11" fill="var(--text-muted)">{p.label}</text>
                 <title>{`${p.label}: ${p.value}`}</title>

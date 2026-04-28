@@ -15,6 +15,7 @@ import {
   HiOutlineClock,
 } from 'react-icons/hi';
 import { formatDateTimeIndia } from '../../utils/dateTime';
+import AcademicCalendarPanel from '../../components/calendar/AcademicCalendarPanel';
 const MonthlyAttendanceTrend = lazy(() => import('../../components/admin/dashboard/MonthlyAttendanceTrend'));
 const DashboardInsightsPanel = lazy(() => import('../../components/admin/dashboard/DashboardInsightsPanel'));
 
@@ -441,6 +442,10 @@ export default function AdminDashboard() {
         <StatsCard icon={HiOutlineClipboardList} label="Papers" value={stats.total_papers || 0} color="#10b981" />
         <StatsCard icon={HiOutlineShieldCheck} label="Audit Logs" value={stats.total_audit_logs || 0} color="#ef4444" />
         <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
+      </div>
+
+      <div style={{ marginBottom: 20 }}>
+        <AcademicCalendarPanel scopeDepartmentId={isDepartmentAdmin ? departmentId : ''} scopeDepartmentName={isDepartmentAdmin ? departmentName : ''} compact />
       </div>
 
       {/* ─── Attendance Summary (primary focus) ─── */}

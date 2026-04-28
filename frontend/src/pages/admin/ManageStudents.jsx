@@ -164,11 +164,9 @@ export default function ManageStudents() {
     params.page = nextPage;
     params.per_page = PAGE_SIZE;
     if (debouncedSearch) params.q = debouncedSearch;
-    // Send both department_id and department name for backend filtering
+    // Use department_id only; backend handles scoping by ID.
     if (debouncedFilters.department_id) {
       params.department_id = debouncedFilters.department_id;
-      const dept = departments.find((d) => d._id === debouncedFilters.department_id);
-      if (dept) params.department = dept.name;
     }
     if (debouncedFilters.course_id) params.course_id = debouncedFilters.course_id;
     if (debouncedFilters.paper_id) params.paper_id = debouncedFilters.paper_id;
@@ -1195,8 +1193,6 @@ export default function ManageStudents() {
           </button>
         </div>
 
-      <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
-
       <div className="mobile-admin-action-strip">
         <button
           className="icon-btn mobile-filters-icon-btn"
@@ -1419,6 +1415,8 @@ export default function ManageStudents() {
         </div>
         ) : null}
       </div>
+
+      <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
 
       <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add New Student" width={560}>
         {StudentModalBody({ onSubmit: handleAdd, submitLabel: 'Create Student' })}

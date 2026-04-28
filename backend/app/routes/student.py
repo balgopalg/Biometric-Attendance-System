@@ -11,7 +11,7 @@ from app.utils.helpers import sanitise_mongo_doc, sanitise_many
 from app.models.enrollment import get_profile_by_user
 from app.models.paper import get_paper_by_id
 from app.models.course import get_course_by_id
-from app.models.attendance import count_attendance, get_approved_leave_dates, session_date_str
+from app.models.attendance import get_approved_leave_dates, session_date_str
 
 student_bp = Blueprint("student", __name__)
 
