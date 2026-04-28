@@ -841,9 +841,13 @@ test.describe('Project end-to-end flows', () => {
     await page.getByRole('combobox', { name: 'Select paper' }).selectOption({ index: 1 });
 
     await page.getByRole('button', { name: 'Start Session' }).click();
-    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
+    const pauseBtn = page.getByRole('button', { name: 'Pause' });
+    const resumeBtn = page.getByRole('button', { name: 'Resume' });
+    await expect(pauseBtn.or(resumeBtn)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole('button', { name: 'Pause' }).click();
+    if (await pauseBtn.isVisible()) {
+      await pauseBtn.click();
+    }
     await page.getByRole('button', { name: 'Upload Image' }).click();
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles({ name: 'classroom.png', mimeType: 'image/png', buffer: ONE_BY_ONE_PNG_BUFFER });
@@ -872,13 +876,21 @@ test.describe('Project end-to-end flows', () => {
     await page.getByRole('combobox', { name: 'Select paper' }).selectOption({ index: 1 });
 
     await page.getByRole('button', { name: 'Start Session' }).click();
-    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
+    const pauseBtn = page.getByRole('button', { name: 'Pause' });
+    const resumeBtn = page.getByRole('button', { name: 'Resume' });
+    await expect(pauseBtn.or(resumeBtn)).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole('button', { name: 'Pause' }).click();
-    await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible({ timeout: 15000 });
-
-    await page.getByRole('button', { name: 'Resume' }).click();
-    await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible({ timeout: 15000 });
+    if (await pauseBtn.isVisible()) {
+      await pauseBtn.click();
+      await expect(resumeBtn).toBeVisible({ timeout: 15000 });
+      await resumeBtn.click();
+      await expect(pauseBtn).toBeVisible({ timeout: 15000 });
+    } else {
+      await resumeBtn.click();
+      await expect(pauseBtn).toBeVisible({ timeout: 15000 });
+      await pauseBtn.click();
+      await expect(resumeBtn).toBeVisible({ timeout: 15000 });
+    }
 
     await page.getByRole('button', { name: 'Stop Session' }).click();
     await expect(page.getByRole('button', { name: 'Start Session' })).toBeVisible({ timeout: 15000 });

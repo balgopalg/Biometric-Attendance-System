@@ -177,6 +177,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
+          docker system prune -af || true
+          df -h
+
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 4G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -186,6 +200,10 @@ jobs:
             --file backend/Dockerfile \
             --output type=docker,dest=backend-image.tar \
             backend
+
+      - name: Clean up after backend build
+        run: |
+          docker builder prune -af || true
 
       - name: Build frontend container artifact
         run: |
