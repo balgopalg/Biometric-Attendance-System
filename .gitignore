@@ -94,3 +94,10 @@ test-results/
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
+
+# --- Gitleaks local scan ---
+gitleaks.exe
+gitleaks.zip
+leaks-report.json
+leaks-check.json
+leaks-verify.json

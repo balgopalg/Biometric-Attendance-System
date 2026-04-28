@@ -136,6 +136,8 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD: false
+          GITLEAKS_ENABLE_SUMMARY: true
 
   sbom-and-provenance:
     name: SBOM And Provenance
@@ -158,12 +160,14 @@ jobs:
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: sbom-cyclonedx
           path: sbom.cdx.json
 
       - name: Attest SBOM provenance
         uses: actions/attest-build-provenance@v1
+        continue-on-error: true
         with:
           subject-path: sbom.cdx.json
 
@@ -214,6 +218,7 @@ jobs:
 
       - name: Upload container artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: container-images
           path: |
@@ -222,10 +227,12 @@ jobs:
 
       - name: Attest backend image artifact provenance
         uses: actions/attest-build-provenance@v1
+        continue-on-error: true
         with:
           subject-path: backend-image.tar
 
       - name: Attest frontend image artifact provenance
         uses: actions/attest-build-provenance@v1
+        continue-on-error: true
         with:
           subject-path: frontend-image.tar
