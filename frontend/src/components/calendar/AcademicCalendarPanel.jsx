@@ -589,7 +589,7 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
               : 'Institution-wide academic holiday calendar'}
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto', flexShrink: 0, textAlign: 'right' }}>
           <button
             type="button"
             className="btn-secondary"
@@ -1061,10 +1061,14 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
       >
         <div style={{ display: 'grid', gap: 14 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <span className="badge badge-info">{selectedWeekday}</span>
+            <span
+              className="badge badge-info"
+              style={selectedIsSunday ? { background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.2)' } : undefined}
+            >
+              {selectedWeekday}
+            </span>
             {selectedHoliday ? <span className="badge badge-danger">Holiday: {selectedHoliday.label}</span> : null}
             {selectedOptionalHoliday ? <span className="badge" style={{ background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.2)' }}>Optional: {selectedOptionalHoliday.label}</span> : null}
-            {selectedIsSunday ? <span className="badge badge-danger">Sunday</span> : null}
             {!selectedHoliday && !selectedOptionalHoliday && !selectedIsSunday ? <span className="badge badge-success">No Holiday</span> : null}
           </div>
 
@@ -1174,7 +1178,6 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
           <div className="glass-card" style={{ padding: 16 }}>
             {canViewSchedules && (
               <>
-                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: 8 }}>Timetable for {selectedWeekday}</p>
                 {selectedHoliday ? (
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No classes today for {selectedHoliday.label}.</p>
                 ) : selectedDaySlots.length === 0 ? (
