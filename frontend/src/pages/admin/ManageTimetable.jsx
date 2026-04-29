@@ -711,7 +711,7 @@ export default function ManageTimetable() {
                     <td>{row.academic_session || 'N/A'}</td>
                     <td><span className={statusBadgeClass(row.status)}>{row.status || 'draft'}</span></td>
                     <td>
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'nowrap', overflowX: 'auto', whiteSpace: 'nowrap' }}>
                         <button
                           className="btn-secondary"
                           style={{ width: 34, height: 34, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
