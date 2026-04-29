@@ -66,23 +66,13 @@ export default function LecturerTimetable() {
       toast.success('Timetable PDF downloaded');
     } catch (err) {
       const popup = window.open('', '_blank', 'width=1280,height=900');
-      const html = exportContainerRef.current.innerHTML;
       if (popup) {
-        popup.document.write(`
-          <html>
-            <head>
-              <title>Lecturer Timetable</title>
-              <style>
-                body { font-family: Arial, sans-serif; padding: 20px; }
-                table { width: 100%; border-collapse: collapse; }
-                th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
-                th { background: #f2f2f2; }
-              </style>
-            </head>
-            <body>${html}</body>
-          </html>
-        `);
+        popup.document.open();
+        popup.document.write('<!doctype html><html><head><title>Lecturer Timetable</title><style>body { font-family: Arial, sans-serif; padding: 20px; } table { width: 100%; border-collapse: collapse; } th, td { border: 1px solid #ddd; padding: 8px; text-align: center; } th { background: #f2f2f2; }</style></head><body></body></html>');
         popup.document.close();
+        
+        const clone = exportContainerRef.current.cloneNode(true);
+        popup.document.body.appendChild(clone);
         popup.focus();
         popup.print();
       }

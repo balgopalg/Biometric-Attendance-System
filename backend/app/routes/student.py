@@ -8,6 +8,7 @@ from bson import ObjectId
 from app.extensions import get_collection
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import sanitise_mongo_doc, sanitise_many, _to_int, _as_text, _to_bool, _id_variants
+from app.utils.validation import sanitize_string
 from app.repositories import find_many_by_ids
 from app.models.enrollment import get_profile_by_user
 from app.models.paper import get_paper_by_id
@@ -413,13 +414,25 @@ def manage_leave_requests(user):
 
     if request.method == "POST":
         d          = request.get_json(silent=True) or {}
-        start_date = d.get("start_date") or d.get("date")
-        end_date   = d.get("end_date") or start_date
-        reason     = (d.get("reason") or "").strip()
+        start_date = _as_text(d.get("start_date") or d.get("date"))
+        end_date   = _as_text(d.get("end_date") or start_date)
+        reason     = sanitize_string(d.get("reason") or "", max_length=500)
         paper_id   = d.get("paper_id") # Null indicates "Global/All Papers"
 
-        if not start_date or not reason:
-            return jsonify({"error": "Start date and reason are required"}), 400
+        # Validate dates are in proper format (YYYY-MM-DD)
+        def _parse_calendar_date(date_str):
+            if not date_str:
+                return False
+            try:
+                datetime.strptime(date_str, "%Y-%m-%d")
+                return True
+            except Exception:
+                return False
+
+        if not _parse_calendar_date(start_date) or not _parse_calendar_date(end_date):
+            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+        if not reason:
+            return jsonify({"error": "Reason is required"}), 400
 
         new_leave = {
             "user_id":    str(user["_id"]),

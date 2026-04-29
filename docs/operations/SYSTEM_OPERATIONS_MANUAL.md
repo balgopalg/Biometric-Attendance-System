@@ -431,6 +431,6 @@ It is intended for Admins, Lecturers, Students, and Operators.
 
 ## 10. Where to find payload-level API examples
 
-- OpenAPI spec with examples and schema: [/docs/openapi.yaml](/docs/openapi.yaml)
-- Workflow payload handbook: [/docs/governance/API_WORKFLOW_GUIDE.md](/docs/governance/API_WORKFLOW_GUIDE.md)
-- CLI runbook for all operations commands: [/docs/operations/CLI_COMMAND_RUNBOOK.md](/docs/operations/CLI_COMMAND_RUNBOOK.md)
+- OpenAPI spec with examples and schema: [/docs/openapi.yaml](../openapi.yaml)
+- Workflow payload handbook: [/docs/governance/API_WORKFLOW_GUIDE.md](../governance/API_WORKFLOW_GUIDE.md)
+- CLI runbook for all operations commands: [/docs/operations/CLI_COMMAND_RUNBOOK.md](CLI_COMMAND_RUNBOOK.md)

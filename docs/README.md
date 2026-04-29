@@ -1,50 +1,35 @@
 # Documentation Hub
 
-This folder is the single source of truth for project documentation.
+This directory contains the living documentation for the Biometric Attendance System.
 
-## Structure
+## Sections
 
-| Directory | Contents |
-|---|---|
-| `governance/` | API lifecycle, workflow standards, release policy, compliance baseline |
-| `operations/` | Deployment guide, Docker runbook, CLI reference, incident response |
-| `security/` | Security hardening guide, implementation summary, quick reference |
-| `testing/` | E2E testing strategy, backend/frontend test guides |
-| `observability/` | Observability architecture, metrics, structured logging |
-| `backend/` | Backend lifecycle and migration documents |
-| `frontend/` | Frontend setup and operational notes |
-| `reports/` | Delivery summaries, readiness checklist, project reviews |
+- `governance/` - API lifecycle, workflow standards, release policy, privacy and compliance.
+- `security/` - Security hardening and implementation guidance.
+- `testing/` - Backend and frontend test strategy, quick starts, and execution notes.
+- `observability/` - Logging, metrics, and health check documentation.
+- `backend/` - Backend lifecycle, data retention, terminal messaging, and migration notes.
+- `frontend/` - Frontend architecture and setup notes.
+- `operations/` - Deployment and operator runbooks.
 
-## Key Documents
+## Recommended Entry Points
 
-| Audience | Document |
-|---|---|
-| System operators | `operations/SYSTEM_OPERATIONS_MANUAL.md` |
-| API integrators | `governance/API_WORKFLOW_GUIDE.md` |
-| Deployment owners | `operations/DEPLOYMENT_PRODUCTION.md` |
-| Security reviewers | `security/SECURITY_HARDENING.md` |
-| QA engineers | `testing/TESTING_QUICKSTART.md` |
-| Frontend implementers | `frontend/FRONTEND_README.md` |
-| Export workflows | `EXCEL_EXPORT_GUIDE.md` |
+- [../README.md](../README.md) - Project overview and setup.
+- [frontend/FRONTEND_README.md](frontend/FRONTEND_README.md) - Frontend architecture and local setup.
+- [security/SECURITY_HARDENING.md](security/SECURITY_HARDENING.md) - Implemented security controls.
+- [observability/OBSERVABILITY.md](observability/OBSERVABILITY.md) - Logging, metrics, and health checks.
+- [testing/TESTING.md](testing/TESTING.md) - Test architecture and commands.
+- [backend/MIGRATIONS.md](backend/MIGRATIONS.md) - Migration and schema evolution notes.
+- [backend/DATA_LIFECYCLE.md](backend/DATA_LIFECYCLE.md) - Upload, dataset, and trainer retention.
+- [EXCEL_EXPORT_GUIDE.md](EXCEL_EXPORT_GUIDE.md) - Admin export workflow.
 
-## API Specifications
+## API Contracts
 
-- `openapi.yaml` — Core API contract (routes, schemas)
-- `openapi.full.yaml` — Extended API contract with all endpoints
+- [../docs/openapi.yaml](openapi.yaml) - Primary API contract.
+- [../docs/openapi.full.yaml](openapi.full.yaml) - Extended API contract with the full endpoint surface.
 
-## Recent Updates (April 2026)
+## Documentation Rules
 
-- All 21 code review issues resolved (security, performance, technical debt)
-- MongoDB authentication enabled in Docker Compose
-- Email templates hardened against XSS via `html.escape()`
-- N+1 query patterns eliminated in session review endpoints
-- LRU-bounded caching for profile and query caches
-- Leave management routes added for students and admins
-- 4-tier RBAC documentation updated (`student → lecturer → department_admin → super_admin`)
-
-## Documentation Standards
-
-- Keep all Markdown documentation under `/docs`
-- Use absolute repo-root links like `/docs/<section>/<file>.md`
-- Keep implementation scripts and runtime assets outside `/docs`
-- Keep operational commands synchronized with `operations/CLI_COMMAND_RUNBOOK.md`
+- Keep source-of-truth documentation here under `docs/`.
+- Prefer code-derived descriptions over release summaries or review reports.
+- Remove outdated project-review artifacts once their content is captured in the living guides.

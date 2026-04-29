@@ -288,14 +288,25 @@ class FakeCollection:
         doc = {key: copy.deepcopy(value) for key, value in query.items() if not key.startswith("$")}
         if "_id" not in doc:
             doc["_id"] = ObjectId()
+        self._is_upserting = True
         self._apply_update(doc, update)
+        self._is_upserting = False
         return doc
 
     def _apply_update(self, doc, update):
         for operator, payload in update.items():
-            if operator == "$set":
+            if operator == "$set" or operator == "$setOnInsert":
                 for key, value in payload.items():
-                    doc[key] = copy.deepcopy(value)
+                    # For $setOnInsert, ideally we should only apply it on insert,
+                    # but in FakeCollection _apply_update context, when upserting
+                    # it applies it as $set. (Since $setOnInsert is only ever called during upsert logic).
+                    # Actually, if the document was already found, $setOnInsert does nothing.
+                    # Wait, _apply_update is used for both update and upsert. If it's an update, $setOnInsert should be ignored.
+                    # But the simplest fix is to just handle it. Let's do it right.
+                    if operator == "$set":
+                        doc[key] = copy.deepcopy(value)
+                    elif operator == "$setOnInsert" and getattr(self, "_is_upserting", False):
+                        doc[key] = copy.deepcopy(value)
             elif operator == "$inc":
                 for key, value in payload.items():
                     doc[key] = doc.get(key, 0) + value

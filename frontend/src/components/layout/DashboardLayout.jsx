@@ -38,8 +38,11 @@ export default function DashboardLayout() {
   const title = titleMap[pathname] || 'Dashboard';
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('sidebar-collapsed');
-    return saved === '1';
+    try {
+      return localStorage.getItem('sidebar-collapsed') === '1';
+    } catch {
+      return false;
+    }
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
 
@@ -70,7 +73,11 @@ export default function DashboardLayout() {
   }, [isMobile, isSidebarOpen]);
 
   useEffect(() => {
-    localStorage.setItem('sidebar-collapsed', isSidebarCollapsed ? '1' : '0');
+    try {
+      localStorage.setItem('sidebar-collapsed', isSidebarCollapsed ? '1' : '0');
+    } catch {
+      // Ignore storage failures in restricted environments.
+    }
   }, [isSidebarCollapsed]);
 
   const toggleSidebar = () => {

@@ -466,10 +466,17 @@ def change_password():
 @auth_bp.route("/profile-picture/<path:file_name>", methods=["GET"])
 @jwt_required()
 def get_profile_picture(file_name):
-    """Serve profile pictures for authenticated users."""
+    """Serve profile pictures for authenticated users (ownership validated)."""
+    email = get_jwt_identity()
+    user = find_user_by_email(email)
+
     safe_name = os.path.basename(file_name or "")
-    if not safe_name:
-        return jsonify({"error": "Invalid profile picture path"}), 400
+    if not user or not safe_name:
+        return jsonify({"error": "Profile picture not found"}), 404
+
+    # Verify ownership: user can only download their own profile picture
+    if user.get("profile_picture_file") != safe_name:
+        return jsonify({"error": "Profile picture not found"}), 404
 
     profile_dir = _safe_profile_upload_folder()
     file_path = os.path.join(profile_dir, safe_name)

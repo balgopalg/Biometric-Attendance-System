@@ -65,20 +65,27 @@ def main() -> None:
                     print(f"Dropped {db_name}.{collection_name}")
 
             docs = []
+            batch_size = 1000
+            doc_count = 0
             with src_path.open("r", encoding="utf-8") as handle:
                 for line in handle:
                     line = line.strip()
                     if not line:
                         continue
                     docs.append(json_util.loads(line))
+                    doc_count += 1
+                    if len(docs) >= batch_size:
+                        if not args.dry_run:
+                            collection.insert_many(docs, ordered=False)
+                        docs.clear()
 
             if args.dry_run:
-                print(f"[dry-run] would restore {len(docs)} docs into {db_name}.{collection_name}")
+                print(f"[dry-run] would restore {doc_count} docs into {db_name}.{collection_name}")
                 continue
 
             if docs:
                 collection.insert_many(docs, ordered=False)
-            print(f"Restored {len(docs)} docs into {db_name}.{collection_name}")
+            print(f"Restored {doc_count} docs into {db_name}.{collection_name}")
 
 
 if __name__ == "__main__":
