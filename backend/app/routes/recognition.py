@@ -90,7 +90,8 @@ def identify_faces(user):
         return jsonify({"error": "Valid paper_id is required for identification"}), 400
 
     profiles = get_profiles_for_paper_cached(paper_id)
-    candidates = prepare_profile_candidates(profiles)
+    # Reuse cached candidates if already prepared (contain vectors)
+    candidates = profiles if profiles and profiles[0].get('vectors') else prepare_profile_candidates(profiles)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
 
     matches = []

@@ -55,27 +55,30 @@ def main() -> None:
             collection_names = sorted(db.list_collection_names())
 
             for collection_name in collection_names:
-                docs = list(db[collection_name].find({}))
+                cursor = db[collection_name].find({})
                 rel_path = Path(alias) / f"{collection_name}.jsonl"
+                
+                # Count docs for manifest (this does load them, but only for display)
+                doc_count = db[collection_name].count_documents({})
                 manifest["files"].append({
                     "alias": alias,
                     "database": db_name,
                     "collection": collection_name,
                     "path": str(rel_path).replace("\\", "/"),
-                    "count": len(docs),
+                    "count": doc_count,
                 })
 
                 if args.dry_run:
-                    print(f"- {alias}.{collection_name}: {len(docs)} docs")
+                    print(f"- {alias}.{collection_name}: {doc_count} docs")
                     continue
 
                 out_path = target_root / rel_path
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 with out_path.open("w", encoding="utf-8") as handle:
-                    for doc in docs:
+                    for doc in cursor:
                         handle.write(json_util.dumps(doc))
                         handle.write("\n")
-                print(f"- wrote {alias}.{collection_name}: {len(docs)} docs")
+                print(f"- wrote {alias}.{collection_name}: {doc_count} docs")
 
         if not args.dry_run:
             target_root.mkdir(parents=True, exist_ok=True)

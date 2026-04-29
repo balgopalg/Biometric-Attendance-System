@@ -48,20 +48,12 @@ def _ocr_text(image: Image.Image) -> str:
 
 
 def _parse_date_text(value: str) -> Optional[date]:
-    for separator in ("/", "-"):
-        parts = value.split(separator)
-        if len(parts) != 3:
-            continue
+    """Parse date text in multiple formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, YYYY-MM-DD, YYYY/MM/DD."""
+    for fmt in ('%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y-%m-%d', '%Y/%m/%d'):
         try:
-            first = int(parts[0])
-            second = int(parts[1])
-            year = int(parts[2])
-            return date(year, second, first) if separator == "/" else date(year, second, first)
+            return datetime.strptime(value, fmt).date()
         except Exception:
-            try:
-                return date(int(parts[2]), int(parts[1]), int(parts[0]))
-            except Exception:
-                continue
+            continue
     return None
 
 

@@ -629,11 +629,12 @@ def _launch_background_job(app, job_type, payload):
     job_id = _create_background_job(job_type, payload)
 
     if current_app.config.get("TASK_QUEUE_ENABLED", False):
-        try:
-            if _enqueue_background_job(job_id):
-                return job_id
-        except Exception:
-            app.logger.exception("Queue enqueue failed for job %s; falling back to local thread", job_id)
+        if _enqueue_background_job(job_id):
+            return job_id
+
+    env = str(current_app.config.get("ENV") or "").lower()
+    if env not in {"development", "dev", "local", "testing", "test"}:
+        raise RuntimeError("Background jobs require TASK_QUEUE_ENABLED in non-local environments")
 
     thread = Thread(target=_run_background_job, args=(app, job_id), daemon=True)
     thread.start()

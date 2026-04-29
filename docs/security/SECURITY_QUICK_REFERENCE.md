@@ -43,7 +43,6 @@
 | `app/security/access_control.py` | RBAC decorators (@role_required, @permission_required) |
 | `app/utils/validation.py` | Input validation (email, password, PIN, role, etc.) |
 | `/docs/security/SECURITY_HARDENING.md` | Comprehensive security guide |
-| `/docs/security/SECURITY_IMPLEMENTATION_SUMMARY.md` | Implementation details |
 | `backend/.env.example` | Backend environment variable template |
 | `verify_security.py` | Verification script to test all features |
 

@@ -97,20 +97,32 @@ def ensure_welcome_notification(user):
 
     user_id = str(user.get("_id"))
     notifications = _notifications_collection()
-    if notifications.count_documents({"user_id": user_id, "template_key": "welcome"}) > 0:
-        return None
-
+    
     title, body, action_url = _welcome_payload(user.get("role"))
-    return create_notification(
-        user_id=user_id,
-        title=title,
-        body=body,
-        category="system",
-        priority="high",
-        action_url=action_url,
-        template_key="welcome",
-        metadata={"role": user.get("role", "student")},
+    doc = {
+        "user_id": user_id,
+        "title": title,
+        "body": body,
+        "category": "system",
+        "priority": "high",
+        "action_url": action_url,
+        "template_key": "welcome",
+        "is_read": False,
+        "created_at": datetime.now(timezone.utc),
+        "metadata": {"role": user.get("role", "student")},
+    }
+    
+    # Use atomic upsert to prevent duplicate welcome notifications
+    result = notifications.update_one(
+        {"user_id": user_id, "template_key": "welcome"},
+        {"$setOnInsert": doc},
+        upsert=True,
     )
+    
+    # Return the document if it was inserted
+    if result.upserted_id:
+        return doc
+    return None
 
 
 def list_notifications(user_id, limit=20):

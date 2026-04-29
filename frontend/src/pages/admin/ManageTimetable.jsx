@@ -512,68 +512,50 @@ export default function ManageTimetable() {
         return;
       }
 
-      const linkTags = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-        .map((node) => node.outerHTML)
-        .join('\n');
-      const styleTags = Array.from(document.querySelectorAll('style'))
-        .map((node) => node.outerHTML)
-        .join('\n');
       const theme = document.documentElement.getAttribute('data-theme');
       const clone = target.cloneNode(true);
 
-      popup.document.open();
-      popup.document.write(`
-        <!doctype html>
-        <html>
-          <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1" />
-            <title>Timetable Export</title>
-            ${linkTags}
-            ${styleTags}
-            <style>
-              @page { size: landscape; margin: 10mm; }
-              html, body { margin: 0; padding: 0; background: #ffffff; }
-              body {
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-                color: var(--text-primary);
-              }
-              .timetable-print-root {
-                width: max-content;
-                min-width: 100%;
-                padding: 14px;
-                background: #ffffff;
-              }
-              .timetable-print-root .glass-card {
-                box-shadow: none !important;
-              }
-              .timetable-print-root button,
-              .timetable-print-root .timetable-cell-edit-btn {
-                display: none !important;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="timetable-print-root"></div>
-          </body>
-        </html>
-      `);
-      popup.document.close();
-
+      const doc = popup.document;
       if (theme) {
-        popup.document.documentElement.setAttribute('data-theme', theme);
+        doc.documentElement.setAttribute('data-theme', theme);
       }
 
-      const mount = popup.document.querySelector('.timetable-print-root');
-      if (!mount) {
-        popup.close();
-        throw new Error('Unable to prepare print preview');
-      }
+      Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).forEach((node) => {
+        doc.head.appendChild(node.cloneNode(true));
+      });
+
+      const printStyles = doc.createElement('style');
+      printStyles.textContent = `
+        @page { size: landscape; margin: 10mm; }
+        html, body { margin: 0; padding: 0; background: #ffffff; }
+        body {
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+          color: var(--text-primary);
+        }
+        .timetable-print-root {
+          width: max-content;
+          min-width: 100%;
+          padding: 14px;
+          background: #ffffff;
+        }
+        .timetable-print-root .glass-card {
+          box-shadow: none !important;
+        }
+        .timetable-print-root button,
+        .timetable-print-root .timetable-cell-edit-btn {
+          display: none !important;
+        }
+      `;
+      doc.head.appendChild(printStyles);
+
+      const mount = doc.createElement('div');
+      mount.className = 'timetable-print-root';
+      doc.body.appendChild(mount);
 
       mount.appendChild(clone);
 
-      const ready = popup.document.fonts?.ready;
+      const ready = doc.fonts?.ready;
       if (ready?.then) {
         await ready.catch(() => undefined);
       }

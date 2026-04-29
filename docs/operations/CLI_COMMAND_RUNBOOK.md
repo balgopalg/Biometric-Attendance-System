@@ -397,6 +397,6 @@ npm run test:e2e
 
 ## 11. Related documents
 
-- API contract: [/docs/openapi.yaml](/docs/openapi.yaml)
-- Workflow payloads and validation: [/docs/governance/API_WORKFLOW_GUIDE.md](/docs/governance/API_WORKFLOW_GUIDE.md)
-- Full operations manual: [/docs/operations/SYSTEM_OPERATIONS_MANUAL.md](/docs/operations/SYSTEM_OPERATIONS_MANUAL.md)
+- API contract: [/docs/openapi.yaml](../openapi.yaml)
+- Workflow payloads and validation: [/docs/governance/API_WORKFLOW_GUIDE.md](../governance/API_WORKFLOW_GUIDE.md)
+- Full operations manual: [/docs/operations/SYSTEM_OPERATIONS_MANUAL.md](SYSTEM_OPERATIONS_MANUAL.md)

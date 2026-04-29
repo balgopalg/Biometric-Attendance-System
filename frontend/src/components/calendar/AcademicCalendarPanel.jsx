@@ -316,18 +316,19 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
   const [showTodos, setShowTodos] = useState(false);
   const [newTodoText, setNewTodoText] = useState('');
   const [todosStore, setTodosStore] = useState({});
+  const storageUserKey = user?._id || user?.email || 'guest';
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(`ac_todos_${user?.id || 'guest'}`);
+      const saved = localStorage.getItem(`ac_todos_${storageUserKey}`);
       if (saved) setTodosStore(JSON.parse(saved));
     } catch { /* ignore */ }
-  }, [user?.id]);
+  }, [storageUserKey]);
 
   const saveTodos = (newStore) => {
     setTodosStore(newStore);
     try {
-      localStorage.setItem(`ac_todos_${user?.id || 'guest'}`, JSON.stringify(newStore));
+      localStorage.setItem(`ac_todos_${storageUserKey}`, JSON.stringify(newStore));
     } catch { /* ignore */ }
   };
 

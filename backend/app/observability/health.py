@@ -98,24 +98,14 @@ class HealthChecker:
             
             queue_name = current_app.config.get('TASK_QUEUE_NAME') or 'biometric:jobs'
             
-            # Get queue stats
-            queue_length = r.llen(f'{queue_name}:queue')
-            running_count = r.llen(f'{queue_name}:running')
-            dead_letter_count = r.llen(f'{queue_name}:dead_letter')
-            
-            # Get recent failures (last 24 hours)
-            recent_failures = r.zcount(
-                f'{queue_name}:failed',
-                min=datetime.now(timezone.utc).timestamp() - 86400,
-                max=datetime.now(timezone.utc).timestamp()
-            )
+            # Get queue stats - check actual queue keys used by implementation
+            queue_length = r.llen(queue_name)
+            delayed_count = r.zcard(f'{queue_name}:delayed')
             
             return {
                 'status': 'healthy',
                 'queue_length': queue_length,
-                'running_jobs': running_count,
-                'dead_letter_count': dead_letter_count,
-                'recent_failures': recent_failures,
+                'delayed_jobs': delayed_count,
             }
         
         except Exception as e:

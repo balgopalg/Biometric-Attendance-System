@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from app.extensions import get_collection
 from app.utils.timezone import to_india_time
 
@@ -21,9 +22,22 @@ def log_attendance(
         "method": method,
         "timestamp": datetime.now(timezone.utc),
     }
-    result = logs.insert_one(doc)
-    doc["_id"] = str(result.inserted_id)
-    return doc
+    try:
+        result = logs.insert_one(doc)
+        doc["_id"] = str(result.inserted_id)
+        return doc
+    except DuplicateKeyError:
+        # Return existing record if duplicate key error occurs (e.g., from retry)
+        existing = logs.find_one({
+            'session_id': session_id,
+            'paper_id': paper_id,
+            'user_id': user_id
+        })
+        if existing:
+            existing["_id"] = str(existing["_id"])
+            return existing
+        # If we can't find the existing doc, re-raise the error
+        raise
 
 
 def get_attendance_for_student(user_id: str, paper_id: Optional[str] = None, limit: int = 5000) -> List[dict]:

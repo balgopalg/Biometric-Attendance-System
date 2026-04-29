@@ -1,223 +1,41 @@
-# Observability Guide
+# Observability
 
-Comprehensive observability infrastructure for the biometric attendance system, enabling structured logging, centralized error tracking, metrics collection, and health monitoring for production deployments.
+The application includes the main observability hooks needed for the current backend surface: structured logging, health checks, and metrics exposure.
 
-## Overview
+## What Is Covered
 
-The observability stack includes:
+- Structured logging for request and application events.
+- Database, Redis, queue, and storage health checks.
+- Metrics hooks for HTTP, auth, database, attendance, and queue operations.
+- Error tracking integration for operational review and triage.
 
-- **Structured JSON Logging**: Contextual logging with request tracing
-- **Centralized Error Tracking**: Sentry integration for error grouping and alerting
-- **Prometheus Metrics**: Request/response metrics and system health indicators
-- **Health Checks**: Comprehensive endpoints for API, database, queue, and storage health
+## Current Entry Points
 
-## Architecture
+- [backend/app/observability/health.py](../../backend/app/observability/health.py)
+- [backend/app/observability/metrics.py](../../backend/app/observability/metrics.py)
+- [backend/app/observability/logging.py](../../backend/app/observability/logging.py)
+- [backend/app/observability/error_tracking.py](../../backend/app/observability/error_tracking.py)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Flask Application                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │  Structured  │  │   Error      │  │  Metrics     │       │
-│  │  Logging     │  │  Tracking    │  │  Collection  │       │
-│  │  (JSON)      │  │  (Sentry)    │  │ (Prometheus) │       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-│         │                  │                  │              │
-└─────────────────────────────────────────────────────────────┘
-         │                  │                  │
-         ▼                  ▼                  ▼
-    ┌─────────┐      ┌─────────┐       ┌──────────┐
-    │  STDOUT │      │ Sentry  │       │Prometheus│
-    │  (JSON) │      │  Cloud  │       │ Metrics  │
-    └─────────┘      └─────────┘       └──────────┘
-         │                  │                  │
-         ▼                  ▼                  ▼
-    ┌─────────┐      ┌─────────┐       ┌──────────┐
-    │   ELK   │      │Sentry   │       │ Grafana  │
-    │ Stack   │      │Dashboard│       │ Dashboard│
-    └─────────┘      └─────────┘       └──────────┘
-```
+## Health Checks
 
-## Components
+- `GET /api/auth/health`
+- `GET /api/health`
+- `GET /api/health/database`
+- `GET /api/health/redis`
+- `GET /api/health/queue`
+- `GET /api/health/storage`
 
-### 1. Structured Logging (`app/observability/logging.py`)
+## Logging Notes
 
-#### Purpose
-JSON-structured logging with automatic request context propagation for correlation and debugging.
+- Keep request IDs and actor context in logs where available.
+- Prefer structured fields over ad hoc string concatenation.
+- Avoid leaking biometric or password-related data into logs.
 
-#### Key Features
-- **JSON Format**: Machine-readable logs for ELK/Datadog integration
-- **Request Context**: Automatic inclusion of request ID, user ID, method, path
-- **Correlation IDs**: X-Request-ID header support for request tracing
-- **Contextual Loggers**: Pre-configured loggers for auth, database, attendance, etc.
+## Metrics Notes
 
-#### Usage
-
-```python
-from app.observability.logging import auth_logger, db_logger
-
-# Simple logging
-auth_logger.info("User login attempt", user_email="john@example.com")
-
-# With context
-auth_logger.set_context(user_id="12345", ip_address="192.168.1.1")
-auth_logger.info("Login successful")
-
-# Error logging
-try:
-    risky_operation()
-except Exception as e:
-    auth_logger.error(f"Operation failed: {str(e)}", exception_type="ValidationError")
-```
-
-#### Log Output Format
-
-```json
-{
-  "timestamp": "2024-01-15T10:30:45.123456",
-  "level": "INFO",
-  "logger": "app.auth",
-  "message": "User login attempt",
-  "request_id": "550e8400-e29b-41d4-a716-446655440000",
-  "http": {
-    "method": "POST",
-    "path": "/api/auth/login",
-    "remote_addr": "192.168.1.1",
-    "user_agent": "Mozilla/5.0..."
-  },
-  "user_email": "john@example.com"
-}
-```
-
-### 2. Error Tracking (`app/observability/error_tracking.py`)
-
-#### Purpose
-Centralized error tracking with MongoDB storage and Sentry integration for error grouping and alerting.
-
-#### Key Features
-- **Error Recording**: Automatic logging of exceptions with full traceback
-- **MongoDB Storage**: Error history in audit database with TTL cleanup
-- **Error IDs**: Unique identifiers for client reference and support
-- **Error Hierarchy**: Tracking of error types (validation, auth, database, etc.)
-
-#### Usage
-
-```python
-from app.observability.error_tracking import ErrorTracker, ErrorHandler
-
-# Track exceptions
-try:
-    process_user_data(user_id)
-except Exception as e:
-    user_id = session.get('user_id')
-    error_id = ErrorTracker.track_error(e, user_id=user_id, context={
-        'operation': 'process_user_data',
-        'user_id': user_id
-    })
-    return {"error": "Operation failed", "error_id": error_id}, 500
-
-# Track validation errors
-error_id = ErrorTracker.track_validation_error(
-    "Email format invalid",
-    field="email",
-    value="invalid-email"
-)
-
-# Track auth errors
-error_id = ErrorTracker.track_auth_error(
-    "Too many login attempts",
-    email="user@example.com"
-)
-
-# Retrieve error details
-error_details = ErrorTracker.get_error(error_id)
-print(error_details)  # Full error document with traceback
-
-# Get recent errors
-recent_errors = ErrorTracker.get_recent_errors(hours=24, limit=50)
-stats = ErrorTracker.get_error_stats(hours=24)
-print(f"Total errors: {stats}")
-```
-
-#### MongoDB Collection Schema
-
-```javascript
-{
-  "_id": "507f1f77bcf86cd799439011",
-  "type": "exception",
-  "exception_type": "ValidationError",
-  "message": "Email format invalid",
-  "traceback": "Traceback (most recent call last)...",
-  "timestamp": ISODate("2024-01-15T10:30:45.123Z"),
-  "user_id": "507f1f77bcf86cd799439012",
-  "http": {
-    "method": "POST",
-    "path": "/api/auth/login",
-    "remote_addr": "192.168.1.1",
-    "user_agent": "Mozilla/5.0..."
-  },
-  "context": {
-    "operation": "login",
-    "email_domain": "example.com"
-  }
-}
-```
-
-### 3. Metrics Collection (`app/observability/metrics.py`)
-
-#### Purpose
-Prometheus-compatible metrics for request/response monitoring, system health, and performance dashboards.
-
-#### Key Metrics
-
-**HTTP Metrics**
-- `http_requests_total` - Total requests by method/endpoint/status
-- `http_request_duration_seconds` - Request latency histogram
-
-**Authentication Metrics**
-- `auth_attempts_total` - Auth attempts by success/failure
-- `account_lockouts_total` - Account lockouts by reason (login/PIN)
-
-**Error Metrics**
-- `errors_total` - Errors by type and HTTP status
-
-**Database Metrics**
-- `db_operations_total` - Operations count by type/collection
-- `db_operation_duration_seconds` - DB operation latency
-
-**Attendance Metrics**
-- `attendance_sessions_total` - Sessions by status
-- `students_marked_total` - Students marked by type
-
-**Queue Metrics**
-- `queue_jobs_total` - Jobs by queue/status
-- `queue_job_duration_seconds` - Job execution time
-
-#### Usage
-
-```python
-from app.observability.metrics import MetricsCollector, MetricsSnapshot
-
-# Record HTTP request (automatic via middleware)
-MetricsCollector.record_http_request(
-    method="POST",
-    endpoint="auth.login",
-    status_code=200,
-    duration_seconds=0.195
-)
-
-# Record authentication event
-MetricsCollector.record_auth_attempt(success=True)
-
-# Record errors
-MetricsCollector.record_error(error_type="ValueError", status_code=400)
-
-# Record database operation
-MetricsCollector.record_db_operation(
-    operation="find",
-    collection="users",
-    duration_seconds=0.012
+- Track latency and status for the routes that drive attendance, enrollment, exports, and authentication.
+- Keep queue and background-job health aligned with the actual queue keys used by the worker path.
+- Use metrics to distinguish normal load from failed or blocked workflows.
 )
 
 # Get metrics snapshot
@@ -696,6 +514,6 @@ from app.observability.health import (
 
 ## Related Documentation
 
-- [/docs/security/SECURITY_HARDENING.md](/docs/security/SECURITY_HARDENING.md) - Security implementation
-- [/docs/testing/TESTING.md](/docs/testing/TESTING.md) - Test suite
-- [backend/.env.example](/backend/.env.example) - Configuration template
+- [/docs/security/SECURITY_HARDENING.md](../security/SECURITY_HARDENING.md) - Security implementation
+- [/docs/testing/TESTING.md](../testing/TESTING.md) - Test suite
+- [backend/.env.example](../../backend/.env.example) - Configuration template
