@@ -26,3 +26,16 @@ def get_profiles_for_paper_cached(paper_id):
             _profile_cache.popitem(last=False)
 
     return data
+
+
+def invalidate_paper_cache(paper_id=None):
+    """Bust the profile cache for a paper, or clear all entries.
+
+    Call this from enrollment/unenrollment write paths so recognition
+    picks up changes immediately instead of waiting for TTL expiry.
+    """
+    with _CACHE_LOCK:
+        if paper_id is None:
+            _profile_cache.clear()
+        else:
+            _profile_cache.pop(paper_id, None)

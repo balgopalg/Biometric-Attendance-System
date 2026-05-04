@@ -519,12 +519,8 @@ def upload_profile_picture():
     try:
         image_rgb = decode_image_bytes(file_bytes)
         image_bgr = image_rgb[:, :, ::-1]
-        min_kb = int(current_app.config.get("PHOTO_MIN_KB", 100) or 100)
-        max_kb = int(current_app.config.get("PHOTO_MAX_KB", 300) or 300)
-        if min_kb <= 0:
-            min_kb = 1
-        if max_kb < min_kb:
-            max_kb = min_kb
+        min_kb = max(1, current_app.config.get("PHOTO_MIN_KB", 100))
+        max_kb = max(min_kb, current_app.config.get("PHOTO_MAX_KB", 300))
         save_jpeg_with_size_bounds(
             destination,
             image_bgr,

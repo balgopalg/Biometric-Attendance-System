@@ -4608,7 +4608,25 @@ def exam_eligibility_summary(user):
     else:
         dept_scope_id = _user_dept_id(user)
 
+    # Fetch courses by ID scope
     courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"], department_id=dept_scope_id))
+    
+    # Defensive fix: If we have a specific department selected, ensure we also include courses that might only have the department name set but missing the ID
+    if dept_scope_id:
+        from app.models.department import get_department_by_id
+        target_dept = get_department_by_id(dept_scope_id)
+        if target_dept and target_dept.get("name"):
+            target_name = target_dept["name"]
+            # Get all courses matching this department name to catch any data inconsistencies
+            all_courses_col = get_collection("academic", "courses")
+            name_matches = sanitise_many(list(all_courses_col.find({"department": target_name})))
+            
+            # Merge results to avoid duplicates
+            existing_ids = {str(c["_id"]) for c in courses}
+            for nm in name_matches:
+                if str(nm["_id"]) not in existing_ids:
+                    courses.append(nm)
+
     papers = sanitise_many(get_all_papers(["name", "code", "semester", "course_id", "lecturer_id", "created_at"]))
     course_map = {c["_id"]: c for c in courses}
     paper_map = {p["_id"]: p for p in papers}

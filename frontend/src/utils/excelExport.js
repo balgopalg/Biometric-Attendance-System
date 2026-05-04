@@ -64,10 +64,8 @@ export async function exportToExcel({
       const colWidths = columns.map((col) => ({
         wch: Math.max(
           col.header.length,
-          Math.max(
-            ...transformedData.map((row) =>
-              String(row[col.header] || '').length
-            ),
+          transformedData.reduce(
+            (max, row) => Math.max(max, String(row[col.header] || '').length),
             10
           )
         ),

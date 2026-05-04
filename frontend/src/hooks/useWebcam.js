@@ -89,7 +89,7 @@ export function useWebcam(options = {}) {
     }
 
     return dataUrl;
-  }, []);
+  }, [options.cropSquare, options.outSize]);
 
   useEffect(() => {
     return () => stopCamera();

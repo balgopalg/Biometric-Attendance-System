@@ -40,7 +40,8 @@ def detect_faces(user):
         try:
             img = decode_base64_image(frame)
         except ValueError as e:
-            return jsonify({"error": f"Invalid image data: {e}"}), 400
+            current_app.logger.warning("Invalid base64 image data: %s", e)
+            return jsonify({"error": "Invalid image data"}), 400
         
     detector = get_detector()
     faces = detector.detect_faces(img)

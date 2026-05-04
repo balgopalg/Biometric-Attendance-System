@@ -51,6 +51,8 @@ def _normalize_attendance_sessions_once():
 
     Fixes missing/typed fields that can make valid committed sessions disappear
     from history views after rollback re-commit flows.
+
+    Uses bulk_write for performance instead of per-document update_one.
     """
     global _SESSIONS_NORMALIZED
     if _SESSIONS_NORMALIZED:
@@ -60,7 +62,10 @@ def _normalize_attendance_sessions_once():
         if _SESSIONS_NORMALIZED:
             return
 
+        from pymongo import UpdateOne
+
         sessions_col = get_collection("attendance", "attendance_sessions")
+        bulk_ops = []
         for doc in sessions_col.find({}):
             session_id = doc.get("session_id")
             if not session_id:
@@ -99,7 +104,15 @@ def _normalize_attendance_sessions_once():
             if committed_at:
                 updates["committed_at"] = committed_at
 
-            sessions_col.update_one({"_id": doc.get("_id")}, {"$set": updates})
+            bulk_ops.append(UpdateOne({"_id": doc.get("_id")}, {"$set": updates}))
+
+            # Flush in batches of 500 to cap memory usage.
+            if len(bulk_ops) >= 500:
+                sessions_col.bulk_write(bulk_ops, ordered=False)
+                bulk_ops.clear()
+
+        if bulk_ops:
+            sessions_col.bulk_write(bulk_ops, ordered=False)
 
         _SESSIONS_NORMALIZED = True
 
@@ -386,31 +399,12 @@ def _clear_cached_session_candidates(session_id):
 
 
 def _extract_classroom_faces(img_rgb, img_bgr=None):
-    """Extract classroom face crops using MediaPipe first, then Haar cascade fallback."""
-    def _resize_with_letterbox(image, size=160):
-        if image is None or not hasattr(image, "shape"):
-            return None
-        h, w = image.shape[:2]
-        if h <= 0 or w <= 0:
-            return None
-        scale = size / float(max(h, w))
-        new_w = max(1, int(round(w * scale)))
-        new_h = max(1, int(round(h * scale)))
-        interp = cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC
-        resized = cv2.resize(image, (new_w, new_h), interpolation=interp)
-        top = (size - new_h) // 2
-        bottom = size - new_h - top
-        left = (size - new_w) // 2
-        right = size - new_w - left
-        return cv2.copyMakeBorder(
-            resized,
-            top,
-            bottom,
-            left,
-            right,
-            cv2.BORDER_CONSTANT,
-            value=(0, 0, 0),
-        )
+    """Extract classroom face crops using FaceDetector (MediaPipe + Haar).
+
+    Falls back to HOG people detection for group photos where face detection
+    fails entirely — this is the only logic not in FaceDetector.
+    """
+    from app.services.face_detection import FaceDetector
 
     detector = get_detector()
     faces = detector.detect_faces(img_rgb) or []
@@ -418,42 +412,10 @@ def _extract_classroom_faces(img_rgb, img_bgr=None):
     if faces:
         return faces
 
+    # Final fallback: detect people regions so the bundle still contains per-person crops.
     if img_bgr is None:
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    cascade = cv2.CascadeClassifier(cascade_path)
-    rects = cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=4,
-        minSize=(40, 40),
-    )
-
-    fallback_faces = []
-    for (x, y, w, h) in rects:
-        pad = int(0.18 * max(w, h))
-        x1 = max(x - pad, 0)
-        y1 = max(y - pad, 0)
-        x2 = min(x + w + pad, img_rgb.shape[1])
-        y2 = min(y + h + pad, img_rgb.shape[0])
-        crop = img_rgb[y1:y2, x1:x2]
-        if crop.size == 0:
-            continue
-        crop_resized = _resize_with_letterbox(crop, size=160)
-        if crop_resized is None:
-            continue
-        fallback_faces.append({
-            "bbox": (x, y, w, h),
-            "confidence": 1.0,
-            "crop": crop_resized,
-        })
-
-    if fallback_faces:
-        return fallback_faces
-
-    # Final fallback: detect people regions so the bundle still contains per-person crops.
     hog = cv2.HOGDescriptor()
     hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
     boxes, _ = hog.detectMultiScale(
@@ -465,22 +427,9 @@ def _extract_classroom_faces(img_rgb, img_bgr=None):
 
     people_faces = []
     for (x, y, w, h) in boxes:
-        pad = int(0.08 * max(w, h))
-        x1 = max(x - pad, 0)
-        y1 = max(y - pad, 0)
-        x2 = min(x + w + pad, img_rgb.shape[1])
-        y2 = min(y + h + pad, img_rgb.shape[0])
-        crop = img_rgb[y1:y2, x1:x2]
-        if crop.size == 0:
-            continue
-        crop_resized = _resize_with_letterbox(crop, size=160)
-        if crop_resized is None:
-            continue
-        people_faces.append({
-            "bbox": (x, y, w, h),
-            "confidence": 0.5,
-            "crop": crop_resized,
-        })
+        face = detector._build_face_record(img_rgb, int(x), int(y), int(w), int(h), 0.5)
+        if face is not None:
+            people_faces.append(face)
 
     return people_faces
 
@@ -582,7 +531,8 @@ def recognize_frame(user):
     try:
         img = decode_base64_image(frame_b64)
     except ValueError as e:
-        return jsonify({"error": f"Invalid image data: {e}"}), 400
+        current_app.logger.warning("Invalid base64 image in identify_frame: %s", e)
+        return jsonify({"error": "Invalid image data"}), 400
     faces = _extract_classroom_faces(img)
 
     if not faces:
@@ -593,6 +543,8 @@ def recognize_frame(user):
 
     new_matches = []
     best_similarity_seen = -1.0
+    # Build a set from the DB-authoritative recognized list for thread-safe dedup.
+    recognized_set = set(session.get("recognized") or [])
     for face in faces:
         embedding = generate_embedding(face["crop"])
 
@@ -602,8 +554,8 @@ def recognize_frame(user):
         if face_best_similarity > best_similarity_seen:
             best_similarity_seen = face_best_similarity
 
-        if match and match["user_id"] not in session["recognized"]:
-            session["recognized"].append(match["user_id"])
+        if match and match["user_id"] not in recognized_set:
+            recognized_set.add(match["user_id"])
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
@@ -622,13 +574,13 @@ def recognize_frame(user):
                 threshold=threshold,
             )
 
-    _save_recognized_students(session_id, session.get("recognized") or [])
+    _save_recognized_students(session_id, list(recognized_set))
     _touch_active_session(session_id)
 
     return jsonify({
         "new_matches": new_matches,
         "faces_detected": len(faces),
-        "total_recognized": len(session["recognized"]),
+        "total_recognized": len(recognized_set),
         "candidates_count": len(candidates),
         "threshold": threshold,
         "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
@@ -694,7 +646,7 @@ def recognize_image(user):
             session_id=session_id,
             error=str(e),
         )
-        return jsonify({"error": f"Failed to process image: {str(e)}"}), 400
+        return jsonify({"error": "Failed to process image"}), 400
     
     faces = _extract_classroom_faces(img, img_bgr=img_raw)
 
@@ -807,11 +759,13 @@ def session_recognized_list(user):
     if str(session.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "Unauthorized"}), 403
 
-    students = []
-    for uid in session["recognized"]:
-        u = find_user_by_id(uid)
-        if u:
-            students.append({"user_id": uid, "name": u["name"], "email": u["email"]})
+    recognized_ids = session.get("recognized") or []
+    users_map = get_users_by_ids(recognized_ids)
+    students = [
+        {"user_id": uid, "name": u.get("name", "Unknown"), "email": u.get("email", "")}
+        for uid in recognized_ids
+        if (u := users_map.get(uid))
+    ]
 
     _touch_active_session(session_id)
     return jsonify({"students": students})
@@ -909,7 +863,7 @@ def commit_session(user):
             log_action("LECTURER_AUTH_SUCCESS", str(user["_id"]), details="Biometric verification successful")
         except Exception as exc:
             current_app.logger.exception("Biometric commit verification failed")
-            return jsonify({"error": f"Biometric system error: {str(exc)}"}), 500
+            return jsonify({"error": "Biometric system error. Please try again."}), 500
     else:
         pin = str(d.get("pin", "")).strip()
         has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
@@ -1134,6 +1088,19 @@ def lecturer_progress(user):
         if sid:
             logs_by_session[sid].append(log)
 
+    # ── Batch-fetch all user data upfront to avoid N+1 queries ──────────
+    all_user_ids = set()
+    for session_doc in committed_docs:
+        for uid in (session_doc.get("user_ids") or []):
+            all_user_ids.add(str(uid).strip())
+    for entries in logs_by_session.values():
+        for entry in entries:
+            uid = entry.get("user_id")
+            if uid:
+                all_user_ids.add(str(uid).strip())
+    all_user_ids.discard("")
+    users_map = get_users_by_ids(list(all_user_ids))
+
     sessions = []
     seen_session_ids = set()
 
@@ -1162,7 +1129,7 @@ def lecturer_progress(user):
             if not stu or stu in seen:
                 continue
             seen.add(stu)
-            u = find_user_by_id(stu)
+            u = users_map.get(stu)
             students.append({
                 "user_id": stu,
                 "name": u.get("name", "Unknown") if u else "Unknown",
@@ -1208,7 +1175,7 @@ def lecturer_progress(user):
             if not stu or stu in seen:
                 continue
             seen.add(stu)
-            u = find_user_by_id(stu)
+            u = users_map.get(stu)
             students.append({
                 "user_id": stu,
                 "name": u.get("name", "Unknown") if u else "Unknown",

@@ -136,15 +136,12 @@ def find_user_by_email(email: str) -> Optional[dict]:
     normalized_email = normalize_email(email)
     if not normalized_email:
         return None
-        
-    users = get_collection("auth", "users")
-    user = users.find_one({"email": normalized_email})
-    if user:
-        return user
 
-    # Fallback to case-insensitive regex if the user was inserted without normalization
-    escaped_email = re.escape(normalized_email)
-    return users.find_one({"email": {"$regex": f"^{escaped_email}$", "$options": "i"}})
+    users = get_collection("auth", "users")
+    # Exact match on the normalized (lowercased) email.
+    # All emails are lowercased at write time (create_user), so regex fallback
+    # is unnecessary and was a security/performance concern (bypassed index).
+    return users.find_one({"email": normalized_email})
 
 
 def find_user_by_id(user_id: str) -> Optional[dict]:
