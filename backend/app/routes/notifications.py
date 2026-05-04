@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from app.models.user import find_user_by_email
+from app.utils.validation import validate_object_id
 from app.services.notification_service import (
     list_notifications,
     mark_all_notifications_read,
@@ -20,7 +21,7 @@ def get_notifications():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    limit = request.args.get("limit", 20)
+    limit = request.args.get("limit", 20, type=int)
     return jsonify(list_notifications(user.get("_id"), limit=limit))
 
 
@@ -30,6 +31,9 @@ def read_notification(notification_id):
     user = find_user_by_email(get_jwt_identity())
     if not user:
         return jsonify({"error": "User not found"}), 404
+
+    if not validate_object_id(notification_id):
+        return jsonify({"error": "Invalid notification ID"}), 400
 
     if not mark_notification_read(user.get("_id"), notification_id):
         return jsonify({"error": "Notification not found"}), 404

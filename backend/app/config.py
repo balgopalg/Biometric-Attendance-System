@@ -151,6 +151,9 @@ class Config:
     # Higher = stricter matching, fewer false positives (absent marked as present)
     # Lower = lenient matching, may have false positives
     
+    # Attendance percentage threshold for exam eligibility
+    ATTENDANCE_THRESHOLD = _env_float("ATTENDANCE_THRESHOLD", 75.0)
+
     FACENET_THRESHOLD = _env_float("FACENET_THRESHOLD", 0.60)
     DROWSINESS_EAR_THRESHOLD = _env_float("DROWSINESS_EAR_THRESHOLD", 0.25)
     DROWSINESS_MAR_THRESHOLD = _env_float("DROWSINESS_MAR_THRESHOLD", 0.60)

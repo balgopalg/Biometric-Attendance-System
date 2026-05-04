@@ -71,14 +71,12 @@ SENSITIVE_OPERATIONS = [
 ]
 
 
-def role_required(*allowed_roles):
-    """Decorator: Verify user role is one of allowed_roles (hierarchy-aware).
+def _verify_role_and_set_context(*allowed_roles):
+    """Internal role gate used by permission_required / owner_or_admin_required.
 
-    .. deprecated::
-        This is a **secondary** implementation that does NOT inject ``user``
-        as a positional argument.  All route modules should import from
-        ``app.utils.auth_decorators`` instead.  This copy is retained only
-        for ``permission_required`` / ``owner_or_admin_required`` internal use.
+    Unlike the canonical ``auth_decorators.role_required``, this does **not**
+    inject ``user`` as a positional argument — that is intentional because the
+    decorators in this module handle ``user`` via ``flask.g.current_user``.
     """
     roles = effective_allowed_roles(allowed_roles)
 

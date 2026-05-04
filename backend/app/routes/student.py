@@ -80,7 +80,8 @@ def _compute_paper_attendance(uid, paper_id_text, sessions_col, leave_dates):
             leave_sessions += 1
             continue
         effective_total += 1
-        if uid in [str(sid) for sid in (sess.get("user_ids") or [])]:
+        session_user_set = {str(sid) for sid in (sess.get("user_ids") or [])}
+        if uid in session_user_set:
             attended += 1
 
     return attended, effective_total, leave_sessions, committed_sessions
