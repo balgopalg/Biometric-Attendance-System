@@ -9,8 +9,22 @@ import PinCommitModal from './PinCommitModal';
 import { formatCourseName } from '../../utils/courseDisplay';
 import { formatDateTimeIndia, getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
 
+const TIMESTAMP_WITHOUT_TZ_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+function normalizeUtcTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  return TIMESTAMP_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
+}
+
 function formatDateTime(value) {
-  return formatDateTimeIndia(value, { dateStyle: 'short', timeStyle: 'medium' });
+  return formatDateTimeIndia(normalizeUtcTimestamp(value), { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function isRollbackOpenByTime(value) {
+  if (!value) return false;
+  const ms = new Date(normalizeUtcTimestamp(value)).getTime();
+  if (Number.isNaN(ms)) return false;
+  return ms > Date.now();
 }
 
 export default function LecturerProgress() {
@@ -198,9 +212,9 @@ export default function LecturerProgress() {
                   <td>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.72rem' }} onClick={() => openHistory(s)}>
-                        {s.editable ? 'Modify / View' : 'View History'}
+                        {isRollbackOpenByTime(s.rollback_until) ? 'Modify / View' : 'View History'}
                       </button>
-                      {s.editable ? <span className="badge badge-warning">Rollback Open</span> : <span className="badge">Finalized</span>}
+                      {isRollbackOpenByTime(s.rollback_until) ? <span className="badge badge-warning">Rollback Open</span> : <span className="badge">Finalized</span>}
                     </div>
                   </td>
                 </tr>
@@ -217,11 +231,15 @@ export default function LecturerProgress() {
           <p style={{ color: 'var(--text-muted)' }}>Loading attendance history...</p>
         ) : (
           <>
+            {(() => {
+              const rollbackOpen = isRollbackOpenByTime(sessionReview.rollback_until);
+              return (
+                <>
             <div style={{ marginBottom: 10 }}>
               <p style={{ fontSize: '0.82rem' }}><b>Subject:</b> {sessionReview.paper?.name || selectedSession?.paper_name} ({sessionReview.paper?.code || selectedSession?.paper_code})</p>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                 Rollback until: {formatDateTime(sessionReview.rollback_until)}
-                {sessionReview.editable ? ' (open)' : ' (closed)'}
+                {rollbackOpen ? ' (open)' : ' (closed)'}
               </p>
             </div>
 
@@ -236,7 +254,7 @@ export default function LecturerProgress() {
                         <input
                           type="checkbox"
                           checked={checked}
-                          disabled={!sessionReview.editable}
+                          disabled={!rollbackOpen}
                           onChange={(e) => {
                             const next = e.target.checked
                               ? [...adjustIds, s.user_id]
@@ -267,10 +285,13 @@ export default function LecturerProgress() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
               <button className="btn-secondary" onClick={() => setShowHistory(false)}>Close</button>
-              <button className="btn-primary" disabled={!sessionReview.editable} onClick={() => setShowRecommitPin(true)}>
+              <button className="btn-primary" disabled={!rollbackOpen} onClick={() => setShowRecommitPin(true)}>
                 Modify & Re-Commit
               </button>
             </div>
+                </>
+              );
+            })()}
           </>
         )}
       </Modal>

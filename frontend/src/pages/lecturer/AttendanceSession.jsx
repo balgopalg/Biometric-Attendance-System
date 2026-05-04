@@ -15,8 +15,15 @@ import { formatCourseName } from '../../utils/courseDisplay';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatDateTimeIndia } from '../../utils/dateTime';
 
+const TIMESTAMP_WITHOUT_TZ_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+function normalizeUtcTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  return TIMESTAMP_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
+}
+
 function fmt(dt) {
-  return formatDateTimeIndia(dt, { dateStyle: 'short', timeStyle: 'medium' });
+  return formatDateTimeIndia(normalizeUtcTimestamp(dt), { dateStyle: 'short', timeStyle: 'medium' });
 }
 
 function safeMatches(value) {
@@ -470,7 +477,10 @@ export default function AttendanceSession() {
 
   const rollbackRemainingMins = useMemo(() => {
     if (!review?.rollback_until) return null;
-    const diff = new Date(review.rollback_until).getTime() - nowMs;
+    const normalizedRollbackUntil = normalizeUtcTimestamp(review.rollback_until);
+    const rollbackUntilMs = new Date(normalizedRollbackUntil).getTime();
+    if (Number.isNaN(rollbackUntilMs)) return null;
+    const diff = rollbackUntilMs - nowMs;
     return Math.max(0, Math.ceil(diff / 60000));
   }, [review, nowMs]);
 

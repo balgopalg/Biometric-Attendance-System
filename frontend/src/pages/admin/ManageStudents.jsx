@@ -76,6 +76,7 @@ export default function ManageStudents() {
   const [totalStudents, setTotalStudents] = useState(0);
   const [page, setPage] = useState(1);
   const [courses, setCourses] = useState([]);
+  const [formCourses, setFormCourses] = useState([]);
   const [papers, setPapers] = useState([]);
 
   const [showAdd, setShowAdd] = useState(false);
@@ -194,6 +195,52 @@ export default function ManageStudents() {
     });
   };
 
+  // Fetch all students with current filters for export (no pagination)
+  const fetchAllStudentsForExport = async () => {
+    try {
+      const allStudents = [];
+      let currentPage = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const params = {};
+        params.page = currentPage;
+        params.per_page = 100; // Higher per_page for efficiency
+        if (debouncedSearch) params.q = debouncedSearch;
+        if (debouncedFilters.department_id) {
+          params.department_id = debouncedFilters.department_id;
+        }
+        if (debouncedFilters.course_id) params.course_id = debouncedFilters.course_id;
+        if (debouncedFilters.paper_id) params.paper_id = debouncedFilters.paper_id;
+        if (debouncedFilters.semester) params.semester = debouncedFilters.semester;
+        if (showInactiveRows) params.include_inactive = true;
+
+        const response = await api.get('/admin/students', { params });
+        const items = Array.isArray(response.data?.items)
+          ? response.data.items
+          : Array.isArray(response.data)
+          ? response.data
+          : [];
+
+        allStudents.push(...items);
+
+        const total = Number(response.data?.total || items.length || 0);
+        const totalPages = Math.ceil(total / 100);
+
+        if (currentPage >= totalPages) {
+          hasMore = false;
+        } else {
+          currentPage += 1;
+        }
+      }
+
+      return allStudents;
+    } catch (err) {
+      console.error('Error fetching all students for export:', err);
+      throw new Error('Failed to fetch all students for export');
+    }
+  };
+
 
 
   useEffect(() => {
@@ -215,6 +262,57 @@ export default function ManageStudents() {
   useEffect(() => {
     fetchMetadata();
   }, [filters.department_id]);
+
+  const activeCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [courses]
+  );
+
+  const visibleCourses = showInactiveRows ? courses : activeCourses;
+
+  // Department options for filter
+  const departmentOptions = useMemo(() => {
+    return departments.map((d) => ({ value: d._id, label: d.name }));
+  }, [departments]);
+
+  useEffect(() => {
+    if (!showAdd && !showEdit) return undefined;
+
+    if (isDepartmentAdmin) {
+      setFormCourses(activeCourses);
+      return undefined;
+    }
+
+    const deptName = String(form.department || '').trim();
+    if (!deptName) {
+      setFormCourses([]);
+      return undefined;
+    }
+
+    const matchedDept = departments.find(
+      (d) => String(d.name || '').toLowerCase() === deptName.toLowerCase()
+    );
+    if (!matchedDept?._id) {
+      setFormCourses([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    api.get('/admin/courses', { params: { department_id: matchedDept._id } })
+      .then((r) => {
+        if (cancelled) return;
+        const items = extractItems(r.data);
+        const active = items.filter((c) => String(c.status || 'active').toLowerCase() === 'active');
+        setFormCourses(active);
+      })
+      .catch(() => {
+        if (!cancelled) setFormCourses([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showAdd, showEdit, isDepartmentAdmin, form.department, departments, activeCourses]);
 
 
   useEffect(() => {
@@ -355,18 +453,6 @@ export default function ManageStudents() {
   }, [papers, filters.course_id, filters.semester]);
 
 
-  const activeCourses = useMemo(
-    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
-    [courses]
-  );
-
-  const visibleCourses = showInactiveRows ? courses : activeCourses;
-
-  // Department options for filter
-  const departmentOptions = useMemo(() => {
-    return departments.map((d) => ({ value: d._id, label: d.name }));
-  }, [departments]);
-
   useEffect(() => {
     if (showInactiveRows) return;
 
@@ -502,10 +588,16 @@ export default function ManageStudents() {
   };
 
   const openEdit = (student) => {
+    const course = courses.find((c) => c._id === student.course_id) || null;
+    const resolvedDepartmentName = String(
+      student.department || course?.department || departmentName || ''
+    ).trim();
+
     setEditingStudent(student);
     setForm({
       name: student.name || '',
       email: student.email || '',
+      department: resolvedDepartmentName,
       course_id: student.course_id || '',
       mobile_no: student.mobile_no || '',
       // roll_number removed, use reg_number only
@@ -1015,15 +1107,18 @@ export default function ManageStudents() {
   };
 
   const handleExportStudents = async () => {
-    if (filtered.length === 0) {
-      toast.error('No students to export');
-      return;
-    }
-
     setExportingStudents(true);
     try {
+      // Fetch all students with current filters (not just visible page)
+      const allStudents = await fetchAllStudentsForExport();
+
+      if (allStudents.length === 0) {
+        toast.error('No students to export');
+        return;
+      }
+
       // Transform data to include course names
-      const transformedData = filtered.map((student) => {
+      const transformedData = allStudents.map((student) => {
         const course = courses.find((c) => c._id === student.course_id);
         return {
           ...student,
@@ -1039,7 +1134,7 @@ export default function ManageStudents() {
           fileName: 'Students',
           sheetName: 'Students',
         });
-        toast.success(`Exported ${filtered.length} students to Excel`);
+        toast.success(`Exported ${allStudents.length} students to Excel`);
       } catch (xlsxError) {
         if (xlsxError.message.includes('xlsx')) {
           // Fallback to CSV
@@ -1048,7 +1143,7 @@ export default function ManageStudents() {
             columns: EXPORT_COLUMN_PRESETS.STUDENTS,
             fileName: 'Students',
           });
-          toast.success(`Exported ${filtered.length} students to CSV (install xlsx for Excel format)`);
+          toast.success(`Exported ${allStudents.length} students to CSV (install xlsx for Excel format)`);
         } else {
           throw xlsxError;
         }
@@ -1091,11 +1186,11 @@ export default function ManageStudents() {
           <select
             className="input-field"
             value={form.department}
-            onChange={(e) => setForm({ ...form, department: e.target.value })}
+            onChange={(e) => setForm({ ...form, department: e.target.value, course_id: '' })}
             disabled={isDepartmentAdmin}
           >
             <option value="" disabled={isSuperAdmin}>
-              {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+              {isDepartmentAdmin ? (departmentName || 'Department') : 'Select department'}
             </option>
             {departments.map((d) => (
               <option key={d._id} value={d.name}>{d.name}</option>
@@ -1105,9 +1200,18 @@ export default function ManageStudents() {
 
         <div>
           <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Course</label>
-          <select className="input-field" value={form.course_id} onChange={(e) => setForm({ ...form, course_id: e.target.value })}>
+          <select
+            className="input-field"
+            value={form.course_id}
+            onChange={(e) => setForm({ ...form, course_id: e.target.value })}
+            disabled={!isDepartmentAdmin && !form.department}
+          >
             <option value="">Select course</option>
-            {activeCourses.filter(c => !form.department || c.department.toLowerCase() === form.department.toLowerCase()).map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
+            {formCourses.map((c) => (
+              <option key={c._id} value={c._id}>
+                {formatCourseName(c.name, { status: c.status })} ({c.code})
+              </option>
+            ))}
           </select>
         </div>
 
@@ -1172,8 +1276,8 @@ export default function ManageStudents() {
           <button className="btn-secondary" onClick={openBulkAssignModal}>
             <HiOutlineClipboardList size={16} /> Bulk Assign Subject
           </button>
-          <button className="btn-secondary" onClick={handleExportStudents} disabled={filtered.length === 0 || exportingStudents} title="Export filtered students to Excel">
-            <HiOutlineDownload size={16} /> {exportingStudents ? 'Exporting...' : `Export (${filtered.length})`}
+          <button className="btn-secondary" onClick={handleExportStudents} disabled={totalStudents === 0 || exportingStudents} title="Export all filtered students to Excel">
+            <HiOutlineDownload size={16} /> {exportingStudents ? 'Exporting...' : `Export (${totalStudents})`}
           </button>
         </div>
       </div>
@@ -1520,8 +1624,8 @@ export default function ManageStudents() {
           <button className="btn-secondary" onClick={() => { setShowMobileOps(false); openBulkAssignModal(); }}>
             <HiOutlineClipboardList size={16} /> Bulk Assign Subject
           </button>
-          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); handleExportStudents(); }} disabled={filtered.length === 0 || exportingStudents}>
-            <HiOutlineDownload size={16} /> {exportingStudents ? 'Exporting...' : `Export (${filtered.length})`}
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); handleExportStudents(); }} disabled={totalStudents === 0 || exportingStudents}>
+            <HiOutlineDownload size={16} /> {exportingStudents ? 'Exporting...' : `Export (${totalStudents})`}
           </button>
         </div>
       </Modal>

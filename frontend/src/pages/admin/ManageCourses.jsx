@@ -87,6 +87,36 @@ export default function ManageCourses() {
     if (isSuperAdmin) fetchDepartments();
   }, [isSuperAdmin]);
 
+  // Fetch all courses with current filters for export (no pagination)
+  const fetchAllCoursesForExport = async () => {
+    try {
+      const all = [];
+      let current = 1;
+      let more = true;
+      while (more) {
+        const params = {};
+        params.page = current;
+        params.per_page = 100;
+        if (search) params.q = search;
+        if (filters.department_id) params.department_id = filters.department_id;
+        if (filters.duration) params.course_duration = filters.duration;
+        if (filters.status) params.status = filters.status;
+        // eslint-disable-next-line no-await-in-loop
+        const r = await api.get('/admin/courses', { params });
+        const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+        all.push(...items);
+        const total = Number(r.data?.total || items.length || 0);
+        const pages = Math.max(1, Math.ceil(total / 100));
+        if (current >= pages) more = false;
+        else current += 1;
+      }
+      return all;
+    } catch (err) {
+      console.error('Failed to fetch all courses for export', err);
+      throw new Error('Failed to fetch all courses for export');
+    }
+  };
+
   useEffect(() => {
     if (isDepartmentAdmin && departmentId) {
       setFilters((prev) => ({ ...prev, department_id: departmentId }));
@@ -223,29 +253,30 @@ export default function ManageCourses() {
   };
 
   const handleExportCourses = async () => {
-    if (filtered.length === 0) {
-      toast.error('No courses to export');
-      return;
-    }
-
     setExportingCourses(true);
     try {
+      const all = await fetchAllCoursesForExport();
+      if (all.length === 0) {
+        toast.error('No courses to export');
+        return;
+      }
+
       try {
         await exportToExcel({
-          data: filtered,
+          data: all,
           columns: EXPORT_COLUMN_PRESETS.COURSES,
           fileName: 'Courses',
           sheetName: 'Courses',
         });
-        toast.success(`Exported ${filtered.length} courses to Excel`);
+        toast.success(`Exported ${all.length} courses to Excel`);
       } catch (xlsxError) {
         if (xlsxError.message.includes('xlsx')) {
           exportToCSV({
-            data: filtered,
+            data: all,
             columns: EXPORT_COLUMN_PRESETS.COURSES,
             fileName: 'Courses',
           });
-          toast.success(`Exported ${filtered.length} courses to CSV`);
+          toast.success(`Exported ${all.length} courses to CSV`);
         } else {
           throw xlsxError;
         }
@@ -326,8 +357,8 @@ export default function ManageCourses() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{totalCourses} courses in current filter</p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-secondary" onClick={handleExportCourses} disabled={filtered.length === 0 || exportingCourses} title="Export filtered courses to Excel">
-            <HiOutlineDownload size={16} /> {exportingCourses ? 'Exporting...' : 'Export'}
+          <button className="btn-secondary" onClick={handleExportCourses} disabled={totalCourses === 0 || exportingCourses} title="Export all filtered courses to Excel">
+            <HiOutlineDownload size={16} /> {exportingCourses ? 'Exporting...' : `Export (${totalCourses})`}
           </button>
           <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department: isDepartmentAdmin && departmentName ? departmentName : '' }); setShowAdd(true); }}>
             <HiOutlinePlus size={16} /> Add Course

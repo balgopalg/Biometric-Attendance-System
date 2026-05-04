@@ -19,31 +19,32 @@ export default function YourAdminPage() {
   // ============================================================================
   // STEP 3: CREATE HANDLER FUNCTION
   // ============================================================================
+  // Recommended: fetch all matching rows from the server (not only the current page)
+  // Implement a helper `fetchAllForExport()` that repeatedly calls your list endpoint
+  // with pagination (e.g. per_page=100) and returns a flat array of all matching items.
   const handleExportData = async () => {
-    // ✅ IMPORTANT: Use 'filtered' or 'filteredData' - the data currently shown
-    // ❌ DON'T use 'allData' - it would bypass filters
-    
-    if (filteredData.length === 0) {
-      toast.error('No data to export');
-      return;
-    }
-
     setExporting(true);
     try {
-      // Try Excel export first
+      // Example: const all = await fetchAllForExport();
+      const all = (typeof fetchAllForExport === 'function') ? await fetchAllForExport() : (filteredData || []);
+
+      if (!all || all.length === 0) {
+        toast.error('No data to export');
+        return;
+      }
+
       try {
         await exportToExcel({
-          data: filteredData,  // <-- Use filtered data only
-          columns: EXPORT_COLUMN_PRESETS.STUDENTS,  // or your custom columns
-          fileName: 'PageName',  // Base name (will become PageName_Export_2026-04-19.xlsx)
-          sheetName: 'PageName',  // Excel sheet name
+          data: all,
+          columns: EXPORT_COLUMN_PRESETS.STUDENTS,
+          fileName: 'PageName',
+          sheetName: 'PageName',
         });
-        toast.success(`Exported ${filteredData.length} records to Excel`);
+        toast.success(`Exported ${all.length} records to Excel`);
       } catch (xlsxError) {
-        // Fallback to CSV if xlsx not installed
         if (xlsxError.message.includes('xlsx')) {
           exportToCSV({
-            data: filteredData,
+            data: all,
             columns: EXPORT_COLUMN_PRESETS.STUDENTS,
             fileName: 'PageName',
           });

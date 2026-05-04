@@ -71,6 +71,7 @@ export default function ManageLecturers() {
   const [createdCreds, setCreatedCreds] = useState(null);
   const [selectedLecturer, setSelectedLecturer] = useState(null);
   const [assignedPaperIds, setAssignedPaperIds] = useState([]);
+  const [assignmentFilters, setAssignmentFilters] = useState({ department_id: '', course_id: '', semester: '' });
 
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ department_id: '', course_id: '', semester: '', paper_id: '' });
@@ -142,6 +143,37 @@ export default function ManageLecturers() {
     if (isSuperAdmin) fetchDepartments();
   }, [isSuperAdmin]);
 
+  // Fetch all lecturers with current filters for export (no pagination)
+  const fetchAllLecturersForExport = async () => {
+    try {
+      const all = [];
+      let current = 1;
+      let more = true;
+      while (more) {
+        const params = {};
+        params.page = current;
+        params.per_page = 100;
+        if (search) params.q = search;
+        if (filters.department_id) params.department_id = filters.department_id;
+        if (filters.course_id) params.course_id = filters.course_id;
+        if (filters.semester) params.semester = filters.semester;
+        if (filters.paper_id) params.paper_id = filters.paper_id;
+        // eslint-disable-next-line no-await-in-loop
+        const r = await api.get('/admin/lecturers', { params });
+        const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+        all.push(...items);
+        const total = Number(r.data?.total || items.length || 0);
+        const pages = Math.max(1, Math.ceil(total / 100));
+        if (current >= pages) more = false;
+        else current += 1;
+      }
+      return all;
+    } catch (err) {
+      console.error('Error fetching all lecturers for export', err);
+      throw new Error('Failed to fetch all lecturers for export');
+    }
+  };
+
   useEffect(() => {
     if (isDepartmentAdmin && departmentId) {
       setFilters((prev) => ({ ...prev, department_id: departmentId }));
@@ -201,14 +233,6 @@ export default function ManageLecturers() {
     return Array.from(values).sort((a, b) => a - b);
   }, [papers, filters.course_id]);
 
-  const filteredPapers = useMemo(() => {
-    return papers.filter((p) => {
-      const matchCourse = !filters.course_id || p.course_id === filters.course_id;
-      const matchSemester = !filters.semester || String(p.semester || '') === String(filters.semester);
-      return matchCourse && matchSemester;
-    });
-  }, [papers, filters.course_id, filters.semester]);
-
   const courseMap = useMemo(() => {
     const map = new Map();
     courses.forEach((course) => {
@@ -216,6 +240,60 @@ export default function ManageLecturers() {
     });
     return map;
   }, [courses]);
+
+  const filteredPapers = useMemo(() => {
+    const selectedDepartmentName = departments.find((dept) => dept._id === filters.department_id)?.name || '';
+
+    return papers.filter((p) => {
+      const course = courseMap.get(String(p.course_id || ''));
+      const matchDepartment = !filters.department_id
+        || course?.department_id === filters.department_id
+        || (selectedDepartmentName && String(course?.department || '').toLowerCase() === selectedDepartmentName.toLowerCase());
+      const matchCourse = !filters.course_id || p.course_id === filters.course_id;
+      const matchSemester = !filters.semester || String(p.semester || '') === String(filters.semester);
+      return matchDepartment && matchCourse && matchSemester;
+    });
+  }, [papers, courseMap, departments, filters.department_id, filters.course_id, filters.semester]);
+
+  const assignmentFilterDepartmentName = useMemo(
+    () => departments.find((dept) => dept._id === assignmentFilters.department_id)?.name || '',
+    [departments, assignmentFilters.department_id]
+  );
+
+  const assignmentFilterCourses = useMemo(() => {
+    if (!assignmentFilters.department_id) return courses;
+    return courses.filter((course) => (
+      course.department_id === assignmentFilters.department_id
+      || (assignmentFilterDepartmentName && String(course.department || '').toLowerCase() === assignmentFilterDepartmentName.toLowerCase())
+    ));
+  }, [courses, assignmentFilterDepartmentName, assignmentFilters.department_id]);
+
+  const assignmentFilterSemesters = useMemo(() => {
+    const values = new Set();
+    papers.forEach((paper) => {
+      const course = courseMap.get(String(paper.course_id || ''));
+      const matchesDepartment = !assignmentFilters.department_id
+        || course?.department_id === assignmentFilters.department_id
+        || (assignmentFilterDepartmentName && String(course?.department || '').toLowerCase() === assignmentFilterDepartmentName.toLowerCase());
+      const matchesCourse = !assignmentFilters.course_id || paper.course_id === assignmentFilters.course_id;
+      if (!matchesDepartment || !matchesCourse) return;
+      const semesterValue = Number(paper.semester || 0);
+      if (Number.isFinite(semesterValue) && semesterValue > 0) values.add(semesterValue);
+    });
+    return Array.from(values).sort((a, b) => a - b);
+  }, [assignmentFilterDepartmentName, assignmentFilters.course_id, assignmentFilters.department_id, courseMap, papers]);
+
+  const assignmentFilteredPapers = useMemo(() => {
+    return papers.filter((paper) => {
+      const course = courseMap.get(String(paper.course_id || ''));
+      const matchesDepartment = !assignmentFilters.department_id
+        || course?.department_id === assignmentFilters.department_id
+        || (assignmentFilterDepartmentName && String(course?.department || '').toLowerCase() === assignmentFilterDepartmentName.toLowerCase());
+      const matchesCourse = !assignmentFilters.course_id || paper.course_id === assignmentFilters.course_id;
+      const matchesSemester = !assignmentFilters.semester || String(paper.semester || '') === String(assignmentFilters.semester);
+      return matchesDepartment && matchesCourse && matchesSemester;
+    });
+  }, [assignmentFilterDepartmentName, assignmentFilters.course_id, assignmentFilters.department_id, assignmentFilters.semester, courseMap, papers]);
 
   const paperMap = useMemo(() => {
     const map = new Map();
@@ -367,6 +445,11 @@ export default function ManageLecturers() {
       const res = await api.get(`/admin/lecturers/${lecturer._id}/papers`);
       setSelectedLecturer(lecturer);
       setAssignedPaperIds((res.data.assigned || []).map((p) => p._id));
+      setAssignmentFilters({
+        department_id: lecturer?.department_id || filters.department_id || '',
+        course_id: filters.course_id || '',
+        semester: filters.semester || '',
+      });
       setShowAssign(true);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to load assignments');
@@ -415,29 +498,30 @@ export default function ManageLecturers() {
   };
 
   const handleExportLecturers = async () => {
-    if (lecturers.length === 0) {
-      toast.error('No lecturers to export');
-      return;
-    }
-
     setExportingLecturers(true);
     try {
+      const all = await fetchAllLecturersForExport();
+      if (all.length === 0) {
+        toast.error('No lecturers to export');
+        return;
+      }
+
       try {
         await exportToExcel({
-          data: lecturers,
+          data: all,
           columns: EXPORT_COLUMN_PRESETS.LECTURERS,
           fileName: 'Lecturers',
           sheetName: 'Lecturers',
         });
-        toast.success(`Exported ${lecturers.length} lecturers to Excel`);
+        toast.success(`Exported ${all.length} lecturers to Excel`);
       } catch (xlsxError) {
         if (xlsxError.message.includes('xlsx')) {
           exportToCSV({
-            data: lecturers,
+            data: all,
             columns: EXPORT_COLUMN_PRESETS.LECTURERS,
             fileName: 'Lecturers',
           });
-          toast.success(`Exported ${lecturers.length} lecturers to CSV`);
+          toast.success(`Exported ${all.length} lecturers to CSV`);
         } else {
           throw xlsxError;
         }
@@ -490,8 +574,8 @@ export default function ManageLecturers() {
           </div>
         </div>
         <div className="lecturers-toolbar-actions-primary" style={{ display: 'flex', gap: 10 }}>
-          <button className="btn-secondary" title="Export lecturers to Excel" onClick={handleExportLecturers} disabled={exportingLecturers}>
-            <HiOutlineDownload size={16} /> {exportingLecturers ? 'Exporting...' : 'Export'}
+          <button className="btn-secondary" title="Export all filtered lecturers to Excel" onClick={handleExportLecturers} disabled={totalLecturers === 0 || exportingLecturers}>
+            <HiOutlineDownload size={16} /> {exportingLecturers ? 'Exporting...' : `Export (${totalLecturers})`}
           </button>
           <button className="btn-secondary" title="Import lecturers from Excel" onClick={openLecturerImportModal}>
             <HiOutlineDocumentAdd size={16} /> Import Excel
@@ -557,7 +641,7 @@ export default function ManageLecturers() {
 
         <select className="input-field" value={filters.paper_id} onChange={(e) => setFilters({ ...filters, paper_id: e.target.value })}>
           <option value="">All Papers</option>
-          {filteredPapers.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
+          {filteredPapers.map((p) => <option key={p._id} value={p._id}>{p.name}{p.code ? ` [${p.code}]` : ''}</option>)}
         </select>
       </div>
 
@@ -783,10 +867,44 @@ export default function ManageLecturers() {
 
       <Modal isOpen={showAssign} onClose={() => setShowAssign(false)} title={`Edit Assignments${selectedLecturer ? ` - ${selectedLecturer.name}` : ''}`} width={600}>
         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 10 }}>
-          Select all papers this lecturer teaches. A lecturer can handle multiple papers across different courses.
+          Select all papers this lecturer teaches. Use the filters below to narrow the list.
         </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+          <select
+            className="input-field"
+            value={assignmentFilters.department_id}
+            onChange={(e) => setAssignmentFilters({ department_id: e.target.value, course_id: '', semester: '' })}
+          >
+            <option value="">All Departments</option>
+            {departments.map((dept) => (
+              <option key={dept._id} value={dept._id}>{dept.name}</option>
+            ))}
+          </select>
+          <select
+            className="input-field"
+            value={assignmentFilters.course_id}
+            onChange={(e) => setAssignmentFilters((prev) => ({ ...prev, course_id: e.target.value, semester: '' }))}
+            disabled={assignmentFilterCourses.length === 0}
+          >
+            <option value="">All Courses</option>
+            {assignmentFilterCourses.map((course) => (
+              <option key={course._id} value={course._id}>{formatCourseName(course.name, { status: course.status })}</option>
+            ))}
+          </select>
+          <select
+            className="input-field"
+            value={assignmentFilters.semester}
+            onChange={(e) => setAssignmentFilters((prev) => ({ ...prev, semester: e.target.value }))}
+            disabled={assignmentFilterSemesters.length === 0}
+          >
+            <option value="">All Semesters</option>
+            {assignmentFilterSemesters.map((semester) => (
+              <option key={semester} value={String(semester)}>Semester {semester}</option>
+            ))}
+          </select>
+        </div>
         <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8, marginBottom: 16 }}>
-          {papers.map((p) => {
+          {assignmentFilteredPapers.map((p) => {
             const checked = assignedPaperIds.includes(p._id);
             return (
               <label key={p._id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', cursor: 'pointer', fontSize: '0.82rem' }}>
@@ -800,10 +918,15 @@ export default function ManageLecturers() {
                     setAssignedPaperIds(next);
                   }}
                 />
-                {p.name} ({p.code}) {p.course_name ? `- ${formatCourseName(p.course_name, { isInactive: p.is_course_inactive, status: p.course_status })}` : ''}
+                {p.name}{p.code ? ` [${p.code}]` : ''} {p.course_name ? `- ${formatCourseName(p.course_name, { isInactive: p.is_course_inactive, status: p.course_status })}` : ''}
               </label>
             );
           })}
+          {assignmentFilteredPapers.length === 0 && (
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '8px 6px' }}>
+              No subjects match the selected filters.
+            </p>
+          )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button className="btn-secondary" onClick={() => setShowAssign(false)}>Cancel</button>

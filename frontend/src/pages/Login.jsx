@@ -14,6 +14,21 @@ function normalizeUtcLockoutTimestamp(value) {
   return LOCKOUT_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
 }
 
+function formatRemainingLockoutTime(lockoutUntil) {
+  const expiry = new Date(lockoutUntil);
+  if (Number.isNaN(expiry.getTime())) return '';
+  const remainingMs = expiry.getTime() - Date.now();
+  if (remainingMs <= 0) return 'a few moments';
+
+  const totalMinutes = Math.ceil(remainingMs / 60000);
+  if (totalMinutes < 60) return `${totalMinutes} minute${totalMinutes === 1 ? '' : 's'}`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours} hour${hours === 1 ? '' : 's'}`;
+  return `${hours} hour${hours === 1 ? '' : 's'} ${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,7 +58,7 @@ export default function Login() {
       const lockoutUntil = err.response?.data?.lockout_until;
       const normalizedLockoutUntil = normalizeUtcLockoutTimestamp(lockoutUntil);
       const message = lockoutUntil
-        ? `Account locked until ${formatDateTimeIndia(normalizedLockoutUntil, { dateStyle: 'short', timeStyle: 'medium' })}`
+        ? `Your account is locked until ${formatDateTimeIndia(normalizedLockoutUntil, { dateStyle: 'short', timeStyle: 'medium' })} local time. You can login in ${formatRemainingLockoutTime(normalizedLockoutUntil)}.`
         : err.response?.data?.error || 'Login failed';
       toast.error(message);
     } finally {
