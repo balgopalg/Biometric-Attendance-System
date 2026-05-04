@@ -8,7 +8,7 @@ import cv2
 from flask import current_app, has_app_context
 
 from app.utils.timezone import india_timestamp_token
-from app.utils.helpers import save_jpeg_with_size_bounds
+from app.utils.helpers import save_jpeg_with_size_bounds, _as_uint8_image
 
 
 logger = logging.getLogger(__name__)
@@ -46,12 +46,60 @@ def _ensure_directory(path):
 def _save_bounded_jpeg(file_path, image):
     """Persist image as JPEG within configured storage bounds."""
     min_kb, max_kb = _photo_size_bounds()
+    # Normalize to uint8 and ensure encoder receives a 3-channel BGR image.
+    img = _as_uint8_image(image)
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
     save_jpeg_with_size_bounds(
         file_path,
-        image,
+        img,
         min_kb=min_kb,
         max_kb=max_kb,
     )
+
+
+def _save_fixed_jpeg(file_path, image, size=160, quality=85):
+    """Save an image as a JPEG at an explicit pixel size without upscaling.
+
+    - Ensures the saved image is exactly `size x size` by resizing or letterboxing.
+    - Writes with a fixed JPEG quality to avoid the encoder's upscaling logic.
+    """
+    if image is None:
+        raise ValueError("image is required")
+
+    img = image
+    # Normalize to uint8 and 2/3-channel layout
+    img = _as_uint8_image(img)
+
+    # If image is grayscale (2D), convert to 3-channel BGR for consistent JPEG encoding
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+    h, w = img.shape[:2]
+    # If larger than target, downscale; if smaller, do NOT upscale — pad instead
+    if max(h, w) > size:
+        # Resize so the largest side == size, preserve aspect ratio
+        scale = size / float(max(h, w))
+        new_w = max(1, int(round(w * scale)))
+        new_h = max(1, int(round(h * scale)))
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        h, w = img.shape[:2]
+
+    # Create square canvas and center the resized image (letterbox with black)
+    top = (size - h) // 2
+    bottom = size - h - top
+    left = (size - w) // 2
+    right = size - w - left
+    canvas = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+    # Encode with fixed quality and write file
+    ok, encoded = cv2.imencode('.jpg', canvas, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+    if not ok:
+        raise RuntimeError(f"Failed to encode JPEG for {file_path}")
+    with open(file_path, 'wb') as fh:
+        fh.write(encoded.tobytes())
+    return len(encoded)
 
 
 def _to_grayscale_image(image):
@@ -193,7 +241,8 @@ def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", max
         file_path = os.path.join(user_dir, file_name)
 
         try:
-            _save_bounded_jpeg(file_path, image_to_save)
+            # Ensure face dataset images are saved as compact 160x160 JPEGs without upscaling
+            _save_fixed_jpeg(file_path, image_to_save, size=160, quality=85)
         except Exception as exc:
             raise RuntimeError(f"Failed to save dataset image: {file_path}") from exc
 
@@ -248,11 +297,21 @@ def save_classroom_upload_bundle(
         if crop is None:
             continue
 
-        crop_to_save = _to_grayscale_image(crop)
+        # Convert face crops to grayscale for consistent storage and to avoid color artifacts
+        crop_to_save = crop
+        if hasattr(crop_to_save, "shape") and len(crop_to_save.shape) == 3:
+            # If detector returned RGB convert to BGR then to gray; if already BGR, convert directly
+            try:
+                # Try converting assuming RGB first, fall back to BGR conversion if needed
+                gray = cv2.cvtColor(crop_to_save, cv2.COLOR_RGB2GRAY)
+            except Exception:
+                gray = cv2.cvtColor(crop_to_save, cv2.COLOR_BGR2GRAY)
+            crop_to_save = gray
 
+        # Prefer saving a compact 160x160 face crop for storage efficiency
         face_path = os.path.join(folder_path, f"face_{upload_token}_{idx:02d}.jpg")
         try:
-            _save_bounded_jpeg(face_path, crop_to_save)
+            _save_fixed_jpeg(face_path, crop_to_save, size=160, quality=85)
         except Exception as exc:
             raise RuntimeError(f"Failed to save classroom face crop: {face_path}") from exc
 

@@ -22,6 +22,14 @@ class BruteForceProtector:
     def _login_attempt_window_minutes(cls):
         return int(current_app.config.get("LOGIN_ATTEMPT_WINDOW_MINUTES", 15))
 
+    @staticmethod
+    def _as_utc_datetime(value):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
 
     @classmethod
     def record_failed_attempt_atomic(cls, email, ip_address):
@@ -62,7 +70,8 @@ class BruteForceProtector:
                 sort=[("attempted_at", 1)]
             )
             if oldest_recent_attempt:
-                lockout_expiry = oldest_recent_attempt["attempted_at"] + timedelta(minutes=cls._login_lockout_duration_minutes())
+                oldest_attempt_at = cls._as_utc_datetime(oldest_recent_attempt.get("attempted_at"))
+                lockout_expiry = oldest_attempt_at + timedelta(minutes=cls._login_lockout_duration_minutes()) if oldest_attempt_at else None
                 if now < lockout_expiry:
                     is_locked = True
         return failed_count, is_locked, lockout_expiry
@@ -100,10 +109,9 @@ class BruteForceProtector:
                 sort=[("attempted_at", 1)]
             )
             if oldest_recent_attempt:
-                lockout_expiry = oldest_recent_attempt["attempted_at"] + timedelta(
-                    minutes=cls._login_lockout_duration_minutes()
-                )
-                if now < lockout_expiry:
+                oldest_attempt_at = cls._as_utc_datetime(oldest_recent_attempt.get("attempted_at"))
+                lockout_expiry = oldest_attempt_at + timedelta(minutes=cls._login_lockout_duration_minutes()) if oldest_attempt_at else None
+                if lockout_expiry and now < lockout_expiry:
                     return True, lockout_expiry
         
         return False, None

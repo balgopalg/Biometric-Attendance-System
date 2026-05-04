@@ -414,6 +414,12 @@ textarea:focus-visible,
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
 }
 
+.input-field:focus-visible {
+  outline: none;
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18), 0 8px 18px rgba(139, 92, 246, 0.08);
+}
+
 .input-field::placeholder {
   color: var(--text-muted);
 }

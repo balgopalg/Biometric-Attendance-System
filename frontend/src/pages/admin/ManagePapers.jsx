@@ -90,6 +90,37 @@ export default function ManagePapers() {
     if (isSuperAdmin) fetchDepartments();
   }, [isSuperAdmin]);
 
+  // Fetch all papers with current filters for export (no pagination)
+  const fetchAllPapersForExport = async () => {
+    try {
+      const all = [];
+      let current = 1;
+      let more = true;
+      while (more) {
+        const params = {};
+        params.page = current;
+        params.per_page = 100;
+        if (search) params.q = search;
+        if (filters.department_id) params.department_id = filters.department_id;
+        if (filters.course_id) params.course_id = filters.course_id;
+        if (filters.lecturer_id) params.lecturer_id = filters.lecturer_id;
+        if (filters.semester) params.semester = filters.semester;
+        // eslint-disable-next-line no-await-in-loop
+        const r = await api.get('/admin/papers', { params });
+        const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
+        all.push(...items);
+        const total = Number(r.data?.total || items.length || 0);
+        const pages = Math.max(1, Math.ceil(total / 100));
+        if (current >= pages) more = false;
+        else current += 1;
+      }
+      return all;
+    } catch (err) {
+      console.error('Error fetching all papers for export', err);
+      throw new Error('Failed to fetch all papers for export');
+    }
+  };
+
   useEffect(() => {
     if (isDepartmentAdmin && departmentId) {
       setFilters((prev) => ({ ...prev, department_id: departmentId }));
@@ -265,14 +296,15 @@ export default function ManagePapers() {
   };
 
   const handleExportPapers = async () => {
-    if (filtered.length === 0) {
-      toast.error('No papers to export');
-      return;
-    }
-
     setExportingPapers(true);
     try {
-      const exportData = filtered.map((p) => ({
+      const all = await fetchAllPapersForExport();
+      if (all.length === 0) {
+        toast.error('No papers to export');
+        return;
+      }
+
+      const exportData = all.map((p) => ({
         name: p.name || '',
         code: p.code || '',
         course: p.course_name || '',
@@ -295,7 +327,7 @@ export default function ManagePapers() {
           fileName: 'Papers',
           sheetName: 'Papers',
         });
-        toast.success(`Exported ${filtered.length} papers to Excel`);
+        toast.success(`Exported ${all.length} papers to Excel`);
       } catch (xlsxError) {
         if (xlsxError.message.includes('xlsx')) {
           exportToCSV({
@@ -310,7 +342,7 @@ export default function ManagePapers() {
             ],
             fileName: 'Papers',
           });
-          toast.success(`Exported ${filtered.length} papers to CSV`);
+          toast.success(`Exported ${all.length} papers to CSV`);
         } else {
           throw xlsxError;
         }
@@ -534,8 +566,8 @@ export default function ManagePapers() {
           <button className="btn-secondary" title="Import papers from Excel" onClick={handleOpenImportModal} disabled={importingPapers}>
             <HiOutlineUpload size={16} /> {importingPapers ? 'Importing...' : 'Import Excel'}
           </button>
-          <button className="btn-secondary" title="Export papers to Excel" onClick={handleExportPapers} disabled={exportingPapers}>
-            <HiOutlineDownload size={16} /> {exportingPapers ? 'Exporting...' : 'Export'}
+          <button className="btn-secondary" title="Export all filtered papers to Excel" onClick={handleExportPapers} disabled={totalPapers === 0 || exportingPapers}>
+            <HiOutlineDownload size={16} /> {exportingPapers ? 'Exporting...' : `Export (${totalPapers})`}
           </button>
           <button className="btn-primary" onClick={() => { setForm({ ...EMPTY_FORM, department_id: isDepartmentAdmin && departmentId ? departmentId : '' }); setShowAdd(true); }}>
             <HiOutlinePlus size={16} /> Add Paper

@@ -40,6 +40,7 @@ function PasswordField({ label, value, field, placeholder, autoFocus = false, on
           type="button"
           onClick={() => onToggleVisibility(field)}
           aria-label={visiblePasswords[field] ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          tabIndex={-1}
           style={{
             position: 'absolute',
             right: 10,

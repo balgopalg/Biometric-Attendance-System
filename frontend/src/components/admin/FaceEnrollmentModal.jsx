@@ -14,7 +14,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [captureProgress, setCaptureProgress] = useState(0);
-  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam();
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam({ cropSquare: true, outSize: 160 });
 
   const handleStartCamera = async () => {
     await startCamera();
@@ -55,10 +57,23 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
         return;
       }
 
+      setIsUploading(true);
+      setUploadProgress(0);
       const response = await api.post('/admin/students/enroll', {
         user_id: student.user_id || student._id,
         photo: photoB64,
         dataset_photos: capturedFrames,
+      }, {
+        onUploadProgress: (progressEvent) => {
+          try {
+            if (progressEvent.lengthComputable) {
+              const pct = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+              setUploadProgress(pct);
+            }
+          } catch (e) {
+            // ignore progress errors
+          }
+        }
       });
 
       const datasetSaved = Number(response.data?.dataset_saved_count || 0);
@@ -74,6 +89,8 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
       toast.error(err.response?.data?.error || 'Failed to enroll face');
     } finally {
       setLoading(false);
+      setIsUploading(false);
+      setUploadProgress(0);
       setCaptureProgress(0);
     }
   };
@@ -191,6 +208,19 @@ export default function FaceEnrollmentModal({ student, onClose, onSuccess }) {
             <p style={{ marginTop: '16px', fontSize: '0.8rem', color: 'var(--accent-cyan)', textAlign: 'center', fontWeight: 600, letterSpacing: '0.5px' }}>
               Recording... Please keep moving your head slowly.
             </p>
+          )}
+          {/* Upload / Processing modal shown after captures complete */}
+          {isUploading && (
+            <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10010 }}>
+              <div style={{ background: 'rgba(0,0,0,0.6)', padding: '20px', borderRadius: '8px', color: '#fff', minWidth: '280px', textAlign: 'center' }}>
+                <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '10px' }}>Processing Enrollment</div>
+                <div style={{ marginBottom: '10px', fontSize: '0.9rem' }}>Uploading dataset and preparing model. Please wait...</div>
+                <div style={{ height: '10px', background: 'rgba(255,255,255,0.15)', borderRadius: '6px', overflow: 'hidden', margin: '0 12px' }}>
+                  <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'linear-gradient(90deg,#06b6d4,#3b82f6)' }} />
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '0.85rem' }}>{uploadProgress > 0 ? `${uploadProgress}%` : 'Preparing...'}</div>
+              </div>
+            </div>
           )}
         </div>
       </div>
