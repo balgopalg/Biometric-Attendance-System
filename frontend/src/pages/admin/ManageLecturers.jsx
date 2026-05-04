@@ -659,7 +659,10 @@ export default function ManageLecturers() {
         ) : null}
 
         {!loadingLecturers && !lecturersError && lecturers.length > 0 ? (
-        <div className="table-scroll lecturers-table-scroll">
+        <div 
+          className="table-scroll lecturers-table-scroll"
+          style={{ paddingBottom: openDepartmentPopover.lecturerId ? '220px' : '0', transition: 'padding 0.2s' }}
+        >
         <table className="data-table">
           <thead>
             <tr>
