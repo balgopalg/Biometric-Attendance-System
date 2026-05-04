@@ -105,7 +105,6 @@ export default function ManagePapers() {
         if (filters.course_id) params.course_id = filters.course_id;
         if (filters.lecturer_id) params.lecturer_id = filters.lecturer_id;
         if (filters.semester) params.semester = filters.semester;
-        // eslint-disable-next-line no-await-in-loop
         const r = await api.get('/admin/papers', { params });
         const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
         all.push(...items);

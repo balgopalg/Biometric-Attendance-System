@@ -158,7 +158,6 @@ export default function ManageLecturers() {
         if (filters.course_id) params.course_id = filters.course_id;
         if (filters.semester) params.semester = filters.semester;
         if (filters.paper_id) params.paper_id = filters.paper_id;
-        // eslint-disable-next-line no-await-in-loop
         const r = await api.get('/admin/lecturers', { params });
         const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
         all.push(...items);
@@ -659,10 +658,7 @@ export default function ManageLecturers() {
         ) : null}
 
         {!loadingLecturers && !lecturersError && lecturers.length > 0 ? (
-        <div 
-          className="table-scroll lecturers-table-scroll"
-          style={{ paddingBottom: openDepartmentPopover.lecturerId ? '220px' : '0', transition: 'padding 0.2s' }}
-        >
+        <div className="table-scroll lecturers-table-scroll">
         <table className="data-table">
           <thead>
             <tr>
