@@ -101,7 +101,6 @@ export default function ManageCourses() {
         if (filters.department_id) params.department_id = filters.department_id;
         if (filters.duration) params.course_duration = filters.duration;
         if (filters.status) params.status = filters.status;
-        // eslint-disable-next-line no-await-in-loop
         const r = await api.get('/admin/courses', { params });
         const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
         all.push(...items);

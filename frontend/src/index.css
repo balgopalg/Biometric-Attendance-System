@@ -961,6 +961,11 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Allow popovers for the lecturers table to overflow vertically without resizing the table */
+.lecturers-table-scroll {
+  overflow-y: visible;
+}
+
 .students-table-scroll .data-table {
   min-width: 1100px;
 }
