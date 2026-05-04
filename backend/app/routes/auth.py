@@ -214,10 +214,10 @@ def login():
         if is_locked:
             lockout_until = _to_utc_iso8601(lockout_expiry)
             log_action(
-                user_id=None,
-                action="login_account_locked",
+                "login_account_locked",
+                None,
+                details=f"Login attempt on locked account: {email}",
                 resource_type="auth",
-                description=f"Login attempt on locked account: {email}",
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
@@ -234,10 +234,10 @@ def login():
         )
         if is_ip_blocked:
             log_action(
-                user_id=None,
-                action="login_ip_blocked",
+                "login_ip_blocked",
+                None,
+                details=f"Login attempt from blocked IP: {ip_address}",
                 resource_type="auth",
-                description=f"Login attempt from blocked IP: {ip_address}",
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
@@ -250,10 +250,10 @@ def login():
             IPRateLimiter.record_request(ip_address, "auth.login", weight=0)
 
             log_action(
-                user_id=str(user.get("_id")),
-                action="login_success",
+                "login_success",
+                str(user.get("_id")),
+                details=f"Successful login for user {email}",
                 resource_type="auth",
-                description=f"Successful login for user {email}",
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
@@ -285,10 +285,10 @@ def login():
             failed_count, is_locked, lockout_expiry = BruteForceProtector.record_failed_attempt_atomic(email, ip_address)
 
             log_action(
-                user_id=None,
-                action="login_failed",
+                "login_failed",
+                None,
+                details=f"Failed login attempt for {email} (attempt {failed_count})",
                 resource_type="auth",
-                description=f"Failed login attempt for {email} (attempt {failed_count})",
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
@@ -402,10 +402,10 @@ def change_password():
             BruteForceProtector.record_failed_attempt_atomic(email, request.remote_addr)
         
         log_action(
-            user_id=str(user["_id"]),
-            action="change_password_failed",
+            "change_password_failed",
+            str(user["_id"]),
+            details=f"Failed password change for {email}: Incorrect current password",
             resource_type="auth",
-            description=f"Failed password change for {email}: Incorrect current password",
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent", ""),
         )
@@ -423,10 +423,10 @@ def change_password():
         BruteForceProtector.clear_failed_attempts(email)
     
     log_action(
-        user_id=str(user["_id"]),
-        action="change_password_success",
+        "change_password_success",
+        str(user["_id"]),
+        details=f"Password changed successfully for {email}",
         resource_type="auth",
-        description=f"Password changed successfully for {email}",
         ip_address=request.remote_addr,
         user_agent=request.headers.get("User-Agent", ""),
     )
@@ -703,10 +703,10 @@ def reset_password_with_otp():
     BruteForceProtector.clear_failed_attempts(email)
 
     log_action(
-        user_id=str(user["_id"]),
-        action="forgot_password_reset_success",
+        "forgot_password_reset_success",
+        str(user["_id"]),
+        details=f"Password reset completed via OTP for {email}",
         resource_type="auth",
-        description=f"Password reset completed via OTP for {email}",
         ip_address=request.remote_addr,
         user_agent=request.headers.get("User-Agent", ""),
     )
