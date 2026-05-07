@@ -781,7 +781,7 @@ class LecturerFlowTests(BaseApiFlowTestCase):
         self.assertEqual(start.status_code, 200, start.get_data(as_text=True))
         session_id = start.get_json()["session_id"]
 
-        with patch("app.routes.lecturer.cv2.imdecode", return_value=np.zeros((10, 10, 3), dtype=np.uint8)), patch("app.routes.lecturer.cv2.cvtColor", side_effect=lambda img, code: img), patch("app.routes.lecturer.get_detector") as detector_factory, patch("app.routes.lecturer.generate_embedding", return_value=[1.0, 0.0]), patch("app.routes.lecturer.save_classroom_upload_bundle", return_value={"folder_path": "uploads/demo", "original_path": "uploads/demo/original.png", "face_paths": ["uploads/demo/face-1.png"]}):
+        with patch("app.routes.lecturer.cv2.imdecode", return_value=np.zeros((10, 10, 3), dtype=np.uint8)), patch("app.routes.lecturer.cv2.cvtColor", side_effect=lambda img, code: img), patch("app.routes.lecturer.get_detector") as detector_factory, patch("app.routes.lecturer.generate_embeddings_batch", return_value=[[1.0, 0.0]]), patch("app.routes.lecturer.save_classroom_upload_bundle", return_value={"folder_path": "uploads/demo", "original_path": "uploads/demo/original.png", "face_paths": ["uploads/demo/face-1.png"]}):
             detector = type("Detector", (), {"detect_faces": lambda self, img: [{"crop": np.zeros((10, 10, 3), dtype=np.uint8)}]})()
             detector_factory.return_value = detector
             upload = self.client.post(

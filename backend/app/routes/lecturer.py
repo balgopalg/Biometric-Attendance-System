@@ -21,6 +21,7 @@ from app.models.user import find_user_by_id, set_user_pin, verify_user_pin, get_
 from app.services.face_detection import get_detector
 from app.services.face_recognition import (
     generate_embedding,
+    generate_embeddings_batch,
     find_best_match,
     find_best_match_cached,
     prepare_profile_candidates,
@@ -398,14 +399,28 @@ def _clear_cached_session_candidates(session_id):
         _SESSION_CANDIDATES_CACHE.pop(sid, None)
 
 
+# Reusable HOG people detector — avoid re-creating on every fallback call.
+_hog_detector = None
+_hog_detector_lock = Lock()
+
+
+def _get_hog_detector():
+    global _hog_detector
+    if _hog_detector is None:
+        with _hog_detector_lock:
+            if _hog_detector is None:
+                hog = cv2.HOGDescriptor()
+                hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+                _hog_detector = hog
+    return _hog_detector
+
+
 def _extract_classroom_faces(img_rgb, img_bgr=None):
     """Extract classroom face crops using FaceDetector (MediaPipe + Haar).
 
     Falls back to HOG people detection for group photos where face detection
     fails entirely — this is the only logic not in FaceDetector.
     """
-    from app.services.face_detection import FaceDetector
-
     detector = get_detector()
     faces = detector.detect_faces(img_rgb) or []
 
@@ -416,8 +431,7 @@ def _extract_classroom_faces(img_rgb, img_bgr=None):
     if img_bgr is None:
         img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    hog = cv2.HOGDescriptor()
-    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+    hog = _get_hog_detector()
     boxes, _ = hog.detectMultiScale(
         img_bgr,
         winStride=(8, 8),
@@ -545,9 +559,12 @@ def recognize_frame(user):
     best_similarity_seen = -1.0
     # Build a set from the DB-authoritative recognized list for thread-safe dedup.
     recognized_set = set(session.get("recognized") or [])
-    for face in faces:
-        embedding = generate_embedding(face["crop"])
 
+    # Batch-generate embeddings for all faces in a single FaceNet inference call
+    crops = [face["crop"] for face in faces]
+    embeddings = generate_embeddings_batch(crops)
+
+    for face, embedding in zip(faces, embeddings):
         match, face_best_similarity = find_best_match_cached(
             embedding, candidates, threshold=threshold
         )
@@ -701,17 +718,22 @@ def recognize_image(user):
 
     new_matches = []
     best_similarity_seen = -1.0
-    for face in faces:
-        embedding = generate_embedding(face["crop"])
+    # Build a set from the DB-authoritative recognized list for thread-safe dedup.
+    recognized_set = set(session.get("recognized") or [])
 
+    # Batch-generate embeddings for all faces in a single FaceNet inference call
+    crops = [face["crop"] for face in faces]
+    embeddings = generate_embeddings_batch(crops)
+
+    for face, embedding in zip(faces, embeddings):
         match, face_best_similarity = find_best_match_cached(
             embedding, candidates, threshold=threshold
         )
         if face_best_similarity > best_similarity_seen:
             best_similarity_seen = face_best_similarity
 
-        if match and match["user_id"] not in session["recognized"]:
-            session["recognized"].append(match["user_id"])
+        if match and match["user_id"] not in recognized_set:
+            recognized_set.add(match["user_id"])
             stu_user = find_user_by_id(match["user_id"])
             match["name"] = stu_user["name"] if stu_user else "Unknown"
             new_matches.append(match)
@@ -730,13 +752,13 @@ def recognize_image(user):
                 threshold=threshold,
             )
 
-    _save_recognized_students(session_id, session.get("recognized") or [])
+    _save_recognized_students(session_id, list(recognized_set))
     _touch_active_session(session_id)
     
     return jsonify({
         "new_matches": new_matches,
         "faces_detected": len(faces),
-        "total_recognized": len(session["recognized"]),
+        "total_recognized": len(recognized_set),
         "candidates_count": len(candidates),
         "threshold": threshold,
         "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,

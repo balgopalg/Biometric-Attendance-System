@@ -10,6 +10,7 @@ from app.utils.auth_decorators import role_required
 from app.services.face_detection import get_detector
 from app.services.face_recognition import (
     generate_embedding,
+    generate_embeddings_batch,
     find_best_match_cached,
     prepare_profile_candidates,
 )
@@ -96,13 +97,22 @@ def identify_faces(user):
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
 
     matches = []
-    for face in faces:
-        embedding = generate_embedding(face["crop"])
+    # Batch-generate embeddings for all detected faces in a single FaceNet call
+    crops = [face["crop"] for face in faces]
+    embeddings = generate_embeddings_batch(crops)
+
+    for face, embedding in zip(faces, embeddings):
         match, _score = find_best_match_cached(embedding, candidates, threshold=threshold)
         if match:
-            matched_user = find_user_by_id(match["user_id"])
-            match["name"] = matched_user["name"] if matched_user else "Unknown"
             matches.append(match)
+
+    if matches:
+        matched_user_ids = list({m["user_id"] for m in matches})
+        from app.models.user import get_users_by_ids
+        users_map = get_users_by_ids(matched_user_ids)
+        for match in matches:
+            matched_user = users_map.get(match["user_id"])
+            match["name"] = matched_user["name"] if matched_user else "Unknown"
 
     return jsonify({
         "matches": matches,

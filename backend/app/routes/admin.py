@@ -80,7 +80,7 @@ from app.models.user import (
     set_user_pin,
 )
 from app.services.face_detection import get_detector
-from app.services.face_recognition import generate_embedding, normalize_embedding
+from app.services.face_recognition import generate_embedding, generate_embeddings_batch
 from app.services.capture_upload import capture_faces_for_user, save_student_upload, save_cropped_face_dataset
 from utilities.train_model import train_and_save_face_model
 from app.utils.auth_decorators import role_required, super_admin_required, validate_ids
@@ -906,9 +906,8 @@ def _train_embeddings_from_dataset_for_user(user_id):
         raise ValueError("No dataset images found for training")
 
     detector = get_detector()
-    embeddings = []
+    valid_crops = []
     skipped = 0
-    seen_signatures = set()
 
     for file_path in image_files:
         img_bgr = cv2.imread(file_path, cv2.IMREAD_COLOR)
@@ -922,18 +921,24 @@ def _train_embeddings_from_dataset_for_user(user_id):
             if not faces:
                 skipped += 1
                 continue
-
-            embedding = normalize_embedding(generate_embedding(faces[0]["crop"]))
-            signature = tuple(np.round(np.asarray(embedding, dtype=np.float32), 3))
-            if signature in seen_signatures:
-                skipped += 1
-                continue
-
-            seen_signatures.add(signature)
-            embeddings.append(embedding)
+            valid_crops.append(faces[0]["crop"])
         except Exception:
             skipped += 1
             continue
+
+    if not valid_crops:
+        raise ValueError("Training failed: no valid faces found in dataset images")
+
+    raw_embeddings = generate_embeddings_batch(valid_crops)
+    
+    embeddings = []
+    seen_signatures = set()
+    for embedding in raw_embeddings:
+        signature = tuple(np.round(np.asarray(embedding, dtype=np.float32), 3))
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        embeddings.append(embedding.tolist() if hasattr(embedding, "tolist") else embedding)
 
     if not embeddings:
         raise ValueError("Training failed: no valid faces found in dataset images")
@@ -3163,7 +3168,7 @@ def enroll_student_face(user):
     # Use the first (largest confidence) face
     face_crop = faces[0]["crop"]
     try:
-        embedding = normalize_embedding(generate_embedding(face_crop))
+        embedding = generate_embedding(face_crop)
         add_face_embedding(resolved_user_id, embedding)
     except Exception as exc:
         current_app.logger.exception("Embedding persistence failed")
