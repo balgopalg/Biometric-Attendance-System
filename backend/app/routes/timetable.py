@@ -499,6 +499,7 @@ def _plan_generation_with_conflict_retries(
 @timetable_bp.route("/academic-sessions", methods=["GET"])
 @role_required("department_admin")
 def list_academic_sessions_for_scope(user):
+    """List available academic sessions and semester options for a course."""
     try:
         department_id = _normalize_department_scope(user, request.args.get("department_id"))
     except PermissionError as exc:
@@ -555,6 +556,7 @@ def list_academic_sessions_for_scope(user):
 @timetable_bp.route("/papers", methods=["GET"])
 @role_required("department_admin")
 def list_papers_for_timetable(user):
+    """List papers available for timetable generation, filtered by course and semester."""
     try:
         department_id = _normalize_department_scope(user, request.args.get("department_id"))
     except PermissionError as exc:
@@ -584,6 +586,7 @@ def list_papers_for_timetable(user):
 @timetable_bp.route("/admin", methods=["GET"])
 @role_required("department_admin")
 def list_admin_timetables(user):
+    """List all timetables for a department with optional course, semester, and status filters."""
     try:
         department_id = _normalize_department_scope(user, request.args.get("department_id"), required_for_super_admin=False)
     except PermissionError as exc:
@@ -611,6 +614,7 @@ def list_admin_timetables(user):
 @timetable_bp.route("/admin/generate", methods=["POST"])
 @role_required("department_admin")
 def generate_admin_timetable(user):
+    """Generate a new timetable with automatic conflict detection and retry support."""
     payload = request.get_json(silent=True) or {}
 
     try:
@@ -754,6 +758,7 @@ def generate_admin_timetable(user):
 @timetable_bp.route("/admin/<timetable_id>/slots", methods=["PUT"])
 @role_required("department_admin")
 def update_admin_timetable_slots(user, timetable_id):
+    """Update individual timeslots and optionally change the timetable status."""
     timetable = get_timetable_by_id(timetable_id)
     if not timetable:
         return jsonify({"error": "Timetable not found"}), 404
@@ -899,6 +904,7 @@ def update_admin_timetable_slots(user, timetable_id):
 @timetable_bp.route("/admin/<timetable_id>/regenerate", methods=["POST"])
 @role_required("department_admin")
 def regenerate_admin_timetable(user, timetable_id):
+    """Regenerate all slots for an existing timetable with updated parameters."""
     timetable = get_timetable_by_id(timetable_id)
     if not timetable:
         return jsonify({"error": "Timetable not found"}), 404
@@ -1020,6 +1026,7 @@ def regenerate_admin_timetable(user, timetable_id):
 @timetable_bp.route("/admin/<timetable_id>/status", methods=["PATCH"])
 @role_required("department_admin")
 def set_timetable_status(user, timetable_id):
+    """Change a timetable's status (draft, active, archived) with conflict checks."""
     timetable = get_timetable_by_id(timetable_id)
     if not timetable:
         return jsonify({"error": "Timetable not found"}), 404
@@ -1063,6 +1070,7 @@ def set_timetable_status(user, timetable_id):
 @timetable_bp.route("/admin/<timetable_id>", methods=["DELETE"])
 @role_required("department_admin")
 def delete_admin_timetable(user, timetable_id):
+    """Delete a draft or active timetable and all associated timeslots."""
     timetable = get_timetable_by_id(timetable_id)
     if not timetable:
         return jsonify({"error": "Timetable not found"}), 404
@@ -1091,6 +1099,7 @@ def delete_admin_timetable(user, timetable_id):
 @timetable_bp.route("/lecturer/my", methods=["GET"])
 @role_required("lecturer")
 def lecturer_my_timetable(user):
+    """Fetch the current lecturer's timetable slots from all active timetables."""
     lecturer_id = _to_oid(user.get("_id"))
     if not lecturer_id:
         return jsonify({"items": []})
@@ -1119,6 +1128,7 @@ def lecturer_my_timetable(user):
 @timetable_bp.route("/student/my", methods=["GET"])
 @role_required("student")
 def student_my_timetable(user):
+    """Fetch the active timetable for the student's enrolled course and semester."""
     profile = get_profile_by_user(str(user.get("_id")))
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404

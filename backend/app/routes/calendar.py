@@ -218,6 +218,7 @@ def _calendar_payload(calendar_doc):
 @calendar_bp.route("/extract", methods=["POST"])
 @role_required("super_admin", "department_admin")
 def extract_calendar(user):
+    """Extract academic calendar data from an uploaded image via OCR."""
     file = request.files.get("image") or request.files.get("calendar_image")
     if not file or not file.filename:
         return jsonify({"error": "Calendar image is required"}), 400
@@ -245,6 +246,7 @@ def extract_calendar(user):
 @calendar_bp.route("/extract-excel", methods=["POST"])
 @role_required("super_admin", "department_admin")
 def extract_calendar_excel(user):
+    """Extract holiday data from an uploaded Excel (.xlsx) file."""
     uploaded = request.files.get("file") or request.files.get("excel")
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "Holiday Excel file is required"}), 400
@@ -274,6 +276,7 @@ def extract_calendar_excel(user):
 @calendar_bp.route("/save", methods=["POST"])
 @role_required("super_admin", "department_admin")
 def save_calendar(user):
+    """Publish an academic calendar with holidays, optional holidays, and auto-detected Sundays."""
     data = request.get_json(silent=True) or {}
     resolved_department_id = _resolved_department_id(user)
 
@@ -316,6 +319,7 @@ def save_calendar(user):
 @calendar_bp.route("/current", methods=["GET"])
 @jwt_required()
 def current_calendar():
+    """Fetch the currently published academic calendar for a given year."""
     find_user_by_email(get_jwt_identity())
     year = request.args.get("year")
 
@@ -326,6 +330,7 @@ def current_calendar():
 @calendar_bp.route("", methods=["GET"])
 @role_required("super_admin", "department_admin")
 def list_calendar_records(user):
+    """List all calendar records with optional year and status filters."""
     year = request.args.get("year")
     status = request.args.get("status")
 
