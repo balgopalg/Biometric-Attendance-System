@@ -17,6 +17,7 @@ notifications_bp = Blueprint("notifications", __name__)
 @notifications_bp.route("", methods=["GET"])
 @jwt_required()
 def get_notifications():
+    """Fetch the current user's notification inbox, ordered newest-first."""
     user = find_user_by_email(get_jwt_identity())
     if not user:
         return jsonify({"error": "User not found"}), 404
@@ -28,6 +29,7 @@ def get_notifications():
 @notifications_bp.route("/<notification_id>/read", methods=["POST"])
 @jwt_required()
 def read_notification(notification_id):
+    """Mark a single notification as read by its ID."""
     user = find_user_by_email(get_jwt_identity())
     if not user:
         return jsonify({"error": "User not found"}), 404
@@ -44,6 +46,7 @@ def read_notification(notification_id):
 @notifications_bp.route("/read-all", methods=["POST"])
 @jwt_required()
 def read_all_notifications():
+    """Mark all unread notifications as read for the current user."""
     user = find_user_by_email(get_jwt_identity())
     if not user:
         return jsonify({"error": "User not found"}), 404

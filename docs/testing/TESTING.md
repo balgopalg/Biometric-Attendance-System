@@ -172,8 +172,9 @@ jobs:
 | Aspect | Backend | Frontend |
 |--------|---------|----------|
 | Framework | pytest | Playwright + React |
-| Tests | 36 integrated tests | 7 scenarios |
-| Status | ✅ 36/36 passing | ✅ 7/7 passing |
-| Runtime | ~25s | ~25-40s |
+| Tests | 40 integrated tests | 13 scenarios |
+| Status | ✅ 40/40 passing | ✅ 13/13 passing |
+| Runtime | ~23s | ~72s |
 
 **Both suites are deterministic, stable over variable compilation latencies, and ready for CI/CD integration.**
+

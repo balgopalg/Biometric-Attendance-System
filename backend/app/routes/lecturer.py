@@ -459,6 +459,7 @@ def my_papers(user):
 @lecturer_bp.route("/pin", methods=["GET"])
 @role_required("lecturer")
 def get_pin_status(user):
+    """Check whether the current lecturer has a PIN configured."""
     has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
     return jsonify({"has_pin": has_pin, "pin_last_set": user.get("pin_last_set")})
 
@@ -466,6 +467,7 @@ def get_pin_status(user):
 @lecturer_bp.route("/pin", methods=["PUT"])
 @role_required("lecturer")
 def set_pin(user):
+    """Set or update the lecturer's 4-digit attendance commit PIN."""
     d = request.get_json(silent=True) or {}
     pin = str(d.get("pin", "")).strip()
     if not pin.isdigit() or len(pin) != 4:
@@ -479,6 +481,7 @@ def set_pin(user):
 @lecturer_bp.route("/pin/generate", methods=["POST"])
 @role_required("lecturer")
 def generate_pin(user):
+    """Auto-generate a random 4-digit PIN for the lecturer."""
     pin = f"{secrets.randbelow(10000):04d}"
     set_user_pin(str(user["_id"]), pin)
     log_action("LECTURER_GENERATE_PIN", str(user["_id"]), details="Lecturer generated a new PIN")
@@ -771,6 +774,7 @@ def recognize_image(user):
 @lecturer_bp.route("/session/recognized", methods=["GET"])
 @role_required("lecturer")
 def session_recognized_list(user):
+    """Return the list of students recognized so far in an active session."""
     session_id = request.args.get("session_id")
     if not session_id:
         return jsonify({"error": "Invalid session"}), 400
@@ -958,6 +962,7 @@ def commit_session(user):
 @lecturer_bp.route("/session/<session_id>/review", methods=["GET"])
 @role_required("lecturer")
 def review_committed_session(user, session_id):
+    """Review a committed attendance session with present/candidate student lists."""
     session_doc = _get_session_doc(session_id)
     if not session_doc:
         return jsonify({"error": "Committed session not found"}), 404
