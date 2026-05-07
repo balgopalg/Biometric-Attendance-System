@@ -582,7 +582,7 @@ class AdminFlowTests(BaseApiFlowTestCase):
         self.assertEqual(stats_payload["total_courses"], 1)
         self.assertEqual(stats_payload["total_papers"], 1)
 
-        with patch("app.routes.admin._build_attendance_matrix_payload", return_value={
+        with patch("app.routes.admin.attendance._build_attendance_matrix_payload", return_value={
             "options": {
                 "courses": [{"_id": self.seed["course_id"], "name": "Master of Computer Applications", "status": "active"}],
                 "academic_sessions": ["2026"],
