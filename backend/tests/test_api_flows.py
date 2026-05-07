@@ -882,7 +882,7 @@ class AdminFlowTests(BaseApiFlowTestCase):
         self.assertEqual(stats_payload["total_courses"], 1)
         self.assertEqual(stats_payload["total_papers"], 1)
 
-        with patch("app.routes.admin._build_attendance_matrix_payload", return_value={
+        with patch("app.routes.admin.attendance._build_attendance_matrix_payload", return_value={
             "options": {
                 "courses": [{"_id": self.seed["course_id"], "name": "Master of Computer Applications", "status": "active"}],
                 "academic_sessions": ["2026"],
@@ -925,7 +925,7 @@ class AdminFlowTests(BaseApiFlowTestCase):
             self.assertEqual(xlsx_response.status_code, 200)
             self.assertIn("spreadsheetml.sheet", xlsx_response.headers.get("Content-Type", ""))
 
-        with patch("app.routes.admin.get_detector") as detector_factory, patch("app.routes.admin.generate_embedding", return_value=[1.0, 0.0]), patch("app.routes.admin.save_cropped_face_dataset", return_value=["dataset/alice/face-1.png"]):
+        with patch("app.routes.admin.enrollment.get_detector") as detector_factory, patch("app.routes.admin.enrollment.generate_embedding", return_value=[1.0, 0.0]), patch("app.routes.admin.enrollment.save_cropped_face_dataset", return_value=["dataset/alice/face-1.png"]):
             detector = type("Detector", (), {"detect_faces": lambda self, img: [{"crop": np.zeros((10, 10, 3), dtype=np.uint8)}]})()
             detector_factory.return_value = detector
             enroll = self.client.post(
@@ -942,14 +942,14 @@ class AdminFlowTests(BaseApiFlowTestCase):
         self.assertEqual(enroll_payload["faces_detected"], 1)
         self.assertGreaterEqual(enroll_payload["dataset_saved_count"], 1)
 
-        with patch("app.routes.admin.get_audit_log_by_id", return_value={
+        with patch("app.routes.admin.attendance.get_audit_log_by_id", return_value={
             "_id": ObjectId(self.seed["audit_id"]),
             "action": "CREATE_STUDENT",
             "timestamp": datetime.now(timezone.utc) - timedelta(hours=1),
             "rollback": {"kind": "noop"},
             "rollback_until": datetime.now(timezone.utc) + timedelta(hours=1),
             "rolled_back": False,
-        }), patch("app.routes.admin._execute_rollback_operation", side_effect=lambda payload: None), patch("app.routes.admin.log_action", side_effect=lambda *args, **kwargs: None):
+        }), patch("app.routes.admin.attendance._execute_rollback_operation", side_effect=lambda payload: None), patch("app.routes.admin.attendance.log_action", side_effect=lambda *args, **kwargs: None):
             rollback = self.client.post(f"/api/admin/audit-logs/{self.seed['audit_id']}/rollback")
             rollback = self.client.post(f"/api/admin/audit-logs/{self.seed['audit_id']}/rollback", headers=self._csrf_headers())
         self.assertEqual(rollback.status_code, 200, rollback.get_data(as_text=True))
