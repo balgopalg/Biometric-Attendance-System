@@ -1,263 +1,189 @@
-# API Workflow Guide: Payloads, Validation, and Examples
+# Concise Workflows: Login, Face Enrollment, and Attendance Recognition
 
-This guide documents key workflow payload contracts and practical examples.
+This guide keeps only the three workflows that the application actually implements in the reviewed code paths: login authentication, student face enrollment, and lecturer attendance-session face recognition.
 
-## 1. Auth workflow
+---
 
-### 1.1 Login
+## 1. Login Authentication
 
-- Endpoint: POST /api/auth/login
-- Purpose: Create authenticated session via JWT cookie
-- Required fields:
-  - email
-  - password
-- Validation rules:
-  - email must be valid format
-  - rate limits and lockouts may block excessive retries
+Summary
+- Endpoint: `POST /api/auth/login`
+- Purpose: authenticate credentials, issue JWT cookies, and return the user context.
 
-Request example:
+Request body
+- `email` and `password` are required.
 
-```json
-{
-  "email": "admin@system.com",
-  "password": "admin123"
-}
+Behavior
+- Validates email format.
+- Checks brute-force lockout and IP rate limits when enabled.
+- Verifies the password hash.
+- On success, issues both access and refresh tokens, sets them as secure HttpOnly cookies, and returns serialized user details.
+- On failure, returns `401` for invalid credentials or `429` if the account/IP is locked.
+
+Relevant config
+- `JWT_SECRET_KEY`
+- `JWT_ACCESS_TOKEN_EXPIRES_SECONDS`
+- `BRUTE_FORCE_PROTECTION_ENABLED`
+- `LOGIN_LOCKOUT_THRESHOLD`
+- `LOGIN_LOCKOUT_DURATION_MINUTES`
+- `IP_RATELIMIT_*`
+
+Notes
+- Token validity is also enforced through revocation checks and the user's `session_version`.
+
+---
+
+## 2. Student Face Enrollment
+
+Summary
+- Endpoint: `POST /api/admin/students/enroll`
+- Purpose: store a student's face embedding, and optionally save a small dataset for later training.
+
+Request body
+- `user_id` is required.
+- `photo` is required and must be a base64-encoded image.
+- `dataset_photos` is optional and may contain up to 50 base64-encoded frames.
+
+Behavior
+- Decodes the base64 image.
+- Runs face detection.
+- If no face is found, returns `400`.
+- Uses the first detected face crop to generate a FaceNet embedding and stores it in the student's profile.
+- If `dataset_photos` are supplied, it extracts crops from up to 50 frames and stores them under `dataset/{user_id}/`.
+- Returns `faces_detected` and `dataset_saved_count`.
+
+Relevant config
+- `FACE_EMBEDDING_ENCRYPTION_KEY`
+- `DATASET_RETENTION_DAYS`
+- `TRAINER_ARTIFACT_RETENTION_DAYS`
+
+Notes
+- Related training endpoints exist separately, but they are not part of the core enrollment flow.
+
+---
+
+## 3. Attendance Session Face Recognition
+
+Summary
+- Start session: `POST /api/lecturer/session/start`
+- Recognize webcam frame: `POST /api/lecturer/session/recognize`
+- Recognize uploaded classroom image: `POST /api/lecturer/session/recognize-image`
+- Commit attendance: `POST /api/lecturer/session/commit`
+
+Start session
+- Requires `paper_id`.
+- Validates the lecturer is assigned to the paper and the course is active.
+- Creates an active session with a generated `session_id`.
+
+Recognition flow
+- Accepts either a base64 webcam frame or a multipart uploaded image.
+- Detects faces in the frame/image.
+- Generates embeddings in batch for the detected face crops.
+- Matches them against the enrolled students for the current paper.
+- Adds newly recognized student IDs to the active session's `recognized` set.
+- Returns the matches and recognition metadata.
+
+Commit flow
+- Finalizes attendance for the active session.
+- Commitment auth is controlled by `LECTURER_AUTH_MODE`:
+  - `pin` mode verifies the lecturer PIN.
+  - `face` mode verifies the lecturer against their enrolled biometric profile.
+- Writes attendance logs for the recognized students.
+- Creates the committed `attendance_sessions` record with a `rollback_until` timestamp.
+
+Relevant config
+- `LECTURER_AUTH_MODE`
+- `FACENET_THRESHOLD`
+- `ACTIVE_SESSION_TIMEOUT_MINUTES`
+
+Notes
+- The rollback window is 30 minutes from commit.
+- Only the assigned lecturer can start, recognize for, or commit the session.
+
+---
+
+## Diagrams (Mermaid)
+
+Login Authentication (flowchart)
+```mermaid
+flowchart TD
+  A[Client → POST /api/auth/login\n{ email, password }] --> B{Brute-force protection\nenabled?}
+  B -->|Locked| C[Return 429: Account locked (lockout_until)]
+  B -->|OK| D[Validate email format]
+  D -->|Invalid| E[Return 400: Invalid email]
+  D -->|Valid| F[Lookup user & verify password]
+  F -->|Fail| G[Record failed attempt → 401 Invalid credentials]
+  F -->|Success| H[Clear failed attempts; log login_success]
+  H --> I[Create Access & Refresh JWTs (claims include sv, role, dept)]
+  I --> J[Set secure HttpOnly cookies (access, refresh)]
+  J --> K[Return 200 + serialized user context]
+  K --> L[Subsequent requests: token revocation check\n(revoked_jwts + user.session_version)]
 ```
 
-Success example:
-
-```json
-{
-  "user": {
-    "_id": "69da681fcd4bb4ef527e972a",
-    "name": "System Admin",
-    "email": "admin@system.com",
-    "role": "admin",
-    "department": "Administration",
-    "must_change_password": false
-  }
-}
+Student Face Enrollment (flowchart)
+```mermaid
+flowchart TD
+  A[Client → POST /api/admin/students/enroll\n{ user_id, photo (base64), dataset_photos? }] --> B[Decode base64 image]
+  B -->|Invalid| C[Return 400: Invalid image]
+  B --> D[Run face detector → faces[]]
+  D -->|none| E[Return 400: No face detected]
+  D -->|has faces| F[Select primary crop (faces[0].crop)]
+  F --> G[generate_embedding(crop) → 512-d vector]
+  G --> H[add_face_embedding(user_id, embedding) → persist to student_profiles]
+  H --> I{dataset_photos provided?}
+  I -->|yes| J[Process up to 50 frames: detect crops, fill missing with last valid]
+  J --> K[save_cropped_face_dataset(dataset/{user_id}/) → dataset_saved_count]
+  I -->|no| L[skip dataset save]
+  K --> M[Log ENROLL_FACE audit, clear caches]
+  L --> M
+  M --> N[Return 200: Face enrolled successfully\n(faces_detected, dataset_saved_count)]
 ```
 
-### 1.2 Change password
+Attendance Session — Face Recognition (sequence)
+```mermaid
+sequenceDiagram
+  participant Lecturer
+  participant API
+  participant Detector as "Face Detector"
+  participant FR as "FaceNet / Recognition"
+  participant DB
 
-- Endpoint: POST /api/auth/change-password
-- Required fields:
-  - current_password
-  - new_password
-  - confirm_password
-- Validation rules:
-  - all fields required
-  - new_password must equal confirm_password
-  - new password must satisfy security policy
-  - new password must differ from current
+  Lecturer->>API: POST /api/lecturer/session/start { paper_id }
+  API->>DB: create active_session(session_id, paper_id, lecturer_id)
+  DB-->>API: ack
+  API-->>Lecturer: 200 { session_id, paper }
 
-Request example:
+  loop Real-time / repeated
+    Lecturer->>API: POST /api/lecturer/session/recognize { session_id, frame(base64) }
+    API->>Detector: detect_faces(frame) -> faces[ {crop,...} ]
+    Detector-->>API: faces
+    API->>FR: generate_embeddings_batch([crops]) -> embeddings[]
+    FR-->>API: embeddings
+    API->>API: prepare candidates for paper (cached)
+    API->>FR: find_best_match_cached(embedding, candidates, threshold)
+    FR-->>API: matched user_id / similarity
+    API->>DB: _addToSet active_sessions.recognized (matched user_id)
+    DB-->>API: ack
+    API-->>Lecturer: 200 { new_matches, faces_detected, total_recognized, threshold, best_similarity_seen }
+  end
 
-```json
-{
-  "current_password": "admin123",
-  "new_password": "NewSecurePass123!",
-  "confirm_password": "NewSecurePass123!"
-}
+  Lecturer->>API: POST /api/lecturer/session/commit { session_id, pin OR image }
+  API->>API: verify lecturer ownership
+  alt auth=face
+    API->>Detector: detect_faces(commit_image)
+    API->>FR: generate_embedding(lecturer_crop)
+    API->>DB: fetch lecturer biometric profile
+    API->>FR: find_best_match(embedding, profile, threshold)
+    FR-->>API: match/no-match
+  else auth=pin
+    API->>DB: verify PIN (with brute-force controls)
+    DB-->>API: ok/fail
+  end
+  API->>DB: write attendance_logs for each recognized user_id
+  API->>DB: insert attendance_sessions (committed) with rollback_until
+  DB-->>API: ack
+  API-->>Lecturer: 200 { message, students_marked, session_id, rollback_until }
 ```
-
-## 2. Admin workflows
-
-### 2.1 Create student
-
-- Endpoint: POST /api/admin/students
-- Required fields:
-  - name
-  - email
-  - course_id
-- Validation rules:
-  - required fields must be non-empty
-  - email must be unique
-  - course must exist and be active
-
-Request example:
-
-```json
-{
-  "name": "Alice Student",
-  "email": "alice@student.com",
-  "course_id": "69da6f26cd4bb4ef527e972b",
-  "department": "Computing"
-}
-```
-
-Success response example:
-
-```json
-{
-  "_id": "69da6f37cd4bb4ef527e972d",
-  "name": "Alice Student",
-  "email": "alice@student.com",
-  "role": "student",
-  "temp_password": "9e2a4a8d20",
-  "profile": {
-    "user_id": "69da6f37cd4bb4ef527e972d",
-    "reg_number": "REG001",
-    "current_semester": 1,
-    "course_id": "69da6f26cd4bb4ef527e972b"
-  }
-}
-```
-
-### 2.2 Face enrollment
-
-- Endpoint: POST /api/admin/students/enroll
-- Required fields:
-  - user_id
-  - photo
-- Optional fields:
-  - dataset_photos
-- Validation rules:
-  - student must exist
-  - photo must decode to valid image
-  - at least one face must be detected
-
-Request example:
-
-```json
-{
-  "user_id": "69da6f37cd4bb4ef527e972d",
-  "photo": "data:image/png;base64,iVBORw0KGgoAAA...",
-  "dataset_photos": [
-    "data:image/png;base64,iVBORw0KGgoAAA...",
-    "data:image/png;base64,iVBORw0KGgoAAA..."
-  ]
-}
-```
-
-Success response example:
-
-```json
-{
-  "message": "Face enrolled successfully",
-  "faces_detected": 1,
-  "dataset_saved_count": 50
-}
-```
-
-### 2.3 Bulk promote students
-
-- Endpoint: POST /api/admin/students/bulk-promote
-- Required fields:
-  - user_ids
-- Optional fields:
-  - from_semester
-- Validation rules:
-  - user_ids must be non-empty
-  - students at max semester are skipped
-
-Request example:
-
-```json
-{
-  "user_ids": [
-    "69da6f37cd4bb4ef527e972d",
-    "69db4d8fdc4feb73eefa4864"
-  ],
-  "from_semester": 1
-}
-```
-
-Success response example:
-
-```json
-{
-  "message": "Promoted 2 students, removed 2 old-semester paper assignments, skipped 0 already at max semester",
-  "promoted_count": 2,
-  "removed_papers_count": 2,
-  "skipped_count": 0,
-  "skipped_max_semester_count": 0
-}
-```
-
-### 2.4 Paper bulk assignment
-
-- Endpoint: POST /api/admin/papers/bulk-assign
-- Supported payload modes:
-  - Single paper to many students: `paper_id` + `user_ids`
-  - Many papers to many students: `paper_ids` + `user_ids` (optionally with `course_id`, `semester` from UI state)
-
-Single-paper request example:
-
-```json
-{
-  "paper_id": "69da7292cd4bb4ef527e9735",
-  "user_ids": [
-    "69da6f37cd4bb4ef527e972d"
-  ]
-}
-```
-
-Multi-paper request example:
-
-```json
-{
-  "course_id": "69da6f26cd4bb4ef527e972b",
-  "semester": 1,
-  "paper_ids": [
-    "69da7292cd4bb4ef527e9735",
-    "69da7292cd4bb4ef527e9736"
-  ],
-  "user_ids": [
-    "69da6f37cd4bb4ef527e972d"
-  ]
-}
-```
-
-Success response example:
-
-```json
-{
-  "message": "Students enrolled successfully",
-  "updated_count": 1,
-  "assigned_paper_count": 2
-}
-```
-
-### 2.5 Attendance matrix export
-
-- Endpoints:
-  - GET /api/admin/attendance-matrix
-  - GET /api/admin/attendance-matrix/export
-  - GET /api/admin/attendance-matrix/export-csv
-- Required query params:
-  - course_id
-  - academic_session
-  - semester
-
-Query example:
-
-```text
-/api/admin/attendance-matrix?course_id=69da6f26cd4bb4ef527e972b&academic_session=2026-28&semester=1
-```
-
-### 2.6 Audit rollback
-
-- Endpoint: POST /api/admin/audit-logs/{log_id}/rollback
-- Validation rules:
-  - log must exist
-  - rollback must be allowed and within window
-
-Success response example:
-
-```json
-{
-  "message": "Rollback completed successfully"
-}
-```
-
-### 2.7 Timetable admin workflows
-
-- List/filter timetables: GET `/api/timetable/admin`
-- Generate timetable: POST `/api/timetable/admin/generate`
-- Regenerate timetable: POST `/api/timetable/admin/{timetable_id}/regenerate`
-- Update timetable slots: PUT `/api/timetable/admin/{timetable_id}/slots`
 - Update timetable status: PATCH `/api/timetable/admin/{timetable_id}/status`
 - Delete timetable: DELETE `/api/timetable/admin/{timetable_id}`
 - Scope metadata endpoints:
