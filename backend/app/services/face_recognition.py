@@ -59,13 +59,18 @@ def _current_env():
 def is_model_stub() -> bool:
     return _model_is_stub
 
+def _normalize_np(vector: np.ndarray) -> np.ndarray:
+    """L2-normalize a numpy vector in-place (no list conversion)."""
+    vec = np.asarray(vector, dtype=np.float32).reshape(-1)
+    norm = np.linalg.norm(vec)
+    if norm > 0.0:
+        vec = vec / norm
+    return vec
+
+
 def normalize_embedding(embedding: list) -> list:
     """Return an L2-normalized embedding vector as a Python list."""
-    vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
-    norm = float(np.linalg.norm(vector))
-    if norm <= 0.0:
-        return vector.tolist()
-    return (vector / norm).tolist()
+    return _normalize_np(np.asarray(embedding, dtype=np.float32)).tolist()
 
 def _load_model():
     global _model, _model_is_stub
@@ -127,13 +132,39 @@ def generate_embedding(face_crop: np.ndarray) -> list:
     list of float
         512-dimensional embedding vector.
     """
+    return _generate_embedding_np(face_crop).tolist()
+
+
+def _generate_embedding_np(face_crop: np.ndarray) -> np.ndarray:
+    """Internal: generate a normalized 512-d numpy embedding (no list conversion)."""
     model = _load_model()
-    face_crop = np.expand_dims(face_crop, axis=0)  # (1, 160, 160, 3)
-    embeddings = model.embeddings(face_crop)
-    first = embeddings[0]
-    if hasattr(first, "tolist"):
-        return normalize_embedding(first.tolist())
-    return normalize_embedding(list(first))
+    batch = np.expand_dims(face_crop, axis=0)  # (1, 160, 160, 3)
+    raw = model.embeddings(batch)
+    return _normalize_np(np.asarray(raw[0], dtype=np.float32))
+
+
+def generate_embeddings_batch(face_crops: list) -> list:
+    """Generate normalized embeddings for multiple face crops in a single inference call.
+
+    Significantly faster than calling generate_embedding() per crop because
+    FaceNet processes the entire batch with optimized TF graph execution.
+
+    Parameters
+    ----------
+    face_crops : list of np.ndarray
+        Each element is a (160, 160, 3) uint8 RGB face crop.
+
+    Returns
+    -------
+    list of np.ndarray
+        Each element is a normalized 512-d float32 numpy vector.
+    """
+    if not face_crops:
+        return []
+    model = _load_model()
+    batch = np.stack(face_crops)  # (N, 160, 160, 3)
+    raw_embeddings = model.embeddings(batch)
+    return [_normalize_np(np.asarray(emb, dtype=np.float32)) for emb in raw_embeddings]
 
 
 def compare_embeddings(embedding_a: list, embedding_b: list) -> float:
@@ -152,7 +183,8 @@ def prepare_profile_candidates(stored_profiles: list) -> list:
             decoded = decode_face_embedding(emb)
             if decoded is None:
                 continue
-            vectors.append(np.asarray(normalize_embedding(decoded), dtype=np.float32))
+            # Use _normalize_np to stay in numpy land (no list↔numpy conversion)
+            vectors.append(_normalize_np(np.asarray(decoded, dtype=np.float32)))
 
         if not vectors:
             continue
@@ -167,20 +199,27 @@ def prepare_profile_candidates(stored_profiles: list) -> list:
     return prepared
 
 
-def find_best_match_cached(query_embedding: list, prepared_candidates: list, threshold=0.6):
-    """Match against pre-normalized candidates. Returns (match_dict_or_none, best_score)."""
+def find_best_match_cached(query_embedding, prepared_candidates: list, threshold=0.6):
+    """Match against pre-normalized candidates. Returns (match_dict_or_none, best_score).
+
+    query_embedding can be a list (will be normalized) or a pre-normalized
+    np.ndarray from generate_embeddings_batch (used directly, zero-copy).
+    """
     if not prepared_candidates:
         return None, -1.0
 
-    # Prepare query vector
-    query = np.asarray(normalize_embedding(query_embedding), dtype=np.float32)
+    # Accept pre-normalized numpy arrays directly to avoid redundant conversion
+    if isinstance(query_embedding, np.ndarray):
+        query = query_embedding.astype(np.float32)
+    else:
+        query = _normalize_np(np.asarray(query_embedding, dtype=np.float32))
 
     # Quick path: if there are few candidates, fall back to simple loop
     total_vectors = sum([len(c.get("vectors", [])) for c in prepared_candidates])
     best_candidate = None
     best_score = -1.0
 
-    if total_vectors <= 64:
+    if total_vectors <= 128:
         for candidate in prepared_candidates:
             for vec in candidate["vectors"]:
                 sim = float(np.dot(query, vec))
@@ -237,17 +276,13 @@ def find_best_match_cached(query_embedding: list, prepared_candidates: list, thr
             except Exception:
                 pass
 
-    # For each candidate find max similarity across its vectors
+    # For each candidate find max similarity across its vectors — O(M) via ufunc.at
     owner_indices = np.asarray(owner_indices, dtype=np.int32)
     num_candidates = len(prepared_candidates)
-    per_candidate_best = np.full((num_candidates,), -1.0, dtype=np.float32)
+    per_candidate_best = np.full((num_candidates,), -1.0, dtype=np.float64)
 
-    # Use numpy to compute per-candidate maxima
-    for idx in range(num_candidates):
-        mask = owner_indices == idx
-        if not np.any(mask):
-            continue
-        per_candidate_best[idx] = float(np.max(sims[mask]))
+    # np.maximum.at scatters element-wise max into per_candidate_best in a single pass
+    np.maximum.at(per_candidate_best, owner_indices, sims.astype(np.float64))
 
     best_idx = int(np.argmax(per_candidate_best))
     best_score = float(per_candidate_best[best_idx])

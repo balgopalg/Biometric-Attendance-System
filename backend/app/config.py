@@ -147,14 +147,15 @@ class Config:
     # Health Checks
     HEALTH_CHECK_ENABLED = _env_bool("HEALTH_CHECK_ENABLED", True)
 
-    # FaceNet cosine similarity threshold (0.6+ recommended for reliable matching)
+    # FaceNet cosine similarity threshold (0.65 recommended for reliable matching)
     # Higher = stricter matching, fewer false positives (absent marked as present)
     # Lower = lenient matching, may have false positives
+    # Range guide: 0.55 = very lenient, 0.65 = balanced, 0.75 = strict
     
     # Attendance percentage threshold for exam eligibility
     ATTENDANCE_THRESHOLD = _env_float("ATTENDANCE_THRESHOLD", 75.0)
 
-    FACENET_THRESHOLD = _env_float("FACENET_THRESHOLD", 0.60)
+    FACENET_THRESHOLD = _env_float("FACENET_THRESHOLD", 0.65)
     DROWSINESS_EAR_THRESHOLD = _env_float("DROWSINESS_EAR_THRESHOLD", 0.25)
     DROWSINESS_MAR_THRESHOLD = _env_float("DROWSINESS_MAR_THRESHOLD", 0.60)
     UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")

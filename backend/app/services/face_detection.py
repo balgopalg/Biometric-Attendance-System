@@ -7,6 +7,11 @@ import numpy as np
 import mediapipe as mp
 
 
+# Minimum face bounding-box dimension (in pixels) to accept.
+# Faces smaller than this produce noisy embeddings and hurt recognition accuracy.
+_MIN_FACE_SIZE = 30
+
+
 class FaceDetector:
     """Detect and crop faces from an image using MediaPipe Face Detection."""
 
@@ -51,6 +56,10 @@ class FaceDetector:
 
     def _build_face_record(self, image_rgb: np.ndarray, x: int, y: int, bw: int, bh: int, confidence: float):
         h, w, _ = image_rgb.shape
+
+        # Skip faces too small to produce reliable embeddings.
+        if bw < _MIN_FACE_SIZE or bh < _MIN_FACE_SIZE:
+            return None
 
         # Add padding for better crop.
         pad = int(0.15 * max(bw, bh))
