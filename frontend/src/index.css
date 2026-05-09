@@ -967,7 +967,18 @@ input[type="date"]:invalid::-webkit-datetime-edit {
 
 /* Allow popovers for the lecturers table to overflow vertically without resizing the table */
 .lecturers-table-scroll {
+  overflow-x: auto;
   overflow-y: visible;
+}
+
+.lecturers-table-card {
+  overflow: visible;
+}
+
+.lecturer-dept-popover-surface,
+.lecturers-table-card .data-table td,
+.lecturers-table-card .data-table th {
+  overflow: visible;
 }
 
 .students-table-scroll .data-table {
