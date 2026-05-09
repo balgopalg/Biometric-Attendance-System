@@ -9,6 +9,7 @@ from app.services.notification_service import (
     list_notifications,
     mark_all_notifications_read,
     mark_notification_read,
+    delete_notification,
 )
 
 notifications_bp = Blueprint("notifications", __name__)
@@ -53,3 +54,20 @@ def read_all_notifications():
 
     updated = mark_all_notifications_read(user.get("_id"))
     return jsonify({"message": "All notifications marked as read", "updated_count": updated})
+
+
+@notifications_bp.route("/<notification_id>", methods=["DELETE"])
+@jwt_required()
+def remove_notification(notification_id):
+    """Delete a single notification by its ID."""
+    user = find_user_by_email(get_jwt_identity())
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    if not validate_object_id(notification_id):
+        return jsonify({"error": "Invalid notification ID"}), 400
+
+    if not delete_notification(user.get("_id"), notification_id):
+        return jsonify({"error": "Notification not found or already deleted"}), 404
+
+    return jsonify({"message": "Notification deleted successfully"})

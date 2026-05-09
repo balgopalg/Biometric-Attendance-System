@@ -291,15 +291,30 @@ export default function FaceSearchModal({ isOpen, onClose }) {
                     }}>
                       {matchedStudent.photo_url ? (
                         <img 
-                          src={`${api.defaults.baseURL}${matchedStudent.photo_url}`} 
+                          src={matchedStudent.photo_url} 
                           alt={matchedStudent.name} 
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => {
+                            e.target.onerror = null; // prevent infinite loop
+                            e.target.style.display = 'none';
+                            if (e.target.nextElementSibling) {
+                                e.target.nextElementSibling.style.display = 'flex';
+                            }
+                          }}
                         />
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                          <HiOutlineIdentification size={32} />
-                        </div>
-                      )}
+                      ) : null}
+                      <div style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        display: matchedStudent.photo_url ? 'none' : 'flex', 
+                        flexDirection: 'column',
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        color: 'var(--text-muted)' 
+                      }}>
+                        <HiOutlineIdentification size={32} />
+                        <span style={{ fontSize: '0.65rem', marginTop: 4, fontWeight: 600 }}>No Profile photo</span>
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -97,7 +97,8 @@ export default function StudentTable() {
                         src={`/api/admin/students/profile-picture/${s.profile_picture_file}`}
                         alt={s.name}
                         style={{
-                          width: 30, height: 30, borderRadius: '50%',
+                          display: 'block', width: 30, height: 30, minWidth: 30, minHeight: 30,
+                          maxWidth: 30, maxHeight: 30, borderRadius: 9999,
                           objectFit: 'cover', cursor: 'pointer'
                         }}
                         onClick={() => setPreviewImage(`/api/admin/students/profile-picture/${s.profile_picture_file}`)}
@@ -132,6 +133,9 @@ export default function StudentTable() {
                       <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Train Face From Dataset'} onClick={() => handleTrainFace(s)} disabled={s.is_course_inactive || trainingStudentId === (s.user_id || s._id)}>
                         <HiOutlineSparkles size={15} />
                       </button>
+                      <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Enroll Face'} onClick={() => handleFaceEnroll(s)} disabled={s.is_course_inactive}>
+                        <HiOutlineCamera size={15} />
+                      </button>
                       <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Manage Subjects'} onClick={() => handleManageStudentPapers(s)} disabled={s.is_course_inactive}>
                         <HiOutlineClipboardList size={15} />
                       </button>
@@ -140,9 +144,6 @@ export default function StudentTable() {
                       </button>
                       <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Reset Password'} onClick={() => handleResetPassword(s)} disabled={s.is_course_inactive}>
                         <HiOutlineKey size={15} />
-                      </button>
-                      <button className="icon-btn" title={s.is_course_inactive ? 'Locked: course inactive' : 'Enroll Face'} onClick={() => handleFaceEnroll(s)} disabled={s.is_course_inactive}>
-                        <HiOutlineCamera size={15} />
                       </button>
                       <button className="icon-btn danger" title={s.is_course_inactive ? 'Locked: course inactive' : 'Delete'} onClick={() => handleDelete(s)} disabled={s.is_course_inactive}>
                         <HiOutlineTrash size={15} />

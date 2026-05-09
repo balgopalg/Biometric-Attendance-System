@@ -187,6 +187,8 @@ def find_student_by_face(user):
             if course.get("code"):
                 course_name += f" ({course['code']})"
 
+    from app.routes.auth import _build_profile_picture_url
+
     return jsonify({
         "student": {
             "name": matched_user.get("name", "N/A"),
@@ -195,7 +197,7 @@ def find_student_by_face(user):
             "course": course_name,
             "academic_session": profile.get("academic_session", profile.get("academic_year", "N/A")),
             "current_semester": profile.get("current_semester", "N/A"),
-            "photo_url": profile.get("photo_urls")[0] if profile.get("photo_urls") else None,
+            "photo_url": _build_profile_picture_url(matched_user) or None,
             "similarity": match["similarity"]
         }
     })
@@ -263,12 +265,14 @@ def find_lecturer_by_face(user):
         if dept:
             dept_name = dept.get("name", "N/A")
 
+    from app.routes.auth import _build_profile_picture_url
+
     return jsonify({
         "lecturer": {
             "name": matched_user.get("name", "N/A"),
             "email": matched_user.get("email", "N/A"),
             "department": dept_name,
-            "photo_url": matched_user.get("profile_photo_url"),
+            "photo_url": _build_profile_picture_url(matched_user) or None,
             "similarity": match["similarity"]
         }
     })

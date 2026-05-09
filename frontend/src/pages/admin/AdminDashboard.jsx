@@ -13,8 +13,8 @@ import {
   HiOutlineClipboardList,
   HiOutlineShieldCheck,
   HiOutlineClock,
+  HiOutlineOfficeBuilding,
 } from 'react-icons/hi';
-import { formatDateTimeIndia } from '../../utils/dateTime';
 import AcademicCalendarPanel from '../../components/calendar/AcademicCalendarPanel';
 const MonthlyAttendanceTrend = lazy(() => import('../../components/admin/dashboard/MonthlyAttendanceTrend'));
 const DashboardInsightsPanel = lazy(() => import('../../components/admin/dashboard/DashboardInsightsPanel'));
@@ -339,11 +339,12 @@ export default function AdminDashboard() {
 
   const monthlyAttendance = useMemo(() => {
     const rows = Array.isArray(trendPoints) ? trendPoints : [];
-      
     return rows.map((row, index) => ({
       key: row.key || `m-${index}`,
       label: row.label || `M${index + 1}`,
       total: Number(row.total) || 0,
+      sessions: Number(row.sessions) || 0,
+      students: Number(row.students) || 0,
     }));
   }, [trendPoints]);
 
@@ -428,20 +429,33 @@ export default function AdminDashboard() {
 
   return (
     <div className="admin-page">
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: '1.3rem', fontWeight: 800 }}>Dashboard</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 4 }}>Overview of your attendance management system.</p>
+      {/* ── Header ── */}
+      <div style={{ marginBottom: 28, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Dashboard</h1>
+            <span className={`badge ${isSuperAdmin ? 'badge-danger' : 'badge-info'}`} style={{ fontSize: '0.65rem' }}>
+              {isSuperAdmin ? '🔐 Super Admin' : `🏢 ${departmentName || 'Dept Admin'}`}
+            </span>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Live overview of your attendance management system.</p>
+        </div>
+        <div style={{ padding: '8px 16px', borderRadius: 12, background: 'var(--bg-glass)', border: '1px solid var(--border-glass)', textAlign: 'right' }}>
+          <p style={{ fontSize: '0.6rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>System Uptime</p>
+          <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-emerald)', fontVariantNumeric: 'tabular-nums' }}>{liveSystemUptime}</p>
+        </div>
       </div>
 
-      <div className="admin-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <StatsCard icon={HiOutlineUsers} label="Total Students" value={stats.total_students || 0} color="#06b6d4" />
-        <StatsCard icon={HiOutlineAcademicCap} label="Lecturers" value={stats.total_lecturers || 0} color="#f59e0b" />
-        <StatsCard icon={HiOutlineBookOpen} label="Total Courses" value={stats.total_courses || 0} color="#8b5cf6" />
-        <StatsCard icon={HiOutlineBookOpen} label="Active Courses" value={stats.active_courses || 0} color="#10b981" />
-        <StatsCard icon={HiOutlineBookOpen} label="Inactive Courses" value={stats.inactive_courses || 0} color="#ef4444" />
-        <StatsCard icon={HiOutlineClipboardList} label="Papers" value={stats.total_papers || 0} color="#10b981" />
-        <StatsCard icon={HiOutlineShieldCheck} label="Audit Logs" value={stats.total_audit_logs || 0} color="#ef4444" />
-        <StatsCard icon={HiOutlineClock} label="System Uptime" value={liveSystemUptime} color="#14b8a6" />
+      <div className="admin-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, marginBottom: 24 }}>
+        <StatsCard icon={HiOutlineUsers} label="Total Students" value={stats.total_students || 0} color="var(--accent-cyan)" href="/admin/students" />
+        <StatsCard icon={HiOutlineAcademicCap} label="Lecturers" value={stats.total_lecturers || 0} color="var(--accent-amber)" href="/admin/lecturers" />
+        {isSuperAdmin && (
+          <StatsCard icon={HiOutlineOfficeBuilding} label="Departments" value={departmentsList.length || 0} color="var(--accent-purple)" href="/admin/departments" />
+        )}
+        <StatsCard icon={HiOutlineBookOpen} label="Active Courses" value={stats.active_courses || 0} color="var(--accent-emerald)" href="/admin/courses" />
+        <StatsCard icon={HiOutlineBookOpen} label="Inactive Courses" value={stats.inactive_courses || 0} color="var(--accent-rose)" href="/admin/courses" />
+        <StatsCard icon={HiOutlineClipboardList} label="Papers" value={stats.total_papers || 0} color="var(--accent-purple)" href="/admin/papers" />
+        <StatsCard icon={HiOutlineShieldCheck} label="Audit Logs" value={stats.total_audit_logs || 0} color="var(--accent-teal, #14b8a6)" href="/admin/audit" />
       </div>
 
       {/* ─── Attendance Summary (primary focus) ─── */}
@@ -481,42 +495,73 @@ export default function AdminDashboard() {
         </Suspense>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-          <div className="glass-card" style={{ padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <HiOutlineShieldCheck size={18} style={{ color: 'var(--accent-amber)' }} />
+          {/* Eligibility Snapshot */}
+          <div className="glass-card" style={{ padding: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(245,158,11,0.1)', display: 'grid', placeItems: 'center' }}>
+                <HiOutlineShieldCheck size={16} style={{ color: 'var(--accent-amber)' }} />
+              </div>
               <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Eligibility Snapshot</h3>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total Students</span><b>{eligibilitySnapshot.total_students}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Eligible</span><b style={{ color: 'var(--accent-emerald)' }}>{eligibilitySnapshot.eligible_count}</b></div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Ineligible</span><b style={{ color: 'var(--accent-rose)' }}>{eligibilitySnapshot.ineligible_count}</b></div>
+            {/* Mini donut */}
+            {(() => {
+              const total = eligibilitySnapshot.total_students || 0;
+              const eligPct = total > 0 ? Math.round((eligibilitySnapshot.eligible_count / total) * 100) : 0;
+              const deg = (eligPct / 100) * 360;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
+                  <div style={{ width: 72, height: 72, borderRadius: '50%', flexShrink: 0, background: `conic-gradient(var(--accent-emerald) ${deg}deg, rgba(255,255,255,0.06) ${deg}deg)`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: 54, height: 54, borderRadius: '50%', background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.9rem', color: 'var(--accent-emerald)' }}>
+                      {total > 0 ? `${eligPct}%` : '—'}
+                    </div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '0.62rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>Eligibility Rate</p>
+                    <p style={{ fontSize: '1.2rem', fontWeight: 800, color: eligPct >= 75 ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>{eligPct}%</p>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>of {total} students</p>
+                  </div>
+                </div>
+              );
+            })()}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[{ label: 'Total Students', value: eligibilitySnapshot.total_students, color: 'var(--text-primary)' },
+                { label: 'Eligible', value: eligibilitySnapshot.eligible_count, color: 'var(--accent-emerald)' },
+                { label: 'Ineligible', value: eligibilitySnapshot.ineligible_count, color: 'var(--accent-rose)' }]
+                .map(({ label, value, color }) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderRadius: 8, background: 'var(--bg-glass)', border: '1px solid var(--border-glass)' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{label}</span>
+                    <b style={{ fontSize: '0.9rem', color }}>{value}</b>
+                  </div>
+                ))}
             </div>
           </div>
 
           {isSuperAdmin && (
             <div className="glass-card" style={{ padding: 20, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Queue Health</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: queueMetrics?.jobs?.running > 0 ? 'var(--accent-emerald)' : 'var(--text-muted)', boxShadow: queueMetrics?.jobs?.running > 0 ? '0 0 6px var(--accent-emerald)' : 'none' }} />
+                  <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Queue Health</h3>
+                </div>
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.72rem' }} onClick={fetchQueueMetrics}>
-                  {loadingQueueMetrics ? 'Refreshing...' : 'Refresh'}
+                  {loadingQueueMetrics ? 'Refreshing…' : 'Refresh'}
                 </button>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queue Depth</span><b>{queueMetrics?.queue?.depth ?? 'N/A'}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Delayed</span><b>{queueMetrics?.queue?.delayed_depth ?? 'N/A'}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Due Delayed</span><b>{queueMetrics?.queue?.due_delayed ?? 'N/A'}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Running</span><b>{queueMetrics?.jobs?.running ?? 'N/A'}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Queued Retries</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.queued_retries ?? 'N/A'}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><span style={{ flexShrink: 0 }}>Next Retry</span><b style={{ textAlign: 'right', fontSize: '0.72rem', wordBreak: 'break-word', minWidth: 0 }}>{formatDateTimeIndia(queueMetrics?.jobs?.next_retry_job?.next_attempt_at, { dateStyle: 'short', timeStyle: 'medium' })}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Stale Running</span><b style={{ color: 'var(--accent-amber)' }}>{queueMetrics?.jobs?.stale_running ?? 'N/A'}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Dead-Letter (24h)</span><b style={{ color: 'var(--accent-rose)' }}>{queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A'}</b></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[{ label: 'Queue Depth', value: queueMetrics?.queue?.depth ?? 'N/A', alert: false },
+                  { label: 'Delayed', value: queueMetrics?.queue?.delayed_depth ?? 'N/A', alert: false },
+                  { label: 'Running', value: queueMetrics?.jobs?.running ?? 'N/A', alert: false },
+                  { label: 'Queued Retries', value: queueMetrics?.jobs?.queued_retries ?? 'N/A', alert: (queueMetrics?.jobs?.queued_retries ?? 0) > 0, color: 'var(--accent-amber)' },
+                  { label: 'Stale Running', value: queueMetrics?.jobs?.stale_running ?? 'N/A', alert: (queueMetrics?.jobs?.stale_running ?? 0) > 0, color: 'var(--accent-amber)' },
+                  { label: 'Dead-Letter (24h)', value: queueMetrics?.jobs?.dead_letter_last_24h ?? 'N/A', alert: (queueMetrics?.jobs?.dead_letter_last_24h ?? 0) > 0, color: 'var(--accent-rose)' },
+                ].map(({ label, value, alert, color }) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', borderRadius: 7, background: alert ? 'rgba(251,191,36,0.04)' : 'transparent' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{label}</span>
+                    <b style={{ fontSize: '0.82rem', color: alert ? (color || 'var(--accent-amber)') : 'var(--text-primary)' }}>{value}</b>
+                  </div>
+                ))}
               </div>
-
-              {queueActionMessage && (
-                <p style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-muted)' }}>{queueActionMessage}</p>
-              )}
-
-
+              {queueActionMessage && <p style={{ marginTop: 10, fontSize: '0.72rem', color: 'var(--text-muted)', padding: '6px 8px', background: 'var(--bg-glass)', borderRadius: 6 }}>{queueActionMessage}</p>}
             </div>
           )}
         </div>
@@ -529,42 +574,45 @@ export default function AdminDashboard() {
       {/* ─── Bottom Panel: Recent Dead-Letter Jobs ─── */}
       {isSuperAdmin && (
         <div style={{ marginTop: 24 }}>
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 12 }}>Recent Dead-Letter Jobs</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-            {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).slice(0, 3).map((job) => (
-              <div key={job.job_id} className="glass-card" style={{ padding: 16, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <p style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 4 }}>{job.job_type || 'unknown'}</p>
-                    {job.student_name && (
-                      <div style={{ marginBottom: 4 }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>{job.student_name}</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 6 }}>({job.reg_number})</span>
-                      </div>
-                    )}
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all', marginBottom: 4 }}>{job.job_id}</p>
-                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Attempts: {job.attempts || 0}/{job.max_attempts || 0}</p>
-                  </div>
-                  <button
-                    className="btn-secondary"
-                    style={{ padding: '6px 12px', fontSize: '0.75rem', height: 'fit-content' }}
-                    disabled={replayingJobId === job.job_id}
-                    onClick={() => replayDeadLetterJob(job.job_id)}
-                  >
-                    {replayingJobId === job.job_id ? 'Replaying...' : 'Replay'}
-                  </button>
-                </div>
-                {job.error && (
-                  <div style={{ marginTop: 12, padding: 8, background: 'var(--bg-card-alt)', borderRadius: 6, border: '1px solid var(--border-glass)' }}>
-                    <p style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', wordBreak: 'break-word', margin: 0 }}>{job.error}</p>
-                  </div>
-                )}
-              </div>
-            ))}
-            {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 && (
-              <StatePanel variant="empty" title="No dead-letter jobs" description="Queue replay is healthy for the current monitoring window." compact />
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Recent Dead-Letter Jobs</h3>
+            <span className="badge badge-danger" style={{ fontSize: '0.62rem' }}>{(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length}</span>
           </div>
+          {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).length === 0 ? (
+            <StatePanel variant="empty" title="No dead-letter jobs" description="Queue replay is healthy for the current monitoring window." compact />
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+              {(queueMetrics?.jobs?.recent_dead_letter_jobs || []).slice(0, 3).map((job) => (
+                <div key={job.job_id} className="glass-card" style={{ padding: 16, overflow: 'hidden', borderLeft: '3px solid var(--accent-rose)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <span className="badge badge-danger" style={{ fontSize: '0.6rem' }}>{job.job_type || 'unknown'}</span>
+                      </div>
+                      {job.student_name && (
+                        <p style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 2 }}>{job.student_name} <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400 }}>({job.reg_number})</span></p>
+                      )}
+                      <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)', wordBreak: 'break-all', marginBottom: 4, fontFamily: 'monospace' }}>{job.job_id}</p>
+                      <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Attempts: <b style={{ color: 'var(--accent-amber)' }}>{job.attempts || 0}</b>/{job.max_attempts || 0}</p>
+                    </div>
+                    <button
+                      className="btn-secondary"
+                      style={{ padding: '6px 12px', fontSize: '0.72rem', height: 'fit-content', flexShrink: 0 }}
+                      disabled={replayingJobId === job.job_id}
+                      onClick={() => replayDeadLetterJob(job.job_id)}
+                    >
+                      {replayingJobId === job.job_id ? '⏳ Replaying…' : '↺ Replay'}
+                    </button>
+                  </div>
+                  {job.error && (
+                    <div style={{ padding: '7px 10px', background: 'rgba(244,63,94,0.06)', borderRadius: 8, border: '1px solid rgba(244,63,94,0.15)' }}>
+                      <p style={{ fontSize: '0.68rem', color: 'var(--accent-rose)', wordBreak: 'break-word', margin: 0, fontFamily: 'monospace' }}>{job.error}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -121,8 +121,8 @@ def _to_grayscale_image(image):
     return image
 
 
-def capture_faces_for_user(user_name, dataset_root="dataset", total_images=50, delay_seconds=0.1, camera_index=0):
-    """Capture grayscale face images from webcam into dataset/<user_name>/.
+def capture_faces_for_user(user_name, dataset_root="dataset", subfolder="", total_images=50, delay_seconds=0.1, camera_index=0):
+    """Capture grayscale face images from webcam into dataset/[subfolder]/<user_name>/.
 
     Returns a list of saved file paths.
     """
@@ -130,7 +130,7 @@ def capture_faces_for_user(user_name, dataset_root="dataset", total_images=50, d
         raise ValueError("total_images must be greater than 0")
 
     safe_user_name = _safe_name(user_name)
-    user_dir = os.path.join(dataset_root, safe_user_name)
+    user_dir = os.path.join(dataset_root, subfolder, safe_user_name) if subfolder else os.path.join(dataset_root, safe_user_name)
     _ensure_directory(user_dir)
 
     cap = cv2.VideoCapture(camera_index)
@@ -215,10 +215,10 @@ def save_classroom_upload(image, uploads_dir="uploads"):
     return file_path
 
 
-def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", max_images=50):
-    """Save cropped face copies to dataset/<user_name>/<user_name>_<count>.jpg."""
+def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", subfolder="", max_images=50):
+    """Save cropped face copies to dataset/[subfolder]/<user_name>/<user_name>_<count>.jpg."""
     safe_user_name = _safe_name(user_name)
-    user_dir = os.path.join(dataset_root, safe_user_name)
+    user_dir = os.path.join(dataset_root, subfolder, safe_user_name) if subfolder else os.path.join(dataset_root, safe_user_name)
     _ensure_directory(user_dir)
 
     saved_paths = []

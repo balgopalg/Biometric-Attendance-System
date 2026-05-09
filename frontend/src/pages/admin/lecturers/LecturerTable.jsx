@@ -7,6 +7,7 @@ import {
   HiOutlineKey,
   HiOutlineTrash,
   HiOutlineCamera,
+  HiOutlineSparkles,
   HiX,
 } from 'react-icons/hi';
 
@@ -26,6 +27,7 @@ export default function LecturerTable({
   onResetPassword,
   onDelete,
   onEnrollFace,
+  onTrainFace,
 }) {
   const [previewImage, setPreviewImage] = useState(null);
   const [activePopoverAnchor, setActivePopoverAnchor] = useState(null);
@@ -120,7 +122,8 @@ export default function LecturerTable({
                         src={`/api/admin/lecturers/profile-picture/${l.profile_picture_file}`}
                         alt={l.name}
                         style={{
-                          width: 30, height: 30, borderRadius: '50%',
+                          display: 'block', width: 30, height: 30, minWidth: 30, minHeight: 30,
+                          maxWidth: 30, maxHeight: 30, borderRadius: 9999,
                           objectFit: 'cover', cursor: 'pointer'
                         }}
                         onClick={() => setPreviewImage(`/api/admin/lecturers/profile-picture/${l.profile_picture_file}`)}
@@ -249,6 +252,9 @@ export default function LecturerTable({
                 </td>
                 <td>
                   <div className="lecturers-row-actions" style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button className="icon-btn" title="Train Face From Dataset" onClick={() => onTrainFace(l)}>
+                      <HiOutlineSparkles size={15} />
+                    </button>
                     <button className="icon-btn" title="Enroll Face" onClick={() => onEnrollFace(l)}>
                       <HiOutlineCamera size={15} />
                     </button>

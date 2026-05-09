@@ -161,7 +161,7 @@ export default function AttendanceSession() {
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 60 * 1000);
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -475,47 +475,74 @@ export default function AttendanceSession() {
     }
   };
 
-  const rollbackRemainingMins = useMemo(() => {
+  const rollbackRemainingMs = useMemo(() => {
     if (!review?.rollback_until) return null;
     const normalizedRollbackUntil = normalizeUtcTimestamp(review.rollback_until);
     const rollbackUntilMs = new Date(normalizedRollbackUntil).getTime();
     if (Number.isNaN(rollbackUntilMs)) return null;
-    const diff = rollbackUntilMs - nowMs;
-    return Math.max(0, Math.ceil(diff / 60000));
+    return Math.max(0, rollbackUntilMs - nowMs);
   }, [review, nowMs]);
+
+
+  const rollbackCountdown = useMemo(() => {
+    if (rollbackRemainingMs === null) return null;
+    if (rollbackRemainingMs <= 0) return '00:00';
+    const totalSecs = Math.floor(rollbackRemainingMs / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }, [rollbackRemainingMs]);
 
   return (
     <div>
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <div className="session-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Take Attendance</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Select paper, verify recognition, then commit with your PIN.</p>
+      {/* ── Toolbar ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance Session</h2>
+              {sessionId && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em',
+                  textTransform: 'uppercase', padding: '3px 10px', borderRadius: 999,
+                  background: scanning ? 'rgba(16,185,129,0.12)' : 'rgba(251,191,36,0.12)',
+                  color: scanning ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                  border: `1px solid ${scanning ? 'rgba(16,185,129,0.25)' : 'rgba(251,191,36,0.25)'}`,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', animation: scanning ? 'pulse-glow 1.4s ease-in-out infinite' : 'none' }} />
+                  {scanning ? 'Live' : 'Paused'}
+                </span>
+              )}
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>Select paper, verify recognition, then commit with your PIN.</p>
+          </div>
         </div>
-        <div className="session-action-buttons" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {!sessionId ? (
-            <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive}>
-              <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Locked' : 'Start Session'}
+            <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Course Locked' : 'Start Session'}
             </button>
           ) : (
             <>
               {scanning ? (
-                <button className="btn-secondary" onClick={pauseSession}>
+                <button className="btn-secondary" onClick={pauseSession} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <HiOutlinePause size={16} /> Pause
                 </button>
               ) : (
-                <button className="btn-primary" onClick={resumeSession}>
+                <button className="btn-primary" onClick={resumeSession} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <HiOutlinePlay size={16} /> Resume
                 </button>
               )}
-              <button className="btn-secondary" onClick={() => setShowUploadModal(true)}>
-                <HiOutlinePhotograph size={16} /> Upload Image
+              <button className="btn-secondary" onClick={() => setShowUploadModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <HiOutlinePhotograph size={16} /> Upload Photo
               </button>
-              <button className="btn-danger" onClick={stopSession}>
-                <HiOutlineStop size={16} /> Stop Session
+              <button className="btn-secondary" onClick={stopSession} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-rose)', borderColor: 'rgba(244,63,94,0.3)' }}>
+                <HiOutlineStop size={16} /> Stop
               </button>
-              <button className="btn-primary" onClick={() => setShowPin(true)} disabled={recognized.length === 0}>
+              <button className="btn-primary" onClick={() => setShowPin(true)} disabled={recognized.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <HiOutlineCheckCircle size={16} /> Commit ({recognized.length})
               </button>
             </>
@@ -547,36 +574,48 @@ export default function AttendanceSession() {
 
       {!loadingPapers && !papersError && papers.length > 0 ? (
       <>
-      <div className="glass-card" style={{ padding: 14, marginBottom: 14 }}>
-        <div className="session-info-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-          <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
-            <option value="">Select Course</option>
-            {courseOptions.map((c) => (
-              <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
-            ))}
-          </select>
-          <select aria-label="Select paper" className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
-            <option value="">{selectedCourseId ? 'Select Paper' : 'Select Course First'}</option>
-            {filteredPapers.map((p) => (
-              <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' - Locked' : ''}</option>
-            ))}
-          </select>
-          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Subject / Course</p>
-            <p style={{ fontWeight: 700 }}>{selectedPaper ? `${selectedPaper.name} · ${formatCourseName(selectedPaper.course_name || 'N/A', { status: selectedPaper.course_status, isInactive: selectedPaper.is_course_inactive })}` : 'N/A'}</p>
-            {selectedPaper?.is_course_inactive && (
-              <p style={{ marginTop: 4, color: 'var(--accent-amber)' }}>Course inactive: attendance locked</p>
-            )}
+      {/* ── Session config card ── */}
+      <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          {/* Course selector */}
+          <div>
+            <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Course</label>
+            <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={!!sessionId}>
+              <option value="">— Select Course —</option>
+              {courseOptions.map((c) => (
+                <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
+              ))}
+            </select>
           </div>
-          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Academic Session</p>
-            <p style={{ fontWeight: 700 }}>{currentAcademicSession}</p>
+          {/* Paper selector */}
+          <div>
+            <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Paper / Subject</label>
+            <select aria-label="Select paper" className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={!!sessionId || !selectedCourseId}>
+              <option value="">{selectedCourseId ? '— Select Paper —' : '— Select Course First —'}</option>
+              {filteredPapers.map((p) => (
+                <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' · Locked' : ''}</option>
+              ))}
+            </select>
           </div>
-          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Session Time</p>
-            <p style={{ fontWeight: 700 }}>{sessionStartedAt ? fmt(sessionStartedAt) : 'Not started'}</p>
-          </div>
+          {/* Info pills */}
+          {[{
+            label: 'Academic Year', value: currentAcademicSession,
+          }, {
+            label: 'Session Started', value: sessionStartedAt ? fmt(sessionStartedAt) : '—',
+          }, {
+            label: 'Enrolled Students', value: selectedPaper?.total_enrolled_students ?? '—',
+          }].map(({ label, value }) => (
+            <div key={label} style={{ padding: '10px 14px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+              <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</p>
+              <p style={{ fontSize: '0.9rem', fontWeight: 700 }}>{value}</p>
+            </div>
+          ))}
         </div>
+        {selectedPaper?.is_course_inactive && (
+          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', fontSize: '0.8rem', color: 'var(--accent-amber)' }}>
+            ⚠️ This course is inactive — attendance sessions are locked.
+          </div>
+        )}
       </div>
 
       <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
@@ -585,55 +624,78 @@ export default function AttendanceSession() {
       </div>
 
       {sessionId && (
-        <div className="glass-card" style={{ marginTop: 14, padding: 12 }}>
-          <p role="status" aria-live="polite" style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Status: <b>{scanning ? 'Scanning' : 'Paused'}</b> |{' '}
-            Faces detected: <b>{diag.faces_detected}</b> | Candidates in this paper: <b>{diag.candidates_count}</b> | Enrolled candidates: <b>{selectedPaper?.total_enrolled_students ?? 0}</b>
-            {diag.best_similarity_seen !== null ? ` | Best similarity: ${diag.best_similarity_seen}` : ''}
-            {diag.threshold !== null ? ` | Threshold: ${diag.threshold}` : ''}
-          </p>
-          {scanError && <p role="alert" style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--accent-rose)' }}>{scanError}</p>}
+        <div className="glass-card" style={{ marginTop: 14, padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+          {[{
+            label: 'Faces Detected', value: diag.faces_detected,
+          }, {
+            label: 'Recognized', value: recognized.length, accent: 'var(--accent-emerald)',
+          }, {
+            label: 'Best Match', value: diag.best_similarity_seen !== null ? `${(diag.best_similarity_seen * 100).toFixed(1)}%` : '—',
+          }, {
+            label: 'Threshold', value: diag.threshold !== null ? `${(diag.threshold * 100).toFixed(0)}%` : '—',
+          }].map(({ label, value, accent }) => (
+            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+              <span style={{ fontSize: '0.92rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</span>
+            </div>
+          ))}
+          {scanError && (
+            <p role="alert" style={{ width: '100%', marginTop: 2, fontSize: '0.78rem', color: 'var(--accent-rose)', background: 'rgba(244,63,94,0.06)', padding: '6px 10px', borderRadius: 'var(--radius)', border: '1px solid rgba(244,63,94,0.15)' }}>{scanError}</p>
+          )}
         </div>
       )}
 
       {review && (
-        <div className="glass-card" style={{ marginTop: 14, padding: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div className="glass-card" style={{ marginTop: 16, padding: 18 }}>
+          {/* Review header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Committed Attendance Review</h3>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Committed: {fmt(review.committed_at)} | Rollback until: {fmt(review.rollback_until)}
-                {rollbackRemainingMins !== null ? ` (${rollbackRemainingMins} min left)` : ''}
-              </p>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 4 }}>Committed Attendance</h3>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Committed: <b style={{ color: 'var(--text-secondary)' }}>{fmt(review.committed_at)}</b></span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Rollback window:{' '}
+                  {rollbackCountdown !== null ? (
+                    <b style={{
+                      color: rollbackRemainingMs === 0 ? 'var(--accent-rose)' : rollbackRemainingMs < 300000 ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                      fontVariantNumeric: 'tabular-nums',
+                      letterSpacing: '0.04em',
+                    }}>
+                      {rollbackCountdown} remaining
+                    </b>
+                  ) : fmt(review.rollback_until)}
+                </span>
+              </div>
             </div>
-            <button className="btn-primary" disabled={!review.editable} onClick={() => setShowAdjustPin(true)}>
-              Re-commit Adjustments
+            <button className="btn-primary" disabled={!review.editable} onClick={() => setShowAdjustPin(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+              <HiOutlineCheckCircle size={15} /> Re-commit Adjustments
             </button>
           </div>
-
           {!review.editable && (
-            <p style={{ fontSize: '0.8rem', color: 'var(--accent-rose)', marginBottom: 10 }}>
-              Rollback window expired. This attendance is finalized and cannot be modified.
-            </p>
+            <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.15)', fontSize: '0.8rem', color: 'var(--accent-rose)' }}>
+              Rollback window expired — this record is finalized.
+            </div>
           )}
-
-          <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8 }}>
+          {/* Candidate checklist */}
+          <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
             {(review.candidates || []).map((s) => {
               const checked = adjustIds.includes(s.user_id);
               return (
-                <label key={s.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: '0.82rem', cursor: review.editable ? 'pointer' : 'default' }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={!review.editable}
-                    onChange={(e) => {
-                      const next = e.target.checked
-                        ? [...adjustIds, s.user_id]
-                        : adjustIds.filter((id) => id !== s.user_id);
-                      setAdjustIds(next);
-                    }}
+                <label key={s.user_id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 12px', borderRadius: 'var(--radius)',
+                  background: checked ? 'rgba(16,185,129,0.06)' : 'var(--bg-glass)',
+                  border: `1px solid ${checked ? 'rgba(16,185,129,0.18)' : 'var(--border-glass)'}`,
+                  cursor: review.editable ? 'pointer' : 'default',
+                  transition: 'background 0.15s, border-color 0.15s',
+                  fontSize: '0.82rem',
+                }}>
+                  <input type="checkbox" checked={checked} disabled={!review.editable}
+                    onChange={(e) => setAdjustIds(e.target.checked ? [...adjustIds, s.user_id] : adjustIds.filter(id => id !== s.user_id))}
                   />
-                  {s.name} ({s.email})
+                  <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>{s.email}</span>
+                  {checked && <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>Present</span>}
                 </label>
               );
             })}

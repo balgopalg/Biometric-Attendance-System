@@ -157,24 +157,16 @@ export default function StudentDashboard() {
           <div>
             <h1 className="student-hero-title">
               <HiOutlineSparkles size={20} style={{ color: 'var(--accent-cyan)' }} />
-              Welcome, <span className="gradient-text">{user?.name || 'Student'}</span>
+              Hey, <span className="gradient-text">{user?.name?.split(' ')[0] || 'Student'}</span> 👋
             </h1>
             <p className="student-hero-subtitle">
-              View your attendance performance and current examination eligibility status.
+              Track your attendance, exam eligibility, and academic performance below.
             </p>
             {!profile?.profile?.has_face && (
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 onClick={() => setShowEnrollModal(true)}
-                style={{ 
-                  marginTop: 16, 
-                  padding: '10px 20px', 
-                  fontSize: '0.9rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
-                }}
+                style={{ marginTop: 16, padding: '10px 20px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)' }}
               >
                 <HiOutlineCamera size={18} /> Enroll My Face
               </button>
@@ -187,7 +179,7 @@ export default function StudentDashboard() {
               {avgPct === null ? 'No Lectures yet' : `Overall ${avgPct}%`}
             </span>
             <span className={`badge ${profile?.profile?.has_face ? 'badge-success' : 'badge-danger'}`}>
-              {profile?.profile?.has_face ? 'Face Enrolled' : 'Face Not Enrolled'}
+              {profile?.profile?.has_face ? '✓ Face Enrolled' : '⚠ Face Pending'}
             </span>
           </div>
         </div>
@@ -219,43 +211,30 @@ export default function StudentDashboard() {
           <p>Academic profile and enrolled paper information</p>
         </div>
         <div className="student-meta-grid">
-          <div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Registration No</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{profile?.profile?.reg_number || 'N/A'}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Course</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>
-              {formatCourseName(profile?.course?.name || 'N/A', { status: profile?.course_status || profile?.course?.status, isInactive: isCourseInactive })}
-            </p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Course Code</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{profile?.course?.code || 'N/A'}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Academic Year</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{profile?.profile?.academic_year || profile?.course?.year || 'N/A'}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Semester</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{currentSemester}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Biometrics</p>
-            <p style={{ fontSize: '0.86rem', fontWeight: 700, color: profile?.profile?.has_face ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
-              {profile?.profile?.has_face ? 'Enrolled' : 'Pending Enrollment'}
-            </p>
-          </div>
+          {[
+            { label: 'Registration No', value: profile?.profile?.reg_number || 'N/A' },
+            { label: 'Course', value: formatCourseName(profile?.course?.name || 'N/A', { status: profile?.course_status || profile?.course?.status, isInactive: isCourseInactive }) },
+            { label: 'Course Code', value: profile?.course?.code || 'N/A' },
+            { label: 'Academic Year', value: profile?.profile?.academic_year || profile?.course?.year || 'N/A' },
+            { label: 'Semester', value: currentSemester },
+            { label: 'Biometrics', value: profile?.profile?.has_face ? 'Enrolled ✓' : 'Pending Enrollment', accent: profile?.profile?.has_face ? 'var(--accent-emerald)' : 'var(--accent-rose)' },
+          ].map(({ label, value, accent }) => (
+            <div key={label} style={{ padding: '10px 14px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+              <p style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{label}</p>
+              <p style={{ fontSize: '0.88rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</p>
+            </div>
+          ))}
         </div>
 
-        <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginTop: 16, marginBottom: 10 }}>Assigned Papers</h4>
+        <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: 18, marginBottom: 10, color: 'var(--text-secondary)' }}>Assigned Papers</h4>
         {assignedPapers.length === 0 ? (
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No papers assigned yet.</p>
         ) : (
-          <div className="student-paper-tags">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {assignedPapers.map((s) => (
-              <span key={s.paper_id} className="badge badge-info">{s.paper_code} - {s.paper_name}</span>
+              <span key={s.paper_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 999, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)', fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-purple)' }}>
+                {s.paper_code} · {s.paper_name}
+              </span>
             ))}
           </div>
         )}
@@ -302,34 +281,41 @@ export default function StudentDashboard() {
       </div>
 
       {/* Predictions */}
-      <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-        <HiOutlineCalculator size={18} style={{ color: 'var(--accent-amber)' }} /> Overall Predictions
-      </h3>
-      <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginBottom: 14 }}>Combined projection based on all enrolled papers</p>
+      <div style={{ marginBottom: 4 }}>
+        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HiOutlineCalculator size={18} style={{ color: 'var(--accent-amber)' }} /> Predictions
+        </h3>
+        <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginBottom: 14 }}>Combined projection based on all enrolled papers</p>
+      </div>
       <div className="student-pred-grid">
         {overallPrediction ? (
           <div className="glass-card" style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span className="badge badge-info">Across All Enrolled Papers</span>
-              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: overallPrediction.current_percentage >= 75 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>Across All Enrolled Papers</span>
+                <p style={{ fontSize: '0.88rem', fontWeight: 700, marginTop: 6 }}>Combined Attendance Projection</p>
+              </div>
+              <span style={{ fontSize: '1.4rem', fontWeight: 800, color: overallPrediction.current_percentage >= 75 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
                 {overallPrediction.current_percentage}%
               </span>
             </div>
-            <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 10 }}>Combined attendance projection</p>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <div style={{ flex: 1, padding: 10, borderRadius: 'var(--radius)', background: 'rgba(245, 158, 11, 0.08)', textAlign: 'center' }}>
-                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-amber)' }}>{overallPrediction.classes_needed_for_75}</p>
-                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Overall classes needed for 75%</p>
+            <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginBottom: 16 }}>
+              <div style={{ width: `${Math.min(overallPrediction.current_percentage, 100)}%`, height: '100%', borderRadius: 999, background: overallPrediction.current_percentage >= 75 ? 'var(--accent-emerald)' : 'var(--accent-rose)', transition: 'width 0.5s ease' }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ padding: '12px 14px', borderRadius: 'var(--radius)', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', textAlign: 'center' }}>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--accent-amber)' }}>{overallPrediction.classes_needed_for_75}</p>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 3 }}>Classes needed for 75%</p>
               </div>
-              <div style={{ flex: 1, padding: 10, borderRadius: 'var(--radius)', background: 'rgba(16, 185, 129, 0.08)', textAlign: 'center' }}>
-                <p style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--accent-emerald)' }}>{overallPrediction.safe_bunks_remaining}</p>
-                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Overall safe bunks left</p>
+              <div style={{ padding: '12px 14px', borderRadius: 'var(--radius)', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.15)', textAlign: 'center' }}>
+                <p style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--accent-emerald)' }}>{overallPrediction.safe_bunks_remaining}</p>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 3 }}>Safe bunks remaining</p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="glass-card" style={{ padding: 20, color: 'var(--text-muted)' }}>
-            Predictions will appear after attendance data is available.
+          <div className="glass-card" style={{ padding: 20 }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>Predictions will appear after attendance data is available.</p>
           </div>
         )}
       </div>

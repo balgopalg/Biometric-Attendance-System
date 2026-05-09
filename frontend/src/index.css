@@ -107,30 +107,106 @@
   --calendar-optional-text: #b45309;
 }
 
+/* ── Academic Calendar Panel ── */
 .academic-calendar-panel {
   color: var(--text-primary);
+  overflow: hidden;
 }
 
+/* ── Board shell — rich gradient background ── */
 .academic-calendar-panel .ac-calendar-board {
   background: var(--calendar-shell-bg);
-  max-width: 920px;
+  max-width: 960px;
   margin: 0 auto;
+  border-radius: 16px;
+  overflow: hidden;
 }
 
 .academic-calendar-panel .ac-month-card {
   background: var(--calendar-panel-bg);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
+/* ── Day cells ── */
 .academic-calendar-panel .ac-day-cell {
-  min-height: 36px;
+  min-height: 40px;
+  transition: transform 140ms ease, box-shadow 140ms ease, background 120ms ease;
 }
 
 .academic-calendar-panel .ac-day-cell:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  z-index: 1;
 }
 
+/* Today special glow ring */
+.ac-day-today {
+  box-shadow: 0 0 0 2px var(--accent-cyan), 0 0 10px rgba(34,211,238,0.35) !important;
+}
+
+/* ── Summary stat cards ── */
+.ac-stat-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-glass);
+  transition: transform 140ms ease;
+}
+.ac-stat-pill:hover {
+  transform: translateY(-2px);
+}
+
+/* ── Upcoming class chips ── */
+.ac-upcoming-chip {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(34,211,238,0.14);
+  background: rgba(34,211,238,0.06);
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.ac-upcoming-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(34,211,238,0.12);
+}
+.ac-upcoming-chip.is-today {
+  border-color: rgba(34,211,238,0.28);
+  background: rgba(34,211,238,0.10);
+}
+
+/* ── Month event rows ── */
 .academic-calendar-panel .ac-event-row {
   color: var(--text-primary);
+  transition: background 120ms ease;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.academic-calendar-panel .ac-event-row:hover {
+  background: var(--bg-glass);
+}
+
+/* ── Month nav header ── */
+.ac-month-nav-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border-glass);
+  margin-bottom: 12px;
+}
+
+/* ── Legend dot ── */
+.ac-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 @media (max-width: 900px) {
@@ -138,7 +214,6 @@
   .academic-calendar-panel .ac-side-grid {
     grid-template-columns: 1fr;
   }
-
   .academic-calendar-panel .ac-calendar-board {
     padding: 10px !important;
   }
@@ -148,22 +223,18 @@
   .academic-calendar-panel {
     padding: 12px !important;
   }
-
   .academic-calendar-panel .ac-board-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
-
   .academic-calendar-panel .ac-day-cell {
     min-height: 36px;
   }
-
   .academic-calendar-panel .ac-event-row {
     grid-template-columns: 1fr !important;
     gap: 4px !important;
     align-items: flex-start !important;
     padding-bottom: 10px !important;
   }
-
   .academic-calendar-panel .ac-month-nav {
     flex-direction: column;
     align-items: stretch !important;
@@ -303,12 +374,17 @@ textarea:focus-visible,
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: all 0.3s ease;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
 
-.stat-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-glow);
+.stat-card.clickable {
+  cursor: pointer;
+}
+
+.stat-card.clickable:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  border-color: var(--card-hover-border);
 }
 
 /* ─── Gradient Text ─── */
@@ -336,8 +412,8 @@ textarea:focus-visible,
 }
 
 .btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 25px rgba(139, 92, 246, 0.3);
+  filter: brightness(1.05);
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.25);
 }
 
 .btn-primary:disabled {
@@ -382,8 +458,8 @@ textarea:focus-visible,
 }
 
 .btn-danger:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 25px rgba(244, 63, 94, 0.3);
+  filter: brightness(1.05);
+  box-shadow: 0 4px 15px rgba(244, 63, 94, 0.25);
 }
 
 @media (max-width: 768px) {
@@ -1234,27 +1310,34 @@ input[type="date"]:invalid::-webkit-datetime-edit {
 
 .timetable-grid-scroll {
   overflow-x: auto;
+  border-radius: 14px;
 }
 
 .timetable-grid-table {
   min-width: 760px;
 }
 
+/* ── slot chip (used in non-sketch mode) ── */
 .timetable-slot-chip {
   border: 1px solid var(--border-glass);
-  border-radius: 10px;
-  padding: 8px;
+  border-radius: 12px;
+  padding: 10px;
   background: var(--bg-glass);
-  min-height: 72px;
+  min-height: 76px;
   position: relative;
+  transition: box-shadow 0.18s, transform 0.18s;
+}
+.timetable-slot-chip:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  transform: translateY(-1px);
 }
 
 .timetable-cell-edit-btn {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 22px;
-  height: 22px;
+  right: 6px;
+  bottom: 6px;
+  width: 24px;
+  height: 24px;
   border: 1px solid var(--border-glass);
   border-radius: 999px;
   background: var(--bg-card);
@@ -1263,47 +1346,132 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background 0.15s;
 }
-
+.timetable-slot-chip:hover .timetable-cell-edit-btn {
+  opacity: 1;
+}
 .timetable-cell-edit-btn:hover {
-  color: var(--text-primary);
+  color: var(--accent-cyan);
   border-color: var(--accent-cyan);
+  background: rgba(34,211,238,0.08);
 }
 
+/* ── sketch/main table ── */
 .timetable-sketch-table {
   min-width: 980px;
-  border-collapse: collapse;
-  border: 3px solid #111827;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
 }
 
-.timetable-sketch-table th,
+/* Outer border on the container card */
+.timetable-sketch-table thead tr th:first-child { border-top-left-radius: 12px; }
+.timetable-sketch-table thead tr th:last-child  { border-top-right-radius: 12px; }
+
+.timetable-sketch-table th {
+  background: var(--bg-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 10px;
+  border-bottom: 2px solid var(--border-glass);
+  border-right: 1px solid var(--border-glass);
+  white-space: nowrap;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.timetable-sketch-table th:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--bg-secondary);
+  min-width: 100px;
+}
+
 .timetable-sketch-table td {
-  border: 3px solid #111827;
+  border-bottom: 1px solid var(--border-glass);
+  border-right: 1px solid var(--border-glass);
   vertical-align: top;
+  padding: 0;
 }
 
+/* Day label column */
 .timetable-sketch-table .timetable-day-cell {
-  background: color-mix(in srgb, var(--bg-card) 86%, #ffffff 14%);
+  background: var(--bg-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  border-right: 2px solid var(--border-glass);
+  letter-spacing: 0.02em;
+}
+.timetable-sketch-table tr:last-child .timetable-day-cell {
+  border-bottom-left-radius: 12px;
 }
 
+/* Slot chip inside sketch table — full-bleed, colored */
 .timetable-sketch-table .timetable-slot-chip {
   border: 0;
   border-radius: 0;
   background: transparent;
-  min-height: 62px;
-  padding: 6px;
+  min-height: 74px;
+  padding: 8px 10px;
 }
 
+/* Today column highlight */
+.timetable-today-col {
+  background: rgba(139, 92, 246, 0.04) !important;
+}
+.timetable-today-header {
+  color: var(--accent-purple) !important;
+  background: rgba(139, 92, 246, 0.08) !important;
+  border-bottom-color: var(--accent-purple) !important;
+}
+
+/* Subject chip accent — cycles through palette */
+.tt-subject-chip {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  margin-bottom: 5px;
+}
+
+/* ── recess ── */
 .timetable-recess-header {
-  min-width: 68px;
+  min-width: 64px;
   text-align: center;
+  background: color-mix(in srgb, var(--bg-secondary) 80%, var(--accent-amber) 20%) !important;
+  color: var(--accent-amber) !important;
 }
 
 .timetable-recess-cell {
-  min-width: 68px;
-  background: color-mix(in srgb, var(--bg-card) 75%, #e5e7eb 25%);
+  min-width: 64px;
+  background: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 6px,
+    rgba(251,191,36,0.06) 6px,
+    rgba(251,191,36,0.06) 12px
+  );
+  border-right: 1px solid rgba(251,191,36,0.25) !important;
+  border-left: 1px solid rgba(251,191,36,0.25) !important;
   text-align: center;
-  padding: 4px !important;
+  padding: 8px 4px !important;
 }
 
 .timetable-recess-cell span {
@@ -1312,16 +1480,20 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   text-orientation: mixed;
   transform: rotate(180deg);
   font-weight: 800;
-  font-size: 0.8rem;
-  letter-spacing: 0.3px;
+  font-size: 0.7rem;
+  letter-spacing: 0.5px;
+  color: var(--accent-amber);
 }
 
 .timetable-recess-cell small {
   display: block;
   margin-top: 6px;
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   color: var(--text-muted);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
 }
+
 
 .student-page .student-pred-grid {
   display: grid;

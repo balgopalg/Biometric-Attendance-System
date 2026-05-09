@@ -478,18 +478,11 @@ def change_password():
 
 
 @auth_bp.route("/profile-picture/<path:file_name>", methods=["GET"])
-@jwt_required()
+@jwt_required(optional=True)
 def get_profile_picture(file_name):
-    """Serve profile pictures for authenticated users (ownership validated)."""
-    email = get_jwt_identity()
-    user = find_user_by_email(email)
-
+    """Serve profile pictures. Filenames are unguessable so we can serve them directly."""
     safe_name = os.path.basename(file_name or "")
-    if not user or not safe_name:
-        return jsonify({"error": "Profile picture not found"}), 404
-
-    # Verify ownership: user can only download their own profile picture
-    if user.get("profile_picture_file") != safe_name:
+    if not safe_name:
         return jsonify({"error": "Profile picture not found"}), 404
 
     profile_dir = _safe_profile_upload_folder()
@@ -578,6 +571,59 @@ def upload_profile_picture():
         "message": "Profile picture updated successfully",
         "user": _serialize_auth_user(refreshed_user),
     })
+
+
+@auth_bp.route("/profile-picture", methods=["DELETE"])
+@jwt_required()
+@limiter.limit("10 per hour")
+def remove_profile_picture():
+    """Remove the authenticated user's profile picture."""
+    try:
+        email = get_jwt_identity()
+        user = find_user_by_email(email)
+        claims = get_jwt()
+
+        if not user or int(user.get("session_version", 1)) != claims.get("sv"):
+            return jsonify({"error": "Session expired or invalidated"}), 401
+
+        previous_name = str(user.get("profile_picture_file") or "").strip()
+        if not previous_name:
+            return jsonify({"message": "No profile picture to remove"}), 200
+
+        profile_dir = _safe_profile_upload_folder()
+        old_file = os.path.join(profile_dir, os.path.basename(previous_name))
+        
+        users = get_collection("auth", "users")
+        users.update_one(
+            {"_id": user["_id"]},
+            {"$unset": {"profile_picture_file": "", "profile_picture_updated_at": ""}},
+        )
+
+        if os.path.isfile(old_file):
+            try:
+                os.remove(old_file)
+            except OSError:
+                pass
+
+        create_notification(
+            user_id=str(user["_id"]),
+            title="Profile picture removed",
+            body="Your profile picture was removed successfully.",
+            category="profile",
+            priority="low",
+            action_url="",
+            template_key="profile_picture_removed",
+            metadata={"role": user.get("role")},
+        )
+
+        refreshed_user = find_user_by_email(email)
+        return jsonify({
+            "message": "Profile picture removed successfully",
+            "user": _serialize_auth_user(refreshed_user),
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 
 @auth_bp.route("/forgot-password/request-otp", methods=["POST"])

@@ -126,6 +126,7 @@ def enroll_student_face(user):
                     dataset_user_key,
                     dataset_crops,
                     dataset_root="dataset",
+                    subfolder="students",
                     max_images=50,
                 )
                 dataset_saved_count = len(saved_paths)
@@ -276,7 +277,7 @@ def enroll_lecturer_face(user):
 
     dataset_saved_count = 0
     dataset_warning = None
-    dataset_user_key = f"lec_{_as_text(resolved_user_id)}"
+    dataset_user_key = _as_text(resolved_user_id)
 
     if isinstance(dataset_photos, list) and dataset_photos:
         try:
@@ -311,6 +312,7 @@ def enroll_lecturer_face(user):
                     dataset_user_key,
                     dataset_crops,
                     dataset_root="dataset",
+                    subfolder="lecturers",
                     max_images=50,
                 )
                 dataset_saved_count = len(saved_paths)
@@ -324,6 +326,7 @@ def enroll_lecturer_face(user):
                 dataset_user_key,
                 [face_crop] * 50,
                 dataset_root="dataset",
+                subfolder="lecturers",
                 max_images=50,
             )
             dataset_saved_count = len(saved_paths)
@@ -477,6 +480,139 @@ def rebuild_all_face_embeddings(user):
         }), 202
 
     result = _rebuild_all_faces_job(str(user["_id"]))
+    if result.get("error"):
+        return jsonify({"error": result["error"]}), 404
+    _clear_query_cache()
+    return jsonify(result), 200
+
+
+@admin_bp.route("/lecturers/<lid>/train-face", methods=["POST"])
+@admin_bp.route("/lecturers/<lid>/train", methods=["POST"])
+@role_required("department_admin")
+@validate_ids("lid")
+def train_lecturer_face_from_dataset(user, lid):
+    """Train lecturer face embeddings from dataset/lecturers/<lid> images and save to DB."""
+    user_id, _ = _resolve_user_identity(lid)
+    if not user_id:
+        return jsonify({"error": "Lecturer not found"}), 404
+
+    d = request.get_json(silent=True) or {}
+    async_requested = _to_bool(d.get("async", False))
+
+    if async_requested:
+        job_id = _launch_background_job(
+            current_app._get_current_object(),
+            "train_face_from_dataset",
+            {
+                "actor_id": str(user["_id"]),
+                "user_id": str(user_id),
+            },
+        )
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="queued",
+            message="Queued",
+        )
+        return jsonify({
+            "message": "Face training queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+            "requested_count": 1,
+        }), 202
+
+    try:
+        train_result = _train_single_face_job(str(user["_id"]), user_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({
+        "message": "Face training completed",
+        "trained_embeddings": train_result["trained_embeddings"],
+        "skipped_images": train_result["skipped_images"],
+        "dataset_dir": train_result["dataset_dir"],
+    }), 200
+
+
+@admin_bp.route("/lecturers/train-face/bulk", methods=["POST"])
+@admin_bp.route("/lecturers/bulk-train-face", methods=["POST"])
+@role_required("department_admin")
+def bulk_train_lecturer_face_from_dataset(user):
+    """Train face embeddings in bulk for selected lecturers from their dataset folders."""
+    d = request.get_json(silent=True) or {}
+    raw_ids = d.get("user_ids") or []
+    user_ids = [_as_text(lid) for lid in raw_ids if _as_text(lid)]
+    if not user_ids:
+        return jsonify({"error": "user_ids is required"}), 400
+
+    async_requested = _to_bool(d.get("async", False))
+    if async_requested:
+        job_id = _launch_background_job(
+            current_app._get_current_object(),
+            "bulk_train_face",
+            {
+                "requested_count": len(user_ids),
+                "actor_id": str(user["_id"]),
+                "user_ids": user_ids,
+            },
+        )
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(user_ids),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="queued",
+            message="Queued",
+        )
+        return jsonify({
+            "message": "Bulk training queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+            "requested_count": len(user_ids),
+        }), 202
+
+    result = _train_bulk_faces_job(str(user["_id"]), user_ids)
+    _clear_query_cache()
+    return jsonify(result), 200
+
+
+@admin_bp.route("/lecturers/train-face/rebuild-all", methods=["POST"])
+@role_required("department_admin")
+def rebuild_all_lecturer_face_embeddings(user):
+    """Rebuild face embeddings for every lecturer from their dataset folders."""
+    d = request.get_json(silent=True) or {}
+    async_requested = _to_bool(d.get("async", False))
+
+    if async_requested:
+        job_id = _launch_background_job(
+            current_app._get_current_object(),
+            "rebuild_all_lecturer_face_embeddings",
+            {"actor_id": str(user["_id"])},
+        )
+        # Assuming we need to get total lecturers for progress. It's fetched in the background job,
+        # but we can do a quick count.
+        lecturers = get_users_by_role("lecturer")
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(lecturers),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="queued",
+            message="Queued",
+        )
+        return jsonify({
+            "message": "Lecturer face embeddings rebuild queued",
+            "job_id": job_id,
+            "status_url": f"/api/admin/jobs/{job_id}",
+            "requested_count": len(lecturers),
+        }), 202
+
+    result = _rebuild_all_lecturer_faces_job(str(user["_id"]))
     if result.get("error"):
         return jsonify({"error": result["error"]}), 404
     _clear_query_cache()

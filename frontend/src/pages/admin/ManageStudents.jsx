@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { useState } from 'react';
 import useStudentData from './students/useStudentData';
 import StudentContext from './students/StudentContext';
-import TrainingProgressPanel from '../../components/admin/TrainingProgressPanel';
+import { useTraining } from '../../context/TrainingContext';
 import StudentTable from './students/StudentTable';
 import StudentFormModal from './students/StudentFormModal';
 import CredentialsModal from './students/CredentialsModal';
@@ -57,8 +57,6 @@ export default function ManageStudents() {
     selectedStudentIds, setSelectedStudentIds,
     setTrainingStudentId, bulkTraining, setBulkTraining,
     rebuildingAllFaces, setRebuildingAllFaces,
-    trainingJob, setTrainingJob, trainingCancelPending, setTrainingCancelPending,
-    setTrainingJobUrl, setTrainingSyncErrorShown,
     paperOptions, setPaperOptions, selectedPaperIds, setSelectedPaperIds,
     baseAssignedPaperIds, setBaseAssignedPaperIds,
     loadingStudentPapers, setLoadingStudentPapers, savingStudentPapers, setSavingStudentPapers,
@@ -69,6 +67,7 @@ export default function ManageStudents() {
   const [deleteStudent, setDeleteStudent] = useState(null);
   const [showFaceSearch, setShowFaceSearch] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const { startTraining } = useTraining();
 
   // ─── HANDLERS ────────────────────────────────────────────────────────
 
@@ -247,55 +246,6 @@ export default function ManageStudents() {
     }
   };
 
-  const normalizeJobStatusUrl = (rawStatusUrl) => {
-    const raw = String(rawStatusUrl || '').trim();
-    if (!raw) return '';
-    if (raw.startsWith('/api/')) return raw.slice(4);
-    if (raw.startsWith('/admin/')) return raw;
-    try {
-      const parsed = new URL(raw, window.location.origin);
-      const path = parsed.pathname || '';
-      return path.startsWith('/api/') ? path.slice(4) : path;
-    } catch {
-      return raw;
-    }
-  };
-
-  const startTrainingProgress = (response, totalFaces) => {
-    const statusUrl = normalizeJobStatusUrl(response.data?.status_url);
-    if (!statusUrl) return;
-
-    setTrainingSyncErrorShown(false);
-    setTrainingJob({
-      job_id: response.data?.job_id,
-      status: 'queued',
-      training_total_faces: Number(response.data?.requested_count || totalFaces || 0),
-      training_processed_faces: 0,
-      training_trained_faces: 0,
-      training_failed_faces: 0,
-      training_stage: 'queued',
-      training_message: response.data?.message || 'Queued',
-      training_progress_percent: 0,
-    });
-    setTrainingCancelPending(false);
-    setTrainingJobUrl(statusUrl);
-  };
-
-  const handleCancelTrainingJob = async () => {
-    const jobId = trainingJob?.job_id;
-    if (!jobId || trainingCancelPending) return;
-    try {
-      setTrainingCancelPending(true);
-      const res = await api.post(`/admin/jobs/${jobId}/cancel`);
-      if (res.data?.job) setTrainingJob(res.data.job);
-      toast.success('Cancellation requested');
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to cancel training job');
-    } finally {
-      setTrainingCancelPending(false);
-    }
-  };
-
   const handleTrainFace = (student) => {
     const sid = student.user_id || student._id;
     if (!sid) { toast.error('Invalid student id'); return; }
@@ -308,7 +258,7 @@ export default function ManageStudents() {
           setTrainingStudentId(sid);
           const res = await api.post(`/admin/students/${sid}/train-face`, { async: true });
           if (res.status === 202 || res.data?.job_id) {
-            startTrainingProgress(res, 1);
+            startTraining(res, 1);
             toast.success('Face training started');
             return;
           }
@@ -338,7 +288,7 @@ export default function ManageStudents() {
           setBulkTraining(true);
           const res = await api.post('/admin/students/train-face/bulk', { user_ids: selectedStudentIds, async: true });
           if (res.status === 202 || res.data?.job_id) {
-            startTrainingProgress(res, selectedStudentIds.length);
+            startTraining(res, selectedStudentIds.length);
             toast.success(`Bulk training queued. Job: ${res.data?.job_id}`);
             return;
           }
@@ -372,7 +322,7 @@ export default function ManageStudents() {
           setRebuildingAllFaces(true);
           const res = await api.post('/admin/students/train-face/rebuild-all', { async: true });
           if (res.status === 202 || res.data?.job_id) {
-            startTrainingProgress(res, Number(res.data?.requested_count || 0));
+            startTraining(res, Number(res.data?.requested_count || 0));
             toast.success(`Rebuild queued. Job: ${res.data?.job_id}`);
             return;
           }
@@ -576,7 +526,6 @@ export default function ManageStudents() {
   return (
     <StudentContext.Provider value={contextValue}>
       <div className="admin-page">
-      <TrainingProgressPanel job={trainingJob} onCancel={handleCancelTrainingJob} cancelling={trainingCancelPending} />
 
       <div className="students-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
