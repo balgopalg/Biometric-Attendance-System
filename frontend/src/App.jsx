@@ -1,11 +1,14 @@
-import { Suspense, lazy, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, Suspense, lazy } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import SplashScreen from './components/ui/SplashScreen';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import { ThemeProvider } from './context/ThemeContext';
+import { Toaster } from 'react-hot-toast';
 import StatePanel from './components/ui/StatePanel';
+
+const LoadContext = createContext(null);
 
 const DashboardLayout = lazy(() => import('./components/layout/DashboardLayout'));
 const Login = lazy(() => import('./pages/Login'));
@@ -44,31 +47,53 @@ function PageFallback() {
   );
 }
 
-function LazyPage({ children }) {
-  return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
+function PageMountNotifier({ children, onMount }) {
+  useEffect(() => {
+    if (onMount) onMount();
+  }, [onMount]);
+  return children;
+}
+
+function LazyPage({ children, onMount }) {
+  const loadCtx = useContext(LoadContext);
+  const mountCallback = onMount || (loadCtx ? loadCtx.handleFirstLoad : null);
+
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <PageMountNotifier onMount={mountCallback}>
+        {children}
+      </PageMountNotifier>
+    </Suspense>
+  );
 }
 
 function GlobalAppLoader({ children }) {
   const { loading } = useAuth();
-  const [minDelayPassed, setMinDelayPassed] = useState(false);
+  const loadCtx = useContext(LoadContext);
+  const [minTimeDone, setMinTimeDone] = useState(false);
 
   useEffect(() => {
-    // Keep splash on screen for a minimum duration to allow animation to complete
     const timer = setTimeout(() => {
-      setMinDelayPassed(true);
-    }, 2200);
+      setMinTimeDone(true);
+    }, 2400); // Enforce 2.4s minimum splash time for rich animation
     return () => clearTimeout(timer);
   }, []);
-
-  const isReady = !loading && minDelayPassed;
+  
+  const isReady = !loading && loadCtx?.firstLoadDone && minTimeDone;
 
   return (
     <>
       <AnimatePresence>
         {!isReady && <SplashScreen key="splash" />}
       </AnimatePresence>
-      <div style={{ opacity: isReady ? 1 : 0, transition: 'opacity 0.6s ease', pointerEvents: isReady ? 'auto' : 'none', minHeight: '100vh' }}>
-        {isReady && children}
+      <div style={{ 
+        opacity: isReady ? 1 : 0, 
+        transition: 'opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1)', 
+        pointerEvents: isReady ? 'auto' : 'none', 
+        minHeight: '100vh',
+        visibility: isReady ? 'visible' : 'hidden'
+      }}>
+        {children}
       </div>
     </>
   );
@@ -85,19 +110,24 @@ function roleHomePath(role) {
 
 /**
  * Expand allowedRoles to include inherited roles.
- * If "department_admin" is allowed → "super_admin" is also allowed.
- * Legacy "admin" alias is transparently handled.
  */
 function expandRoles(allowedRoles) {
   const roles = new Set(allowedRoles || []);
 
-  // Legacy compat: treat "admin" as "department_admin"
-  if (roles.has('admin')) {
-    roles.delete('admin');
+  // Strict 4-tier hierarchy: super_admin > department_admin > lecturer > student
+  // If a route allows 'student', everyone can access it (already covered by generic auth in most cases)
+  
+  if (roles.has('student')) {
+    roles.add('lecturer');
     roles.add('department_admin');
+    roles.add('super_admin');
   }
 
-  // Role inheritance: super_admin inherits all admin-level access
+  if (roles.has('lecturer')) {
+    roles.add('department_admin');
+    roles.add('super_admin');
+  }
+
   if (roles.has('department_admin')) {
     roles.add('super_admin');
   }
@@ -106,15 +136,17 @@ function expandRoles(allowedRoles) {
 }
 
 function ProtectedRoute({ children, allowedRoles }) {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const isAuthenticated = !!user;
   const mustChangePassword = user?.must_change_password;
+
+  if (loading) return null;
+
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (mustChangePassword) return <Navigate to="/change-password" replace />;
 
   if (allowedRoles) {
     const effective = expandRoles(allowedRoles);
-    // Normalize legacy "admin" → "super_admin" for cached session data
     const userRole = user?.role === 'admin' ? 'super_admin' : user?.role;
     if (!effective.has(userRole)) {
       return <Navigate to={roleHomePath(user?.role)} replace />;
@@ -124,76 +156,101 @@ function ProtectedRoute({ children, allowedRoles }) {
 }
 
 function RootRedirect() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const isAuthenticated = !!user;
   const mustChangePassword = user?.must_change_password;
   
-  // Redirect to login if not authenticated
+  if (loading) return null;
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
   
-  // Redirect to password change if required
   if (mustChangePassword) {
     return <Navigate to="/change-password" replace />;
   }
   
-  // Redirect to role-based dashboard
   return <Navigate to={roleHomePath(user?.role)} replace />;
 }
 
 export default function App() {
+  const [firstLoadDone, setFirstLoadDone] = useState(false);
+
+  const handleFirstLoad = () => {
+    if (!firstLoadDone) setFirstLoadDone(true);
+  };
+
   return (
     <BrowserRouter>
       <ThemeProvider>
+        <Toaster
+          position="top-right"
+          reverseOrder={false}
+          gutter={10}
+          containerStyle={{ zIndex: 2147483000, top: 16, right: 16 }}
+          toastOptions={{
+            duration: 3200,
+            removeDelay: 220,
+            style: {
+              background: 'rgba(15, 23, 42, 0.96)',
+              color: '#f8fafc',
+              border: '1px solid rgba(148, 163, 184, 0.3)',
+              boxShadow: '0 12px 28px rgba(0,0,0,0.28)',
+            },
+            success: {
+              iconTheme: { primary: '#10b981', secondary: '#ecfdf5' },
+            },
+            error: {
+              iconTheme: { primary: '#ef4444', secondary: '#fef2f2' },
+            },
+          }}
+        />
         <AuthProvider>
-          <GlobalAppLoader>
-            <Routes>
-              <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
-              <Route path="/change-password" element={<LazyPage><ChangePassword /></LazyPage>} />
-              <Route path="/forgot-password" element={<LazyPage><ForgotPassword /></LazyPage>} />
-              <Route path="/" element={<RootRedirect />} />
+          <LoadContext.Provider value={{ firstLoadDone, handleFirstLoad }}>
+            <GlobalAppLoader>
+              <Routes>
+                <Route path="/login" element={<LazyPage><Login /></LazyPage>} />
+                <Route path="/change-password" element={<LazyPage><ChangePassword /></LazyPage>} />
+                <Route path="/forgot-password" element={<LazyPage><ForgotPassword /></LazyPage>} />
+                <Route path="/" element={<RootRedirect />} />
 
-              {/* Admin — both super_admin and department_admin */}
-              <Route element={<ProtectedRoute allowedRoles={['department_admin']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
-                <Route path="/admin" element={<LazyPage><AdminDashboard /></LazyPage>} />
-                <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
-                <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
-                <Route path="/admin/timetable" element={<LazyPage><ManageTimetable /></LazyPage>} />
-                <Route path="/admin/calendar" element={<LazyPage><ManageCalendar /></LazyPage>} />
-                <Route path="/admin/lecturers" element={<LazyPage><ManageLecturers /></LazyPage>} />
-                <Route path="/admin/students" element={<LazyPage><ManageStudents /></LazyPage>} />
-                <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />
-                <Route path="/admin/exam-eligibility" element={<LazyPage><ExamEligibility /></LazyPage>} />
-                <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
-                <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
-                <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
-                <Route path="/admin/leaves" element={<LazyPage><ManageLeaves /></LazyPage>} />
-                {/* Super Admin only routes */}
-                <Route path="/admin/departments" element={<LazyPage><ManageDepartments /></LazyPage>} />
-                <Route path="/admin/department-admins" element={<LazyPage><ManageDepartmentAdmins /></LazyPage>} />
-              </Route>
+                <Route element={<ProtectedRoute allowedRoles={['department_admin']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+                  <Route path="/admin" element={<LazyPage><AdminDashboard /></LazyPage>} />
+                  <Route path="/admin/courses" element={<LazyPage><ManageCourses /></LazyPage>} />
+                  <Route path="/admin/papers" element={<LazyPage><ManagePapers /></LazyPage>} />
+                  <Route path="/admin/timetable" element={<LazyPage><ManageTimetable /></LazyPage>} />
+                  <Route path="/admin/calendar" element={<LazyPage><ManageCalendar /></LazyPage>} />
+                  <Route path="/admin/lecturers" element={<LazyPage><ManageLecturers /></LazyPage>} />
+                  <Route path="/admin/students" element={<LazyPage><ManageStudents /></LazyPage>} />
+                  <Route path="/admin/enrollment" element={<LazyPage><StudentEnrollment /></LazyPage>} />
+                  <Route path="/admin/exam-eligibility" element={<LazyPage><ExamEligibility /></LazyPage>} />
+                  <Route path="/admin/attendance-matrix" element={<LazyPage><AttendanceMatrix /></LazyPage>} />
+                  <Route path="/admin/audit" element={<LazyPage><AuditTrail /></LazyPage>} />
+                  <Route path="/admin/dead-letter" element={<LazyPage><DeadLetterJobs /></LazyPage>} />
+                  <Route path="/admin/leaves" element={<LazyPage><ManageLeaves /></LazyPage>} />
+                  <Route path="/admin/departments" element={<LazyPage><ManageDepartments /></LazyPage>} />
+                  <Route path="/admin/department-admins" element={<LazyPage><ManageDepartmentAdmins /></LazyPage>} />
+                </Route>
 
-              {/* Lecturer */}
-              <Route element={<ProtectedRoute allowedRoles={['lecturer']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
-                <Route path="/lecturer" element={<LazyPage><LecturerDashboard /></LazyPage>} />
-                <Route path="/lecturer/session" element={<LazyPage><AttendanceSession /></LazyPage>} />
-                <Route path="/lecturer/progress" element={<LazyPage><LecturerProgress /></LazyPage>} />
-                <Route path="/lecturer/timetable" element={<LazyPage><LecturerTimetable /></LazyPage>} />
-              </Route>
+                <Route element={<ProtectedRoute allowedRoles={['lecturer']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+                  <Route path="/lecturer" element={<LazyPage><LecturerDashboard /></LazyPage>} />
+                  <Route path="/lecturer/session" element={<LazyPage><AttendanceSession /></LazyPage>} />
+                  <Route path="/lecturer/progress" element={<LazyPage><LecturerProgress /></LazyPage>} />
+                  <Route path="/lecturer/timetable" element={<LazyPage><LecturerTimetable /></LazyPage>} />
+                </Route>
 
-              {/* Student */}
-              <Route element={<ProtectedRoute allowedRoles={['student']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
-                <Route path="/student" element={<LazyPage><StudentDashboard /></LazyPage>} />
-                <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
-                <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
-                <Route path="/student/timetable" element={<LazyPage><StudentTimetable /></LazyPage>} />
-                <Route path="/student/leaves" element={<LazyPage><StudentLeaveRequests /></LazyPage>} />
-              </Route>
+                <Route element={<ProtectedRoute allowedRoles={['student']}><LazyPage><DashboardLayout /></LazyPage></ProtectedRoute>}>
+                  <Route path="/student" element={<LazyPage><StudentDashboard /></LazyPage>} />
+                  <Route path="/student/attendance" element={<LazyPage><AttendanceSummary /></LazyPage>} />
+                  <Route path="/student/exams" element={<LazyPage><ExamPortal /></LazyPage>} />
+                  <Route path="/student/timetable" element={<LazyPage><StudentTimetable /></LazyPage>} />
+                  <Route path="/student/leaves" element={<LazyPage><StudentLeaveRequests /></LazyPage>} />
+                </Route>
 
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </GlobalAppLoader>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </GlobalAppLoader>
+          </LoadContext.Provider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

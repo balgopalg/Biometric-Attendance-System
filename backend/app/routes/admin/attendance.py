@@ -61,7 +61,11 @@ def reassign_course_entities(user):
 
 # ─── Audit Trail ────────────────────────────────────────────────────────────
 
-_AUDIT_EXCLUDED_ACTIONS = ["HEARTBEAT", "QUEUE_CHECK", "STATUS_CHECK"]
+# Merge additional high-level audit exclusions with the biometric read
+# exclusions already defined in _helpers.py (imported via wildcard).
+_AUDIT_EXCLUDED_ACTIONS = list(set(
+    _AUDIT_EXCLUDED_ACTIONS + ["HEARTBEAT", "QUEUE_CHECK", "STATUS_CHECK"]
+))
 
 @admin_bp.route("/audit-logs", methods=["GET"])
 @role_required("department_admin")
@@ -107,19 +111,13 @@ def list_audit_logs(user):
         # Super admin: optionally scope to a department by ID
         dept_filter_id = None
         if dept_id_param:
-            try:
-                dept_filter_id = ObjectId(dept_id_param)
-            except Exception:
-                pass
+            dept_filter_id = _to_oid(dept_id_param)
         if dept_filter_id:
             # Get all user IDs in this department to filter logs
             users_col = get_collection("auth", "users")
-            dept_user_ids = [
-                str(u["_id"])
-                for u in users_col.find({"department_id": dept_filter_id}, {"_id": 1})
-            ]
-            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
-            all_user_id_variants = dept_user_ids + dept_user_ids_oids  # type: ignore[operator]
+            all_user_id_variants = []
+            for u in users_col.find({"department_id": dept_filter_id}, {"_id": 1}):
+                all_user_id_variants.extend(_id_variants(u["_id"]))
             dept_user_filter = {"$or": [
                 {"performed_by": {"$in": all_user_id_variants}},
                 {"target_user": {"$in": all_user_id_variants}},
@@ -137,12 +135,9 @@ def list_audit_logs(user):
         user_dept_id = _user_dept_id(user)
         if user_dept_id:
             users_col = get_collection("auth", "users")
-            dept_user_ids = [
-                str(u["_id"])
-                for u in users_col.find({"department_id": user_dept_id}, {"_id": 1})
-            ]
-            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
-            all_user_id_variants = dept_user_ids + dept_user_ids_oids  # type: ignore[operator]
+            all_user_id_variants = []
+            for u in users_col.find({"department_id": user_dept_id}, {"_id": 1}):
+                all_user_id_variants.extend(_id_variants(u["_id"]))
             dept_user_filter = {"$or": [
                 {"performed_by": {"$in": all_user_id_variants}},
                 {"target_user": {"$in": all_user_id_variants}},
@@ -276,15 +271,12 @@ def export_audit_logs(user):
     if is_super_admin(user):
         dept_filter_id = None
         if dept_id_param:
-            try:
-                dept_filter_id = ObjectId(dept_id_param)
-            except Exception:
-                pass
+            dept_filter_id = _to_oid(dept_id_param)
         if dept_filter_id:
             users_col = get_collection("auth", "users")
-            dept_user_ids = [str(u["_id"]) for u in users_col.find({"department_id": dept_filter_id}, {"_id": 1})]
-            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
-            all_user_id_variants = dept_user_ids + dept_user_ids_oids
+            all_user_id_variants = []
+            for u in users_col.find({"department_id": dept_filter_id}, {"_id": 1}):
+                all_user_id_variants.extend(_id_variants(u["_id"]))
             dept_user_filter = {"$or": [
                 {"performed_by": {"$in": all_user_id_variants}},
                 {"target_user": {"$in": all_user_id_variants}},
@@ -300,9 +292,9 @@ def export_audit_logs(user):
         user_dept_id = _user_dept_id(user)
         if user_dept_id:
             users_col = get_collection("auth", "users")
-            dept_user_ids = [str(u["_id"]) for u in users_col.find({"department_id": user_dept_id}, {"_id": 1})]
-            dept_user_ids_oids = [ObjectId(uid) for uid in dept_user_ids if ObjectId.is_valid(uid)]
-            all_user_id_variants = dept_user_ids + dept_user_ids_oids
+            all_user_id_variants = []
+            for u in users_col.find({"department_id": user_dept_id}, {"_id": 1}):
+                all_user_id_variants.extend(_id_variants(u["_id"]))
             dept_user_filter = {"$or": [
                 {"performed_by": {"$in": all_user_id_variants}},
                 {"target_user": {"$in": all_user_id_variants}},
@@ -650,6 +642,23 @@ def exam_eligibility_summary(user):
                 _as_text(gid.get("paper_id")),
             )] = int(row.get("count", 0) or 0)
 
+    # Pre-fetch all relevant sessions to eliminate N+1 queries in the loop
+    sessions_by_paper = {}
+    if paper_match_ids:
+        all_sessions = list(sessions_col.find(
+            {"paper_id": {"$in": paper_match_ids}},
+            {"paper_id": 1, "committed_at": 1, "last_updated_at": 1, "created_at": 1}
+        ))
+        for s in all_sessions:
+            pid_str = _as_text(s.get("paper_id"))
+            ts = s.get("committed_at") or s.get("last_updated_at") or s.get("created_at")
+            if ts:
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if pid_str not in sessions_by_paper:
+                    sessions_by_paper[pid_str] = []
+                sessions_by_paper[pid_str].append(ts)
+
     override_map = {}
     if student_match_ids and paper_match_ids:
         for override in overrides_col.find(
@@ -696,22 +705,11 @@ def exam_eligibility_summary(user):
 
             # Count classes for this subject across all lecturers,
             # scoped to sessions after the student was enrolled.
-            session_query = {"paper_id": {"$in": _id_variants(pid_text)}}
-
             if profile_created_at:
-                session_query["$or"] = [
-                    {"committed_at": {"$gte": profile_created_at}},
-                    {
-                        "committed_at": {"$exists": False},
-                        "last_updated_at": {"$gte": profile_created_at},
-                    },
-                    {
-                        "committed_at": {"$exists": False},
-                        "last_updated_at": {"$exists": False},
-                        "created_at": {"$gte": profile_created_at},
-                    },
-                ]
-                classes_happened = int(sessions_col.count_documents(session_query) or 0)
+                if profile_created_at.tzinfo is None:
+                    profile_created_at = profile_created_at.replace(tzinfo=timezone.utc)
+                paper_sessions = sessions_by_paper.get(pid_text, [])
+                classes_happened = sum(1 for ts in paper_sessions if ts >= profile_created_at)
             else:
                 classes_happened = int(classes_happened_by_paper.get(pid_text, 0) or 0)
 
@@ -943,7 +941,10 @@ def list_leave_requests(user):
     
     paper_ids = list({d.get("paper_id") for d in docs if d.get("paper_id")})
     papers_col = get_collection("academic", "papers")
-    paper_map = {str(p["_id"]): p for p in papers_col.find({"_id": {"$in": [ObjectId(pid) for pid in paper_ids]}})}
+    paper_ids_with_oids = []
+    for pid in paper_ids:
+        paper_ids_with_oids.extend(_id_variants(pid))
+    paper_map = {str(p["_id"]): p for p in papers_col.find({"_id": {"$in": paper_ids_with_oids}})}
 
     for d in docs:
         ud = user_map.get(d.get("user_id")) or {}
@@ -964,13 +965,13 @@ def list_leave_requests(user):
 def approve_leave_request(user, leave_id):
     """Approve a leave request (marks as approved; attendance team can exclude those dates)."""
     leaves_col = get_collection("academic", "leave_requests")
-    doc = leaves_col.find_one({"_id": ObjectId(leave_id)})
+    doc = leaves_col.find_one({"_id": _to_oid(leave_id)})
     if not doc:
         return jsonify({"error": "Leave request not found"}), 404
 
     now = datetime.now(timezone.utc)
     leaves_col.update_one(
-        {"_id": ObjectId(leave_id)},
+        {"_id": _to_oid(leave_id)},
         {"$set": {
             "status":      "approved",
             "reviewed_by": str(user["_id"]),
@@ -991,7 +992,7 @@ def approve_leave_request(user, leave_id):
 def reject_leave_request(user, leave_id):
     """Reject a leave request with an optional reason."""
     leaves_col = get_collection("academic", "leave_requests")
-    doc = leaves_col.find_one({"_id": ObjectId(leave_id)})
+    doc = leaves_col.find_one({"_id": _to_oid(leave_id)})
     if not doc:
         return jsonify({"error": "Leave request not found"}), 404
 
@@ -1000,7 +1001,7 @@ def reject_leave_request(user, leave_id):
     now    = datetime.now(timezone.utc)
 
     leaves_col.update_one(
-        {"_id": ObjectId(leave_id)},
+        {"_id": _to_oid(leave_id)},
         {"$set": {
             "status":      "rejected",
             "remark":      remark,
@@ -1683,9 +1684,7 @@ def dashboard_stats(user):
     # course_ids from sanitise_many are strings; profiles may store course_id as ObjectId or string
     course_ids_with_oids = []
     for cid in course_ids:
-        course_ids_with_oids.append(cid)  # string
-        if ObjectId.is_valid(cid):
-            course_ids_with_oids.append(ObjectId(cid))  # ObjectId variant
+        course_ids_with_oids.extend(_id_variants(cid))
 
     # Scope profiles to department's courses when filtering
     profile_query = {"course_id": {"$in": course_ids_with_oids}} if (user_dept and course_ids_with_oids) else {}
@@ -1729,10 +1728,11 @@ def dashboard_stats(user):
     
     if user_dept:
         student_user_ids = [_as_text(p.get("user_id")) for p in profiles if p.get("user_id")]
-        valid_oids = [ObjectId(u) for u in student_user_ids if ObjectId.is_valid(u)]
+        valid_oids = []
+        for u in student_user_ids:
+            valid_oids.extend(_id_variants(u))
         student_query["$or"] = [
-            {"_id": {"$in": valid_oids}},
-            {"_id": {"$in": student_user_ids}},
+            {"_id": {"$in": valid_oids}}
         ]
         lecturer_query["department_id"] = user_dept
 
@@ -1767,8 +1767,7 @@ def dashboard_stats(user):
     all_paper_ids = []
     for paper in papers_col.find(paper_query, {"course_id": 1}):
         if paper.get("_id"):
-            all_paper_ids.append(paper["_id"])
-            all_paper_ids.append(str(paper["_id"]))
+            all_paper_ids.extend(_id_variants(paper["_id"]))
         paper_course_id = _as_text(paper.get("course_id"))
         if not paper_course_id or paper_course_id in active_course_ids:
             active_paper_count += 1
@@ -1779,9 +1778,9 @@ def dashboard_stats(user):
     if not user_dept:
         audit_count = audit_col.count_documents({})
     else:
-        dept_u_ids = [str(u["_id"]) for u in users_col.find({"department_id": user_dept}, {"_id": 1})]
-        dept_oids = [ObjectId(u) for u in dept_u_ids if ObjectId.is_valid(u)]
-        all_uid_variants = dept_u_ids + dept_oids
+        all_uid_variants = []
+        for u in users_col.find({"department_id": user_dept}, {"_id": 1}):
+            all_uid_variants.extend(_id_variants(u["_id"]))
         audit_count = audit_col.count_documents({
             "$or": [
                 {"performed_by": {"$in": all_uid_variants}},
@@ -1843,7 +1842,7 @@ def monthly_attendance_trend_api(user):
 
     if scope_dept_id:
         # Filter by department_id (ObjectId) directly — reliable, no name mismatch
-        dept_oid = ObjectId(str(scope_dept_id)) if not isinstance(scope_dept_id, ObjectId) else scope_dept_id
+        dept_oid = _to_oid(scope_dept_id)
         dept_id_variants = [dept_oid, str(dept_oid)]
 
         courses = list(get_collection("academic", "courses").find(
@@ -1989,7 +1988,7 @@ def send_shortage_alerts(user):
             # Fetch committed sessions for this paper
             paper_id_variants = [paper_id_text]
             try:
-                paper_id_variants.append(ObjectId(paper_id_text))
+                paper_id_variants.extend(_id_variants(paper_id_text))
             except Exception:
                 pass
                 

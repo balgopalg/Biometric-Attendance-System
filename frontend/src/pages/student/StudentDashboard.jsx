@@ -6,9 +6,10 @@ import StatsCard from '../../components/ui/StatsCard';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator, HiOutlineSparkles, HiOutlineBookOpen } from 'react-icons/hi';
+import { HiOutlineChartBar, HiOutlineAcademicCap, HiOutlineCalculator, HiOutlineSparkles, HiOutlineBookOpen, HiOutlineCamera } from 'react-icons/hi';
 import { useAuth } from '../../hooks/useAuth';
 import AcademicCalendarPanel from '../../components/calendar/AcademicCalendarPanel';
+import FaceEnrollmentModal from '../../components/admin/FaceEnrollmentModal';
 
 function parseSemesterValue(value) {
   if (value === null || value === undefined) return null;
@@ -68,6 +69,7 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState(null);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
 
   const assignedPapers = profile?.papers || profile?.subjects || [];
   const courseStatus = String(profile?.course_status || profile?.course?.status || 'active').toLowerCase();
@@ -98,7 +100,7 @@ export default function StudentDashboard() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state, navigate, user?._id, user?.email, user?.name]);
 
-  useEffect(() => {
+  const fetchDashboardData = () => {
     setLoadingDashboard(true);
     setDashboardError('');
     Promise.all([
@@ -115,6 +117,10 @@ export default function StudentDashboard() {
       setProfile(null);
       setDashboardError(err.response?.data?.error || 'Failed to load student dashboard.');
     }).finally(() => setLoadingDashboard(false));
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
   }, []);
 
   const safeAttendance = Array.isArray(attendance) ? attendance : [];
@@ -128,7 +134,7 @@ export default function StudentDashboard() {
 
   const overallPrediction = safePredictions[0] || null;
 
-  if (loadingDashboard) {
+  if (loadingDashboard && !profile) {
     return (
       <div className="student-page">
         <StatePanel variant="loading" title="Loading dashboard" description="Preparing attendance summaries and predictions." compact />
@@ -151,11 +157,28 @@ export default function StudentDashboard() {
           <div>
             <h1 className="student-hero-title">
               <HiOutlineSparkles size={20} style={{ color: 'var(--accent-cyan)' }} />
-              Welcome, <span className="gradient-text">Student</span>
+              Welcome, <span className="gradient-text">{user?.name || 'Student'}</span>
             </h1>
             <p className="student-hero-subtitle">
               View your attendance performance and current examination eligibility status.
             </p>
+            {!profile?.profile?.has_face && (
+              <button 
+                className="btn-primary" 
+                onClick={() => setShowEnrollModal(true)}
+                style={{ 
+                  marginTop: 16, 
+                  padding: '10px 20px', 
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
+                }}
+              >
+                <HiOutlineCamera size={18} /> Enroll My Face
+              </button>
+            )}
           </div>
           <div className="student-hero-badges">
             <span className="badge badge-info">{currentSemester}</span>
@@ -314,6 +337,17 @@ export default function StudentDashboard() {
       <div style={{ marginTop: 24 }}>
         <AcademicCalendarPanel compact />
       </div>
+
+      {showEnrollModal && profile && (
+        <FaceEnrollmentModal 
+          student={{ ...profile.profile, user_id: user?._id }}
+          onClose={() => setShowEnrollModal(false)}
+          onSuccess={() => {
+            setShowEnrollModal(false);
+            fetchDashboardData();
+          }}
+        />
+      )}
     </div>
   );
 }

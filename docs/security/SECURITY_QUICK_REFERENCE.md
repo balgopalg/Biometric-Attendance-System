@@ -44,7 +44,7 @@
 | `app/utils/validation.py` | Input validation (email, password, PIN, role, etc.) |
 | `/docs/security/SECURITY_HARDENING.md` | Comprehensive security guide |
 | `backend/.env.example` | Backend environment variable template |
-| `verify_security.py` | Verification script to test all features |
+| `backend/tests/` | Security coverage via pytest suite |
 
 ---
 
@@ -70,10 +70,9 @@ cp backend/.env.example backend/.env
 
 ### 3. Verify Installation
 ```bash
-cd backend
-python ../verify_security.py
+python -m pytest backend/tests/test_api_flows.py backend/tests/test_rbac.py
 
-# Expected: 25+ checks passing
+# Expected: all tests passing
 ```
 
 ### 4. Test Features
@@ -102,7 +101,12 @@ done
 ```
 # Rate Limiting
 RATELIMIT_ENABLED=true
-RATELIMIT_STORAGE_URL=memory://  (use redis://localhost:6379 for distributed)
+RATELIMIT_STORAGE_URI=memory://  (dev only; use redis://localhost:6379/1 for shared limits)
+RATELIMIT_FAIL_CLOSED=true       (recommended in staging/production)
+
+# Email Worker Pool
+EMAIL_WORKER_MAX_THREADS=4
+EMAIL_MAX_PENDING_TASKS=1000
 
 # Brute Force
 BRUTE_FORCE_PROTECTION_ENABLED=true
@@ -111,7 +115,7 @@ LOGIN_LOCKOUT_DURATION_MINUTES=15
 PIN_MAX_ATTEMPTS=3
 
 # Password Policy
-PASSWORD_MIN_LENGTH=12
+PASSWORD_MIN_LENGTH=8
 PASSWORD_REQUIRE_UPPERCASE=true
 PASSWORD_REQUIRE_LOWERCASE=true
 PASSWORD_REQUIRE_DIGITS=true
@@ -281,7 +285,7 @@ curl -X GET http://localhost/api/admin/stats \
 3. **HTTPS:** Deployment must use HTTPS (JWT_COOKIE_SECURE=true)
 4. **CORS:** Whitelist only your frontend domain
 5. **Monitoring:** Review audit logs and failed login attempts regularly
-6. **Testing:** Run `verify_security.py` before deploying
+6. **Testing:** Run `pytest backend/tests/test_api_flows.py backend/tests/test_rbac.py` before deploying
 7. **Lockouts:** Track account lockouts and help unlock legitimate users
 
 ---
@@ -289,8 +293,8 @@ curl -X GET http://localhost/api/admin/stats \
 ## 📞 Quick Commands
 
 ```bash
-# Verify security
-python verify_security.py
+# Verify security flows
+python -m pytest backend/tests/test_api_flows.py backend/tests/test_rbac.py
 
 # Install dependencies
 pip install -r requirements.txt

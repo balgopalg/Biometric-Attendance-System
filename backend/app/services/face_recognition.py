@@ -1,5 +1,6 @@
 """Face recognition service using FaceNet embeddings + cosine similarity."""
 
+import hashlib
 import os
 import warnings
 
@@ -7,6 +8,7 @@ import numpy as np
 from flask import current_app, has_app_context
 
 from app.models.enrollment import decode_face_embedding
+from app.utils.helpers import _current_env
 
 
 # We use keras-facenet which provides a ready-to-use InceptionResNetV1 model.
@@ -38,23 +40,38 @@ def _vectors_cache_get(key):
 
 def _vectors_cache_set(key, value):
     _init_vectors_cache()
-    max_entries = int(current_app.config.get("VECTORS_CACHE_MAX_ENTRIES", 128))
+    if has_app_context():
+        max_entries = int(current_app.config.get("VECTORS_CACHE_MAX_ENTRIES", 128))
+    else:
+        max_entries = 128
     with _VECTORS_CACHE_LOCK:
         _VECTORS_CACHE[key] = value
         _VECTORS_CACHE.move_to_end(key)
         while len(_VECTORS_CACHE) > max_entries:
             _VECTORS_CACHE.popitem(last=False)
 
-def _current_env():
-    if has_app_context():
-        try:
-            env = current_app.config.get("ENV")
-            if env:
-                return str(env).strip().lower()
-        except Exception:
-            pass  # nosec B110
 
-    return (os.getenv("FLASK_ENV") or os.getenv("ENV") or "").strip().lower()
+def _prepared_candidates_cache_key(prepared_candidates: list):
+    """Build a stable fingerprint for the current candidate vectors."""
+    digest = hashlib.sha256()
+    for candidate in prepared_candidates:
+        digest.update(str(candidate.get("user_id", "")).encode("utf-8"))
+        digest.update(b"\x00")
+        digest.update(str(candidate.get("reg_number", "")).encode("utf-8"))
+        digest.update(b"\x00")
+
+        vectors = candidate.get("vectors", []) or []
+        digest.update(str(len(vectors)).encode("ascii"))
+        digest.update(b"\x00")
+
+        for vector in vectors:
+            array = np.asarray(vector, dtype=np.float32).reshape(-1)
+            digest.update(str(array.shape[0]).encode("ascii"))
+            digest.update(b"\x00")
+            digest.update(array.tobytes())
+            digest.update(b"\x00")
+
+    return digest.hexdigest()
 
 def is_model_stub() -> bool:
     return _model_is_stub
@@ -239,9 +256,10 @@ def find_best_match_cached(query_embedding, prepared_candidates: list, threshold
         return None, best_score
 
     # Vectorized path: try to reuse pre-stacked vectors from a small LRU cache.
-    # Create a fingerprint key for the prepared candidates: tuple(user_id, count)
+    # Create a fingerprint key from the actual candidate vectors so re-enrollment
+    # with the same vector count still invalidates stale cache entries.
     try:
-        key = tuple((c.get("user_id"), len(c.get("vectors", []))) for c in prepared_candidates)
+        key = _prepared_candidates_cache_key(prepared_candidates)
     except Exception:
         key = None
 

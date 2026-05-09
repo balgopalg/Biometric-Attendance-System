@@ -72,13 +72,26 @@ def _resolve_department_name(user):
             dept_doc = get_department_by_id(str(user["department_id"]))
             if dept_doc:
                 dept_name = dept_doc.get("name", dept_name)
-        except Exception:
-            pass
+        except Exception as e:
+            current_app.logger.warning(f"Failed to resolve department name: {e}")
     return dept_name
 
 
 def _serialize_auth_user(user):
     effective_role = _normalize_role(user["role"])
+    
+    # Resolve face enrollment status based on role
+    has_face = False
+    if effective_role == "lecturer":
+        has_face = bool(user.get("face_embeddings"))
+    elif effective_role == "student":
+        try:
+            from app.models.enrollment import get_profile_by_user
+            profile = get_profile_by_user(str(user["_id"]))
+            has_face = bool(profile and profile.get("face_embeddings"))
+        except Exception:
+            has_face = False
+
     return {
         "_id": str(user["_id"]),
         "name": user["name"],
@@ -89,6 +102,7 @@ def _serialize_auth_user(user):
         "department_name": _resolve_department_name(user),
         "must_change_password": user.get("must_change_password", False),
         "profile_picture_url": _build_profile_picture_url(user),
+        "has_face_enrolled": has_face,
     }
 
 

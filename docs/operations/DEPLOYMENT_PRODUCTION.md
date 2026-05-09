@@ -18,10 +18,13 @@
    - `JWT_COOKIE_DOMAIN`
    - `YAGMAIL_USER` and `YAGMAIL_PASSWORD` (if onboarding/reset emails are enabled)
    - `YAGMAIL_SMTP_HOST`, `YAGMAIL_SMTP_PORT`, `YAGMAIL_SMTP_SSL`, `YAGMAIL_SMTP_STARTTLS` as needed for your SMTP provider
+   - `EMAIL_WORKER_MAX_THREADS` and `EMAIL_MAX_PENDING_TASKS` (tune async email throughput)
    - `TEMP_PASS_DISPLAY_ENABLED=0` (recommended for production)
 3. Confirm security values:
    - `STRICT_JWT_SECRET=1`
    - `RATELIMIT_ENABLED=1`
+   - `RATELIMIT_FAIL_CLOSED=1`
+   - `RATELIMIT_STORAGE_URI=redis://redis:6379/1`
    - `BRUTE_FORCE_PROTECTION_ENABLED=1`
    - `TASK_QUEUE_ENABLED=1`
 

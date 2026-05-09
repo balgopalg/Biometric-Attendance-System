@@ -1,5 +1,6 @@
 """Input validation and sanitization utilities."""
 
+import ipaddress
 import re
 from urllib.parse import urlparse
 
@@ -56,8 +57,8 @@ def validate_pin(pin):
 
 
 def validate_role(role):
-    """Validate role is one of allowed values (4-tier RBAC + legacy alias)."""
-    allowed = {"super_admin", "department_admin", "admin", "lecturer", "student"}
+    """Validate role is one of allowed values (4-tier RBAC)."""
+    allowed = {"super_admin", "department_admin", "lecturer", "student"}
     return role in allowed
 
 
@@ -118,8 +119,6 @@ def validate_attendance_percentage(percentage):
     except (ValueError, TypeError):
         return False
 
-
-import ipaddress
 
 def validate_ip_address(ip):
     """Validate IPv4 or IPv6 address format using ipaddress module."""

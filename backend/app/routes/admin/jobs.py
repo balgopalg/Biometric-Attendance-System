@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from . import admin_bp
 from ._helpers import *
 
@@ -82,6 +83,29 @@ def replay_dead_letter_job(user, job_id):
             "status_url": f"/api/admin/jobs/{job_id}",
         }
     ), 202
+
+
+
+def _parse_iso_date(value):
+    if not value:
+        return None
+    try:
+        # Expected format: "YYYY-MM-DD" or ISO string
+        if "T" in str(value):
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return datetime.strptime(str(value), "%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _local_midnight_to_utc(local_midnight, tz_offset_minutes):
+    if not local_midnight:
+        return None
+    # If tz_offset_minutes is 330 (for IST), we subtract 330 mins to get UTC
+    utc_dt = local_midnight - timedelta(minutes=_to_int(tz_offset_minutes, 0))
+    if utc_dt.tzinfo is None:
+        utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    return utc_dt
 
 
 def _requeue_dead_letter_job_by_id(job_id):
@@ -425,3 +449,94 @@ def get_job_metrics(user):
     )
 
 
+
+@admin_bp.route("/jobs/<job_id>", methods=["DELETE"])
+@role_required("department_admin")
+def delete_background_job(user, job_id):
+    jobs = get_collection("attendance", "background_jobs")
+    job = jobs.find_one({"job_id": job_id})
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+
+    # Allow deleting if not running
+    status = _as_text(job.get("status")).lower()
+    if status == "running":
+        return jsonify({"error": "Cannot delete a running job"}), 400
+
+    jobs.delete_one({"job_id": job_id})
+
+    log_action(
+        "DELETE_BACKGROUND_JOB",
+        str(user["_id"]),
+        details=f"job_id={job_id}, job_type={_as_text(job.get('job_type'))}, status={status}",
+    )
+
+    return jsonify({"message": "Job deleted", "job_id": job_id})
+
+
+@admin_bp.route("/jobs/dead-letter/delete-bulk", methods=["POST"])
+@role_required("department_admin")
+def delete_dead_letter_jobs_bulk(user):
+    d = request.get_json(silent=True) or {}
+    raw_ids = d.get("job_ids") or []
+    job_ids = [_as_text(x) for x in raw_ids if _as_text(x)]
+    if not job_ids:
+        return jsonify({"error": "job_ids is required"}), 400
+
+    jobs = get_collection("attendance", "background_jobs")
+    res = jobs.delete_many({"job_id": {"$in": job_ids}, "status": "dead_letter"})
+
+    log_action(
+        "DELETE_DEAD_LETTER_JOB_BULK",
+        str(user["_id"]),
+        details=f"requested={len(job_ids)}, deleted={res.deleted_count}",
+    )
+
+    return jsonify(
+        {
+            "message": "Bulk dead-letter deletion processed",
+            "requested": len(job_ids),
+            "deleted": res.deleted_count,
+        }
+    ), 200
+
+
+@admin_bp.route("/jobs/dead-letter/delete-filtered", methods=["POST"])
+@role_required("department_admin")
+def delete_dead_letter_jobs_filtered(user):
+    d = request.get_json(silent=True) or {}
+    filters = {
+        "q": d.get("q", ""),
+        "job_type": d.get("job_type", ""),
+        "from": d.get("from", ""),
+        "to": d.get("to", ""),
+        "sort_by": d.get("sort_by", "updated_at"),
+        "sort_dir": d.get("sort_dir", "desc"),
+        "tz_offset_minutes": d.get("tz_offset_minutes", 0),
+    }
+
+    try:
+        rows, total_matched = _fetch_dead_letter_rows(filters, include_pagination=False)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if not rows:
+        return jsonify({"message": "No jobs match filters", "deleted": 0}), 200
+
+    job_ids = [row["job_id"] for row in rows if "job_id" in row]
+    jobs = get_collection("attendance", "background_jobs")
+    res = jobs.delete_many({"job_id": {"$in": job_ids}, "status": "dead_letter"})
+
+    log_action(
+        "DELETE_DEAD_LETTER_JOB_FILTERED",
+        str(user["_id"]),
+        details=f"matched={total_matched}, deleted={res.deleted_count}",
+    )
+
+    return jsonify(
+        {
+            "message": "Filtered dead-letter deletion processed",
+            "matched": total_matched,
+            "deleted": res.deleted_count,
+        }
+    ), 200

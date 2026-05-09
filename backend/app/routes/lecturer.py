@@ -31,7 +31,7 @@ from app.security.brute_force_protection import BruteForceProtector
 from app.security.rate_limiter import limiter
 from app.observability.logging import attendance_logger
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_mongo_doc, decode_base64_image, decode_image_bytes
+from app.utils.helpers import sanitise_mongo_doc, decode_base64_image, decode_image_bytes, _id_variants
 
 lecturer_bp = Blueprint("lecturer", __name__)
 
@@ -42,9 +42,30 @@ _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES = 180
 _ALLOWED_UPLOAD_MIME_TYPES = {"image/jpeg", "image/png", "image/bmp", "image/webp"}
 _ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+_MAX_AUTH_UPLOAD_BYTES = 2 * 1024 * 1024
 _SESSION_CANDIDATES_CACHE_MAX_ENTRIES_DEFAULT = 500
 _SESSION_CANDIDATES_CACHE = OrderedDict()
 _SESSION_CANDIDATES_LOCK = Lock()
+
+
+def _validate_auth_image(image):
+    if not image:
+        return None, "Lecturer face photo is required for biometric authentication."
+    
+    content_type = str(getattr(image, "content_type", "") or "").strip().lower()
+    extension = os.path.splitext(str(image.filename or "").strip())[1].lower()
+    if content_type not in _ALLOWED_UPLOAD_MIME_TYPES:
+        return None, "Unsupported image type"
+    if extension not in _ALLOWED_UPLOAD_EXTENSIONS:
+        return None, "Unsupported image extension"
+        
+    img_bytes = image.read()
+    if not img_bytes:
+        return None, "Invalid image file"
+    if len(img_bytes) > _MAX_AUTH_UPLOAD_BYTES:
+        return None, f"Image exceeds maximum size of {_MAX_AUTH_UPLOAD_BYTES // (1024*1024)}MB"
+        
+    return img_bytes, None
 
 
 def _normalize_attendance_sessions_once():
@@ -61,6 +82,12 @@ def _normalize_attendance_sessions_once():
 
     with _SESSIONS_NORMALIZE_LOCK:
         if _SESSIONS_NORMALIZED:
+            return
+
+        # Check database flag for multi-worker safety
+        sys_col = get_collection("attendance", "system_flags")
+        if sys_col.find_one({"_id": "normalization_done"}):
+            _SESSIONS_NORMALIZED = True
             return
 
         from pymongo import UpdateOne
@@ -115,6 +142,11 @@ def _normalize_attendance_sessions_once():
         if bulk_ops:
             sessions_col.bulk_write(bulk_ops, ordered=False)
 
+        sys_col.update_one(
+            {"_id": "normalization_done"},
+            {"$set": {"completed_at": datetime.now(timezone.utc)}},
+            upsert=True
+        )
         _SESSIONS_NORMALIZED = True
 
 
@@ -809,7 +841,7 @@ def stop_session(user):
 
     session = _get_active_session(session_id)
     if not session:
-        return jsonify({"message": "Session already stopped"}), 200
+        return jsonify({"error": "Session already stopped"}), 400
 
     if str(session.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "Unauthorized"}), 403
@@ -852,15 +884,11 @@ def commit_session(user):
 
     if auth_mode == "face":
         image = request.files.get("image")
-        if not image:
-            return jsonify({"error": "Lecturer face photo is required for biometric authentication."}), 400
+        img_bytes, err_msg = _validate_auth_image(image)
+        if err_msg:
+            return jsonify({"error": err_msg}), 400
         
         try:
-            # Read and decode the image
-            img_bytes = image.read()
-            if not img_bytes:
-                return jsonify({"error": "Invalid image file"}), 400
-
             img = decode_image_bytes(img_bytes)
             if img is None:
                 return jsonify({"error": "Invalid image file"}), 400
@@ -997,25 +1025,62 @@ def adjust_committed_session(user, session_id):
         return jsonify({"error": "Rollback window expired. Session is finalized."}), 403
 
     d = request.get_json(silent=True) or {}
-    pin = str(d.get("pin", "")).strip()
     user_ids = d.get("user_ids") or []
 
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
-        blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
-        if blocked:
-            return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+    # C-1 fix: Validate each user_id is a valid ObjectId and enrolled in the paper
+    from app.utils.validation import validate_object_id
+    valid_ids = [str(uid) for uid in user_ids if validate_object_id(str(uid))]
+    enrolled = {str(p["user_id"]) for p in get_profiles_for_paper(session_doc.get("paper_id", ""))}
+    user_ids = [uid for uid in valid_ids if uid in enrolled]
 
-    if not verify_user_pin(user, pin):
+    # C-2 fix: Respect LECTURER_AUTH_MODE for adjustments (not PIN-only)
+    auth_mode = current_app.config.get("LECTURER_AUTH_MODE", "pin")
+
+    if auth_mode == "face":
+        image = request.files.get("image")
+        img_bytes, err_msg = _validate_auth_image(image)
+        if err_msg:
+            return jsonify({"error": err_msg}), 400
+
+        try:
+            img = decode_image_bytes(img_bytes)
+            if img is None:
+                return jsonify({"error": "Invalid image file"}), 400
+            detector = get_detector()
+            faces = detector.detect_faces(img)
+            if not faces:
+                return jsonify({"error": "No face detected. Please ensure your face is clearly visible."}), 400
+            embedding = generate_embedding(faces[0]["crop"])
+            profile = get_profile_by_user(str(user["_id"]))
+            if not profile or not profile.get("face_embeddings"):
+                return jsonify({"error": "Biometric profile not found."}), 403
+            threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
+            match = find_best_match(embedding, [profile], threshold=threshold)
+            if not match:
+                log_action("LECTURER_ADJUST_AUTH_FAILED", str(user["_id"]), details="Biometric verification failed during session adjust")
+                return jsonify({"error": "Biometric verification failed."}), 403
+        except Exception:
+            current_app.logger.exception("Biometric adjust verification failed")
+            return jsonify({"error": "Biometric system error. Please try again."}), 500
+    else:
+        pin = str(d.get("pin", "")).strip()
+
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
             max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
-            if attempts >= max_attempts:
+            blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
+            if blocked:
                 return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
-        return jsonify({"error": "Invalid PIN"}), 403
 
-    if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        BruteForceProtector.clear_pin_failures(session_id)
+        if not verify_user_pin(user, pin):
+            if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+                attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
+                max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+                if attempts >= max_attempts:
+                    return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+            return jsonify({"error": "Invalid PIN"}), 403
+
+        if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
+            BruteForceProtector.clear_pin_failures(session_id)
 
     _replace_session_attendance(
         session_id=session_id,
@@ -1063,12 +1128,7 @@ def lecturer_progress(user):
     from_date = _local_midnight_to_utc(from_local, tz_offset_minutes)
     to_date = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
 
-    lecturer_id_variants = [lecturer_id]
-    try:
-        if ObjectId.is_valid(lecturer_id):
-            lecturer_id_variants.append(ObjectId(lecturer_id))
-    except Exception:
-        pass  # nosec B110
+    lecturer_id_variants = _id_variants(lecturer_id)
 
     query = {"lecturer_id": {"$in": lecturer_id_variants}}
     if paper_id:
@@ -1082,9 +1142,26 @@ def lecturer_progress(user):
         query["timestamp"] = ts
 
     logs_col = get_collection("attendance", "attendance_logs")
-    logs = list(logs_col.find(query).sort("timestamp", 1))
+    logs = list(logs_col.find(query).sort("timestamp", 1).limit(5000))
     assigned_papers = [_enrich_paper(p) for p in get_papers_by_lecturer(lecturer_id)]
     paper_lookup = {p["_id"]: p for p in assigned_papers}
+
+    # H-4 fix: Pre-collect all paper_ids from committed docs + logs to batch-fetch
+    _extra_paper_ids = set()
+    for _doc in (list(get_collection("attendance", "attendance_sessions").find(
+        {"lecturer_id": {"$in": lecturer_id_variants}}, {"paper_id": 1}
+    ))):
+        _pid = str(_doc.get("paper_id") or "")
+        if _pid and _pid not in paper_lookup:
+            _extra_paper_ids.add(_pid)
+    if _extra_paper_ids:
+        papers_col = get_collection("academic", "papers")
+        paper_oid_variants = []
+        for p in _extra_paper_ids:
+            paper_oid_variants.extend(_id_variants(p))
+        for raw in papers_col.find({"_id": {"$in": paper_oid_variants}}):
+            enriched = _enrich_paper(raw)
+            paper_lookup[enriched["_id"]] = enriched
 
     # Load committed sessions directly so zero-attendance classes are still visible.
     sessions_col = get_collection("attendance", "attendance_sessions")
@@ -1099,7 +1176,7 @@ def lecturer_progress(user):
             committed_ts["$lt"] = to_date
         session_query["committed_at"] = committed_ts
 
-    committed_docs = list(sessions_col.find(session_query))
+    committed_docs = list(sessions_col.find(session_query).limit(5000))
     session_docs = {doc.get("session_id"): doc for doc in committed_docs if doc.get("session_id")}
 
     # Precompute total enrolled students per paper for attended/total metrics.
@@ -1175,8 +1252,8 @@ def lecturer_progress(user):
         sessions.append({
             "session_id": sid,
             "paper_id": pid,
-            "paper_name": (paper or {}).get("name") or ((get_paper_by_id(pid) or {}).get("name") if pid else "Unknown"),
-            "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
+            "paper_name": (paper or {}).get("name", "Unknown"),
+            "paper_code": (paper or {}).get("code", ""),
             "course_name": (paper or {}).get("course_name"),
             "academic_year": session_doc.get("academic_year") or (paper or {}).get("academic_year"),
             "timestamp": first_ts.isoformat() if hasattr(first_ts, "isoformat") else first_ts,
@@ -1214,8 +1291,8 @@ def lecturer_progress(user):
         sessions.append({
             "session_id": sid,
             "paper_id": pid,
-            "paper_name": (paper or {}).get("name") or ((get_paper_by_id(pid) or {}).get("name") if pid else "Unknown"),
-            "paper_code": (paper or {}).get("code") or ((get_paper_by_id(pid) or {}).get("code") if pid else ""),
+            "paper_name": (paper or {}).get("name", "Unknown"),
+            "paper_code": (paper or {}).get("code", ""),
             "course_name": (paper or {}).get("course_name"),
             "academic_year": (paper or {}).get("academic_year"),
             "timestamp": first_ts.isoformat() if hasattr(first_ts, "isoformat") else first_ts,
@@ -1238,9 +1315,6 @@ def lecturer_progress(user):
     per_paper = []
     for pid, stat in paper_stats.items():
         paper = paper_lookup.get(pid)
-        if not paper and pid:
-            raw = get_paper_by_id(pid)
-            paper = _enrich_paper(raw) if raw else None
         per_paper.append({
             "paper_id": pid,
             "paper_name": (paper or {}).get("name", "Unknown"),

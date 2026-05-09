@@ -12,13 +12,13 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
     const validFiles = Array.from(filesList).filter(f => f.type.startsWith('image/'));
     
     if (validFiles.length === 0) {
-      toast?.error ? toast.error('Please select image files only') : alert('Please select image files only');
+      toast.error('Please select image files only');
       return;
     }
 
     const totalFiles = selectedFiles.length + validFiles.length;
     if (totalFiles > 5) {
-      toast?.error ? toast.error('You can only upload a maximum of 5 images at a time') : alert('You can only upload a maximum of 5 images at a time');
+      toast.error('You can only upload a maximum of 5 images at a time');
       return;
     }
 
@@ -80,7 +80,7 @@ const UploadClassroomImage = ({ onUpload, onClose, isLoading = false }) => {
 
   const handleUpload = () => {
     if (selectedFiles.length === 0) {
-      alert('Please select at least one image');
+      toast.error('Please select at least one image');
       return;
     }
 

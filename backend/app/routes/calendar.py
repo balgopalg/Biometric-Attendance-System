@@ -38,8 +38,8 @@ def _to_year(value):
         return None
     try:
         return int(text)
-    except Exception:
-        return text
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_calendar_date(value):
@@ -56,7 +56,7 @@ def _parse_calendar_date(value):
     for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%Y/%m/%d", "%d/%m/%Y"):
         try:
             return datetime.strptime(text, fmt).date()
-        except Exception:
+        except ValueError:
             continue
     return None
 
@@ -197,7 +197,7 @@ def _extract_calendar_draft_from_excel(*, file_bytes: bytes, year_hint=None, sou
     }
 
 
-def _resolved_department_id(user: dict, provided_department_id=None):
+def _resolved_department_id(user: dict):
     # Academic calendar is global and shared across all departments.
     return None
 
@@ -253,10 +253,15 @@ def extract_calendar_excel(user):
     if not uploaded.filename.lower().endswith((".xlsx", ".xlsm", ".xltx")):
         return jsonify({"error": "Unsupported file type. Please upload .xlsx, .xlsm or .xltx"}), 400
 
+    # H-9 fix: Validate magic bytes (ZIP/PK signature) before passing to openpyxl
+    file_bytes = uploaded.read()
+    if len(file_bytes) < 4 or file_bytes[:2] != b'PK':
+        return jsonify({"error": "Invalid file format. The uploaded file is not a valid Excel document."}), 400
+
     year_hint = _to_year(request.form.get("year"))
     try:
         draft = _extract_calendar_draft_from_excel(
-            file_bytes=uploaded.read(),
+            file_bytes=file_bytes,
             year_hint=year_hint,
             source_filename=uploaded.filename,
         )
@@ -265,6 +270,7 @@ def extract_calendar_excel(user):
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception:
+        current_app.logger.exception("Failed to extract calendar data from Excel")
         return jsonify({"error": "Failed to extract calendar data from Excel"}), 500
 
     draft["department_id"] = ""

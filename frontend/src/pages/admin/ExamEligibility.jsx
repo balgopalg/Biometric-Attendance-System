@@ -55,10 +55,11 @@ export default function ExamEligibility() {
   }, [filters.department_id]);
 
   const fetchEligibility = (signal, activeFilters = filters, activeSearch = search) => {
-    // Dept admins always have department_id set; super admins fetch all by default
-    if (isDepartmentAdmin && !activeFilters.department_id) {
+    // Only fetch once both department and course are selected to improve performance
+    if (!activeFilters.department_id || !activeFilters.course_id) {
       setRows([]);
       setEligibilityError('');
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -393,7 +394,7 @@ export default function ExamEligibility() {
     );
   }
 
-  if (!loading && !eligibilityError && rows.length === 0 && isDepartmentAdmin && !filters.department_id) {
+  if (!loading && !eligibilityError && (!filters.department_id || !filters.course_id)) {
     return (
       <div className="admin-page">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
@@ -431,7 +432,12 @@ export default function ExamEligibility() {
             </select>
           </div>
         </div>
-        <StatePanel variant="empty" title="No Records" description="No exam eligibility records found. Adjust filters or add students." compact />
+        <StatePanel 
+          variant="empty" 
+          title="Selection Required" 
+          description="Please select a department and course to view examination eligibility details." 
+          compact 
+        />
       </div>
     );
   }

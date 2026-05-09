@@ -50,6 +50,9 @@ Then edit `backend/.env` and set at minimum:
 - `SENTRY_DSN` (optional, can be blank)
 - `YAGMAIL_USER` and `YAGMAIL_PASSWORD` (optional; enables welcome and password-reset emails)
 - `YAGMAIL_SMTP_HOST`, `YAGMAIL_SMTP_PORT`, `YAGMAIL_SMTP_SSL`, `YAGMAIL_SMTP_STARTTLS` (optional; provider-specific)
+- `EMAIL_WORKER_MAX_THREADS` and `EMAIL_MAX_PENDING_TASKS` (optional; tune email background throughput)
+- `RATELIMIT_STORAGE_URI` (set to Redis in shared/staging/prod setups)
+- `RATELIMIT_FAIL_CLOSED` (`1` recommended in staging/production)
 - `TEMP_PASS_DISPLAY_ENABLED` (`0` recommended; set to `1` to return temp passwords in admin API responses)
 
 Note: Excel student/lecturer imports do not require email delivery to be configured.

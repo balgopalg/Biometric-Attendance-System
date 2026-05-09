@@ -132,8 +132,12 @@ def add_paper(user):
 def edit_paper(user, pid):
     d = request.get_json(silent=True) or {}
     fields = dict(d)
-    if "lecturer_id" in fields and not fields["lecturer_id"]:
-        fields["lecturer_id"] = None
+    if "lecturer_id" in fields:
+        fields["lecturer_id"] = _to_oid(fields["lecturer_id"])
+
+    # Remove immutable fields that MongoDB doesn't allow in $set
+    for key in ["_id", "_id_str", "created_at"]:
+        fields.pop(key, None)
 
     previous = get_paper_by_id(pid)
     if not previous:

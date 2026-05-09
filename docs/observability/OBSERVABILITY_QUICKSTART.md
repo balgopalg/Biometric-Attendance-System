@@ -1,10 +1,10 @@
-# Observability Quick Reference
+﻿# Observability Quick Reference
 
 Fast start guide for observability configuration and monitoring.
 
 ## 5-Minute Setup
 
-### 1. Install Dependencies ✓ (Already added to requirements.txt)
+### 1. Install Dependencies âœ“ (Already added to requirements.txt)
 
 ```bash
 pip install python-json-logger==2.0.7 prometheus-client==0.19.0 sentry-sdk==1.40.6
@@ -33,7 +33,7 @@ python run.py
 ### 4. Test Health Endpoint
 
 ```bash
-curl http://localhost:5000/api/health
+curl http://localhost:5000/api/health/health
 ```
 
 Expected response:
@@ -56,13 +56,13 @@ Expected response:
 
 | Endpoint | Purpose | Status Codes |
 |----------|---------|--------------|
-| `GET /api/health` | Full health check | 200 (ok), 503 (failed) |
-| `GET /api/health/database` | Database only | 200/503 |
-| `GET /api/health/redis` | Redis only | 200/503 |
-| `GET /api/health/queue` | Queue only | 200/503 |
-| `GET /api/health/storage` | Storage only | 200/503 |
-| `GET /api/health/live` | Kubernetes liveness | 200 |
-| `GET /api/health/ready` | Kubernetes readiness | 200/503 |
+| `GET /api/health/health` | Full health check | 200 (ok), 503 (failed) |
+| `GET /api/health/health/database` | Database only | 200/503 |
+| `GET /api/health/health/redis` | Redis only | 200/503 |
+| `GET /api/health/health/queue` | Queue only | 200/503 |
+| `GET /api/health/health/storage` | Storage only | 200/503 |
+| `GET /api/health/health/live` | Kubernetes liveness | 200 |
+| `GET /api/health/health/ready` | Kubernetes readiness | 200/503 |
 
 ### Metrics
 
@@ -88,13 +88,13 @@ Error responses include error_id for support reference:
 
 ```bash
 # Quick health check
-curl http://localhost:5000/api/health
+curl http://localhost:5000/api/health/health
 
 # Database health only
-curl http://localhost:5000/api/health/database
+curl http://localhost:5000/api/health/health/database
 
 # Queue health
-curl http://localhost:5000/api/health/queue
+curl http://localhost:5000/api/health/health/queue
 ```
 
 ### 2. View Metrics
@@ -204,7 +204,7 @@ services:
       SENTRY_DSN: ${SENTRY_DSN}
       METRICS_ENABLED: 1
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health/ready"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -246,7 +246,7 @@ spec:
         
         livenessProbe:
           httpGet:
-            path: /api/health/live
+            path: /api/health/health/live
             port: 5000
           initialDelaySeconds: 10
           periodSeconds: 30
@@ -255,7 +255,7 @@ spec:
         
         readinessProbe:
           httpGet:
-            path: /api/health/ready
+            path: /api/health/health/ready
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 10
@@ -310,13 +310,13 @@ Check individual components:
 
 ```bash
 # Database issue?
-curl http://localhost:5000/api/health/database
+curl http://localhost:5000/api/health/health/database
 
 # Redis issue?
-curl http://localhost:5000/api/health/redis
+curl http://localhost:5000/api/health/health/redis
 
 # Storage issue?
-curl http://localhost:5000/api/health/storage
+curl http://localhost:5000/api/health/health/storage
 ```
 
 ### Metrics Not Appearing
@@ -423,3 +423,4 @@ tail -f app.log | jq 'select(.level=="ERROR")'
 # Filter by endpoint
 tail -f app.log | jq 'select(.http.path=="/api/auth/login")'
 ```
+

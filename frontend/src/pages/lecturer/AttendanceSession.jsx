@@ -34,7 +34,7 @@ export default function AttendanceSession() {
   const [params] = useSearchParams();
   const paperIdFromQuery = params.get('paper_id');
 
-  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame, clearError } = useWebcam();
+  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, flipCamera, captureFrame, clearError } = useWebcam();
   const [papers, setPapers] = useState([]);
   const [loadingPapers, setLoadingPapers] = useState(true);
   const [papersError, setPapersError] = useState('');
@@ -580,7 +580,7 @@ export default function AttendanceSession() {
       </div>
 
       <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
-        <WebcamFeed ref={videoRef} isActive={isActive} error={error} />
+        <WebcamFeed ref={videoRef} isActive={isActive} error={error} onFlipCamera={flipCamera} />
         <RecognizedList students={recognized} />
       </div>
 

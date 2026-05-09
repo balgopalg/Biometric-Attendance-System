@@ -295,7 +295,7 @@ python verify_observability.py
 - Command:
 
 ```powershell
-python verify_security.py
+python -m pytest backend/tests/test_api_flows.py backend/tests/test_rbac.py
 ```
 
 ## 8. Performance validation commands

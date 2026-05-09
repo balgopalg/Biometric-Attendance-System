@@ -3,15 +3,18 @@ import api from '../api/axios';
 
 const AuthContext = createContext(null);
 
+const getCachedUser = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const cached = window.sessionStorage.getItem('user');
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+};
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try {
-      const cached = window.sessionStorage.getItem('user');
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [user, setUser] = useState(getCachedUser);
   const [loading, setLoading] = useState(true);
 
   const persistUser = useCallback((u) => {
@@ -47,7 +50,7 @@ export function AuthProvider({ children }) {
     async (email, password) => {
       const res = await api.post('/auth/login', { email, password });
       persistUser(res.data.user);
-      return res.data;
+      return res.data.user;
     },
     [persistUser]
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import api from '../../api/axios';
 import StatePanel from '../../components/ui/StatePanel';
 import { 
@@ -42,7 +43,7 @@ export default function ManageLeaves() {
       });
       fetchLeaves();
     } catch (err) {
-      alert('Action failed: ' + (err.response?.data?.error || 'Unknown error'));
+      toast.error('Action failed: ' + (err.response?.data?.error || 'Unknown error'));
     } finally {
       setProcessingId(null);
     }

@@ -49,7 +49,7 @@ export default function Login() {
         navigate('/change-password', { replace: true });
         return;
       }
-      const dest = user.role === 'admin' ? '/admin' : user.role === 'lecturer' ? '/lecturer' : '/student';
+      const dest = ['admin', 'super_admin', 'department_admin'].includes(user.role) ? '/admin' : user.role === 'lecturer' ? '/lecturer' : '/student';
       navigate(dest, {
         replace: true,
         state: { showWelcome: true, welcomeToken: `${Date.now()}-${Math.random().toString(36).slice(2)}` },

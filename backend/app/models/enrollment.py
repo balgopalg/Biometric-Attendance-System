@@ -12,6 +12,7 @@ from bson import ObjectId
 from flask import current_app, has_app_context, has_request_context, request, g
 from app.extensions import get_collection
 from app.models.audit import log_action
+from app.utils.helpers import _current_env, _id_variants
 
 try:
     from cryptography.fernet import Fernet, InvalidToken
@@ -69,17 +70,6 @@ def _append_noisy_profile_log(payload: dict) -> None:
     except Exception:
         pass  # Telemetry logging should never fail the request
 
-
-def _current_env() -> str:
-    if has_app_context():
-        try:
-            env = current_app.config.get("ENV")
-            if env:
-                return str(env).strip().lower()
-        except Exception:
-            pass  # nosec B110
-
-    return (os.getenv("FLASK_ENV") or os.getenv("ENV") or "").strip().lower()
 
 
 def _legacy_safe_name(raw_value: Any) -> str:
@@ -266,8 +256,12 @@ def get_profile_by_user(user_id: str) -> Optional[dict]:
 
 
 def get_profile_by_id(profile_id: str) -> Optional[dict]:
+    try:
+        oid = ObjectId(profile_id)
+    except Exception:
+        return None
     profiles = get_collection("academic", "student_profiles")
-    profile = profiles.find_one({"_id": ObjectId(profile_id)})
+    profile = profiles.find_one({"_id": oid})
     _log_biometric_read("student_profile_read_by_id", user_id=str((profile or {}).get("user_id") or ""), details={"profile_id": str(profile_id)})
     return profile
 
@@ -311,11 +305,7 @@ def enroll_in_papers(user_id: str, paper_ids: List[str]) -> int:
     if not normalized_user_id:
         return 0
 
-    user_id_filters = [normalized_user_id]
-    try:
-        user_id_filters.append(ObjectId(normalized_user_id))
-    except Exception:
-        pass  # nosec B110
+    user_id_filters = _id_variants(normalized_user_id)
 
     normalized_paper_ids = [str(pid).strip() for pid in (paper_ids or []) if str(pid).strip()]
     if not normalized_paper_ids:
@@ -332,11 +322,7 @@ def enroll_in_papers(user_id: str, paper_ids: List[str]) -> int:
 def get_profiles_for_paper(paper_id: str) -> List[dict]:
     """Return all student profiles enrolled in a given paper."""
     profiles = get_collection("academic", "student_profiles")
-    filters = [paper_id, str(paper_id)]
-    try:
-        filters.append(ObjectId(str(paper_id)))
-    except Exception:
-        pass  # nosec B110
+    filters = _id_variants(paper_id)
     items = list(profiles.find({"enrolled_papers": {"$in": filters}}))
     _log_biometric_read("paper_profile_read", details={"paper_id": str(paper_id), "count": len(items)})
     return items
@@ -345,11 +331,7 @@ def get_profiles_for_paper(paper_id: str) -> List[dict]:
 def count_profiles_for_paper(paper_id: str) -> int:
     """Count enrolled students for a paper, handling string/ObjectId ids."""
     profiles = get_collection("academic", "student_profiles")
-    filters = [paper_id, str(paper_id)]
-    try:
-        filters.append(ObjectId(str(paper_id)))
-    except Exception:
-        pass  # nosec B110
+    filters = _id_variants(paper_id)
     count = int(profiles.count_documents({"enrolled_papers": {"$in": filters}}))
     _log_biometric_read("paper_profile_count", details={"paper_id": str(paper_id), "count": count})
     return count
@@ -390,8 +372,8 @@ def delete_profile(user_id: str, user: Optional[dict] = None) -> None:
         safe_name = _legacy_safe_name(profile.get("reg_number") or "")
 
     user_id_text = str(user_id).strip()
-    dataset_root = "dataset"
-    uploads_root = "uploads"
+    dataset_root = current_app.config.get("DATASET_ABSOLUTE_PATH") or os.path.abspath(os.path.join(current_app.root_path, "..", "dataset"))
+    uploads_root = current_app.config.get("UPLOADS_ABSOLUTE_PATH") or os.path.abspath(os.path.join(current_app.root_path, "..", "uploads"))
 
     _remove_path(os.path.join(dataset_root, user_id_text))
     if safe_name:
@@ -399,3 +381,32 @@ def delete_profile(user_id: str, user: Optional[dict] = None) -> None:
         _remove_prefix_matches(uploads_root, [safe_name, user_id_text])
 
     profiles.delete_one({"user_id": user_id})
+
+    # Cascade cleanup: remove orphaned records from related collections
+    # to prevent phantom entries in attendance reports and eligibility views.
+    _cascade_cleanup_user_data(user_id_text)
+
+
+def _cascade_cleanup_user_data(user_id: str) -> None:
+    """Remove attendance, eligibility, and leave data tied to a deleted student."""
+    from app.utils.helpers import _id_variants
+
+    uid_variants = _id_variants(user_id)
+    if not uid_variants:
+        return
+
+    try:
+        # Attendance logs
+        att_logs = get_collection("attendance", "attendance_logs")
+        att_logs.delete_many({"user_id": {"$in": uid_variants}})
+
+        # Exam eligibility overrides
+        overrides = get_collection("attendance", "exam_eligibility_overrides")
+        overrides.delete_many({"user_id": {"$in": uid_variants}})
+
+        # Leave requests
+        leaves = get_collection("attendance", "leave_requests")
+        leaves.delete_many({"user_id": {"$in": uid_variants}})
+    except Exception:
+        # Cascade failures should not block the primary profile deletion.
+        current_app.logger.exception("Cascade cleanup failed for user_id=%s", user_id)

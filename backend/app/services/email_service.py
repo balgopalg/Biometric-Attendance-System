@@ -15,16 +15,23 @@ calling request, so user creation always succeeds even when email delivery
 fails.
 """
 
+import atexit
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 from html import escape as html_escape
-from threading import Thread
+import threading
 
 logger = logging.getLogger(__name__)
 
 # ─── Yagmail setup ───────────────────────────────────────────────────────────
 
 _YAGMAIL_READY = False
+_EMAIL_EXECUTOR = None
+_EMAIL_EXECUTOR_LOCK = threading.Lock()
+_EMAIL_PENDING_LOCK = threading.Lock()
+_EMAIL_PENDING_COUNT = 0
+_EMAIL_THREAD_LOCAL = threading.local()
 
 
 from app.config import _env_bool
@@ -57,6 +64,81 @@ def _get_mailer():
         smtp_ssl=smtp_ssl,
         smtp_starttls=smtp_starttls,
     )
+
+
+def _get_email_executor() -> ThreadPoolExecutor:
+    """Return a lazily initialized shared executor for email delivery."""
+    global _EMAIL_EXECUTOR
+    if _EMAIL_EXECUTOR is not None:
+        return _EMAIL_EXECUTOR
+
+    with _EMAIL_EXECUTOR_LOCK:
+        if _EMAIL_EXECUTOR is None:
+            max_workers = max(1, int(os.getenv("EMAIL_WORKER_MAX_THREADS", "4") or 4))
+            _EMAIL_EXECUTOR = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="email-delivery",
+            )
+
+            def _shutdown_executor():
+                if _EMAIL_EXECUTOR is not None:
+                    _EMAIL_EXECUTOR.shutdown(wait=True, cancel_futures=False)
+
+            atexit.register(_shutdown_executor)
+
+    return _EMAIL_EXECUTOR
+
+
+def _acquire_email_slot() -> bool:
+    """Apply backpressure so bulk imports do not enqueue unbounded email tasks."""
+    global _EMAIL_PENDING_COUNT
+    max_pending = max(1, int(os.getenv("EMAIL_MAX_PENDING_TASKS", "1000") or 1000))
+    with _EMAIL_PENDING_LOCK:
+        if _EMAIL_PENDING_COUNT >= max_pending:
+            return False
+        _EMAIL_PENDING_COUNT += 1
+        return True
+
+
+def _release_email_slot() -> None:
+    global _EMAIL_PENDING_COUNT
+    with _EMAIL_PENDING_LOCK:
+        if _EMAIL_PENDING_COUNT > 0:
+            _EMAIL_PENDING_COUNT -= 1
+
+
+def _get_thread_mailer():
+    """Reuse a single SMTP client per worker thread to reduce connection churn."""
+    mailer = getattr(_EMAIL_THREAD_LOCAL, "mailer", None)
+    if mailer is None:
+        mailer = _get_mailer()
+        _EMAIL_THREAD_LOCAL.mailer = mailer
+    return mailer
+
+
+def _submit_email_job(send_fn, *, to_email: str, success_message: str, failure_message: str) -> bool:
+    """Submit non-blocking email work to the shared pool."""
+    if not _acquire_email_slot():
+        logger.warning("Email queue is full; skipping email send to %s", to_email)
+        return False
+
+    def _run():
+        try:
+            mailer = _get_thread_mailer()
+            send_fn(mailer)
+            logger.info(success_message, to_email)
+        except Exception:
+            logger.exception(failure_message, to_email)
+        finally:
+            _release_email_slot()
+
+    try:
+        _get_email_executor().submit(_run)
+        return True
+    except Exception:
+        _release_email_slot()
+        logger.exception("Failed to submit email job for %s", to_email)
+        return False
 
 
 def _get_login_url() -> str:
@@ -407,20 +489,16 @@ def send_welcome_email(
         logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
         return False
 
-    def _send():
-        try:
-            mailer = _get_mailer()
-            mailer.send(
-                to=to_email,
-                subject=f"Your {role.capitalize()} Account — Biometric Attendance System",
-                contents=_welcome_html(name, to_email, temp_password, role),
-            )
-            logger.info("Welcome email sent to %s", to_email)
-        except Exception:
-            logger.exception("Failed to send welcome email to %s", to_email)
-
-    Thread(target=_send, daemon=True).start()
-    return True
+    return _submit_email_job(
+      lambda mailer: mailer.send(
+        to=to_email,
+        subject=f"Your {role.capitalize()} Account — Biometric Attendance System",
+        contents=_welcome_html(name, to_email, temp_password, role),
+      ),
+      to_email=to_email,
+      success_message="Welcome email sent to %s",
+      failure_message="Failed to send welcome email to %s",
+    )
 
 
 def send_password_reset_email(
@@ -437,20 +515,16 @@ def send_password_reset_email(
         logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
         return False
 
-    def _send():
-        try:
-            mailer = _get_mailer()
-            mailer.send(
-                to=to_email,
-                subject="Password Reset — Biometric Attendance System",
-                contents=_password_reset_html(name, to_email, temp_password, role),
-            )
-            logger.info("Password reset email sent to %s", to_email)
-        except Exception:
-            logger.exception("Failed to send password reset email to %s", to_email)
-
-    Thread(target=_send, daemon=True).start()
-    return True
+    return _submit_email_job(
+      lambda mailer: mailer.send(
+        to=to_email,
+        subject="Password Reset — Biometric Attendance System",
+        contents=_password_reset_html(name, to_email, temp_password, role),
+      ),
+      to_email=to_email,
+      success_message="Password reset email sent to %s",
+      failure_message="Failed to send password reset email to %s",
+    )
 
 
 def send_password_recovery_otp_email(
@@ -464,20 +538,16 @@ def send_password_recovery_otp_email(
         logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
         return False
 
-    def _send():
-        try:
-            mailer = _get_mailer()
-            mailer.send(
-                to=to_email,
-                subject="Password Recovery OTP — Biometric Attendance System",
-                contents=_password_recovery_otp_html(name, otp, expires_in_minutes),
-            )
-            logger.info("Password recovery OTP email sent to %s", to_email)
-        except Exception:
-            logger.exception("Failed to send password recovery OTP email to %s", to_email)
-
-    Thread(target=_send, daemon=True).start()
-    return True
+    return _submit_email_job(
+      lambda mailer: mailer.send(
+        to=to_email,
+        subject="Password Recovery OTP — Biometric Attendance System",
+        contents=_password_recovery_otp_html(name, otp, expires_in_minutes),
+      ),
+      to_email=to_email,
+      success_message="Password recovery OTP email sent to %s",
+      failure_message="Failed to send password recovery OTP email to %s",
+    )
 
 
 def send_shortage_alert_email(
@@ -491,17 +561,13 @@ def send_shortage_alert_email(
     if not _YAGMAIL_READY:
         return False
 
-    def _send():
-        try:
-            mailer = _get_mailer()
-            mailer.send(
-                to=to_email,
-                subject=f"URGENT: Attendance Shortage in {paper_name}",
-                contents=_shortage_alert_html(name, paper_name, percentage, classes_needed),
-            )
-            logger.info("Shortage alert sent to %s for %s", to_email, paper_name)
-        except Exception:
-            logger.exception("Failed to send shortage alert to %s", to_email)
-
-    Thread(target=_send, daemon=True).start()
-    return True
+    return _submit_email_job(
+      lambda mailer: mailer.send(
+        to=to_email,
+        subject=f"URGENT: Attendance Shortage in {paper_name}",
+        contents=_shortage_alert_html(name, paper_name, percentage, classes_needed),
+      ),
+      to_email=to_email,
+      success_message=f"Shortage alert sent to %s for {paper_name}",
+      failure_message="Failed to send shortage alert to %s",
+    )

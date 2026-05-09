@@ -12,6 +12,7 @@ from app.security.rbac import (
     effective_allowed_roles,
     get_user_department_id,
     is_super_admin,
+    validate_department_access,
     ADMIN_ROLES,
 )
 
@@ -71,38 +72,6 @@ SENSITIVE_OPERATIONS = [
 ]
 
 
-def _verify_role_and_set_context(*allowed_roles):
-    """Internal role gate used by permission_required / owner_or_admin_required.
-
-    Unlike the canonical ``auth_decorators.role_required``, this does **not**
-    inject ``user`` as a positional argument — that is intentional because the
-    decorators in this module handle ``user`` via ``flask.g.current_user``.
-    """
-    roles = effective_allowed_roles(allowed_roles)
-
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            verify_jwt_in_request()
-            user_email = get_jwt_identity()
-            users = get_collection("auth", "users")
-            user = users.find_one({"email": user_email})
-
-            if not user:
-                return jsonify({"error": "User not found"}), 404
-
-            user_role = user.get("role")
-            if user_role not in roles:
-                return jsonify({"error": "Access denied: insufficient permissions"}), 403
-
-            # Store user in g for access during request
-            g.current_user = user
-            g.department_id = get_user_department_id(user)
-            return fn(*args, **kwargs)
-
-        return wrapper
-    return decorator
-
 
 def permission_required(permission_name):
     """Decorator: Verify user has specific permission (hierarchy-aware)."""
@@ -140,7 +109,10 @@ def permission_required(permission_name):
 
 
 def owner_or_admin_required(resource_user_id_param="user_id"):
-    """Decorator: User must be resource owner or any admin role."""
+    """Decorator: User must be resource owner or any admin role.
+
+    H-5 fix: department_admin is scoped to their own department.
+    """
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -152,10 +124,20 @@ def owner_or_admin_required(resource_user_id_param="user_id"):
             if not user:
                 return jsonify({"error": "User not found"}), 404
 
-            # Any admin can access anything (within their department scope)
+            g.current_user = user
+            g.department_id = get_user_department_id(user)
+
+            # Super admin can access anything globally
+            if is_super_admin(user):
+                return fn(*args, **kwargs)
+
+            # Department admin: verify the target resource is in their department
             if user.get("role") in ADMIN_ROLES:
-                g.current_user = user
-                g.department_id = get_user_department_id(user)
+                resource_user_id = kwargs.get(resource_user_id_param) or request.args.get(resource_user_id_param)
+                if resource_user_id:
+                    target_user = users.find_one({"_id": __import__("bson").ObjectId(str(resource_user_id))})
+                    if target_user and not validate_department_access(user, target_user.get("department_id")):
+                        return jsonify({"error": "Access denied: resource outside your department"}), 403
                 return fn(*args, **kwargs)
 
             # Others can only access their own resources
@@ -163,8 +145,6 @@ def owner_or_admin_required(resource_user_id_param="user_id"):
             if str(user.get("_id")) != str(resource_user_id):
                 return jsonify({"error": "Access denied: can only access own resources"}), 403
 
-            g.current_user = user
-            g.department_id = get_user_department_id(user)
             return fn(*args, **kwargs)
 
         return wrapper
@@ -172,7 +152,10 @@ def owner_or_admin_required(resource_user_id_param="user_id"):
 
 
 def sensitive_operation(operation_name):
-    """Decorator: Mark and audit sensitive operations."""
+    """Decorator: Gate and audit sensitive operations.
+
+    H-6 fix: Now also verifies the user is authenticated and has an admin role.
+    """
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
@@ -184,15 +167,19 @@ def sensitive_operation(operation_name):
             if not user:
                 return jsonify({"error": "User not found"}), 404
 
+            # Only admin roles can perform sensitive operations
+            if user.get("role") not in ADMIN_ROLES and not is_super_admin(user):
+                return jsonify({"error": "Access denied: insufficient permissions"}), 403
+
             # Audit the operation
             from app.models.audit import log_action
             from flask import request as flask_request
 
             log_action(
-                user_id=user.get("_id"),
                 action=operation_name,
+                performed_by=str(user.get("_id")),
+                details=f"User {user.get('email')} performed {operation_name}",
                 resource_type="sensitive_operation",
-                description=f"User {user.get('email')} performed {operation_name}",
                 ip_address=flask_request.remote_addr,
                 user_agent=flask_request.headers.get("User-Agent", ""),
                 department_id=get_user_department_id(user),
@@ -205,19 +192,3 @@ def sensitive_operation(operation_name):
         return wrapper
     return decorator
 
-
-def validate_request_signature(required_fields):
-    """Decorator: Validate request has required fields."""
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            data = request.get_json(silent=True) or {}
-            missing = [field for field in required_fields if field not in data]
-
-            if missing:
-                return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
-
-            return fn(*args, **kwargs)
-
-        return wrapper
-    return decorator

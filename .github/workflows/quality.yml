@@ -189,10 +189,10 @@ jobs:
 
       - name: Add swap space
         run: |
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo fallocate -l 4G /swapfile_extra || sudo dd if=/dev/zero of=/swapfile_extra bs=1M count=4096
+          sudo chmod 600 /swapfile_extra
+          sudo mkswap /swapfile_extra
+          sudo swapon /swapfile_extra
           free -h
 
       - name: Set up Docker Buildx

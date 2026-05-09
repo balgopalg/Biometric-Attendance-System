@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-const WEBCAM_DEBUG = false;
+const WEBCAM_DEBUG = import.meta.env.VITE_WEBCAM_DEBUG === 'true';
 
 export function useWebcam(options = {}) {
   const videoRef = useRef(null);
@@ -8,18 +8,32 @@ export function useWebcam(options = {}) {
   const streamRef = useRef(null);
   const [isActive, setIsActive] = useState(false);
   const [error, setError] = useState(null);
+  const [facingMode, setFacingMode] = useState('user');
 
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (facing) => {
     try {
       setError(null);
+      // Guard: mediaDevices API unavailable in non-HTTPS or restricted contexts
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('Camera not available. Ensure you are using HTTPS or localhost.');
+        setIsActive(false);
+        return false;
+      }
+      // Stop existing stream before starting a new one
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      const mode = facing || facingMode || 'user';
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
+        video: { width: 640, height: 480, facingMode: mode },
       });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+      setFacingMode(mode);
       setIsActive(true);
       return true;
     } catch (err) {
@@ -34,7 +48,7 @@ export function useWebcam(options = {}) {
       setIsActive(false);
       return false;
     }
-  }, []);
+  }, [facingMode]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -48,6 +62,11 @@ export function useWebcam(options = {}) {
     }
     setIsActive(false);
   }, []);
+
+  const flipCamera = useCallback(async () => {
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    return startCamera(nextMode);
+  }, [facingMode, startCamera]);
 
   const captureFrame = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return null;
@@ -95,5 +114,5 @@ export function useWebcam(options = {}) {
     return () => stopCamera();
   }, [stopCamera]);
 
-  return { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame, clearError };
+  return { videoRef, canvasRef, isActive, error, facingMode, startCamera, stopCamera, flipCamera, captureFrame, clearError };
 }
