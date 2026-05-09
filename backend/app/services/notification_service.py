@@ -161,3 +161,16 @@ def mark_all_notifications_read(user_id):
         {"$set": {"is_read": True, "read_at": _utc_now()}},
     )
     return result.modified_count
+
+
+def delete_notification(user_id, notification_id):
+    notifications = _notifications_collection()
+    try:
+        object_id = ObjectId(notification_id)
+    except Exception:
+        return False
+
+    result = notifications.delete_one(
+        {"_id": object_id, "user_id": str(user_id)}
+    )
+    return result.deleted_count > 0

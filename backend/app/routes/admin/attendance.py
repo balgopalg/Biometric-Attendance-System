@@ -1639,10 +1639,10 @@ def dashboard_stats(user):
     
     user_dept = None
     if is_super_admin(user):
-        user_dept = dept_filter_id or None
+        user_dept = _to_oid(dept_filter_id) if dept_filter_id else None
     else:
         user_dept = _user_dept_id(user)
-        
+    
     cache_key = ("dashboard_stats", user_dept)
     cached_payload = _cache_get(cache_key)
     if cached_payload is not None:
@@ -1734,7 +1734,20 @@ def dashboard_stats(user):
         student_query["$or"] = [
             {"_id": {"$in": valid_oids}}
         ]
-        lecturer_query["department_id"] = user_dept
+
+        dept_name = ""
+        dept_doc = get_department_by_id(str(user_dept)) if user_dept else None
+        if dept_doc:
+            dept_name = _as_text(dept_doc.get("name", "")).strip()
+
+        lecturer_query["$or"] = [{"department_id": user_dept}]
+        if dept_name:
+            lecturer_query["$or"].append({
+                "department": {
+                    "$regex": f"^{re.escape(dept_name)}$",
+                    "$options": "i",
+                },
+            })
 
     for usr in users_col.find(lecturer_query, {"department": 1}):
         dept_key = _as_text(usr.get("department"))
@@ -1854,7 +1867,6 @@ def monthly_attendance_trend_api(user):
             course_ids.append(str(c["_id"]))
 
         if not course_ids:
-            # No courses for this department → return all-zero trend
             def _ms(dt): return datetime(dt.year, dt.month, 1)
             def _sm(dt, d):
                 y = dt.year + ((dt.month - 1 + d) // 12)
@@ -1864,7 +1876,7 @@ def monthly_attendance_trend_api(user):
             sm = _sm(_ms(now), -5)
             return jsonify([
                 {"key": f"{_sm(sm,i).year}-{_sm(sm,i).month:02d}",
-                 "label": _sm(sm, i).strftime("%b"), "total": 0}
+                 "label": _sm(sm, i).strftime("%b"), "total": 0, "sessions": 0, "students": 0}
                 for i in range(6)
             ])
 
@@ -1877,7 +1889,6 @@ def monthly_attendance_trend_api(user):
             paper_ids.append(str(p["_id"]))
 
         if not paper_ids:
-            # No papers → zero trend
             def _ms(dt): return datetime(dt.year, dt.month, 1)
             def _sm(dt, d):
                 y = dt.year + ((dt.month - 1 + d) // 12)
@@ -1887,7 +1898,7 @@ def monthly_attendance_trend_api(user):
             sm = _sm(_ms(now), -5)
             return jsonify([
                 {"key": f"{_sm(sm,i).year}-{_sm(sm,i).month:02d}",
-                 "label": _sm(sm, i).strftime("%b"), "total": 0}
+                 "label": _sm(sm, i).strftime("%b"), "total": 0, "sessions": 0, "students": 0}
                 for i in range(6)
             ])
 
@@ -1907,31 +1918,57 @@ def monthly_attendance_trend_api(user):
 
     query["timestamp"] = {"$gte": start_month}
 
-    docs = attendance_col.find(query, {"timestamp": 1})
-    count_map = {}
-    for doc in docs:
-        ts = doc.get("timestamp")
-        if isinstance(ts, str):
-            try:
-                ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            except Exception:
-                continue
-        if not isinstance(ts, datetime):
-            continue
-        key = f"{ts.year}-{ts.month:02d}"
-        count_map[key] = count_map.get(key, 0) + 1
+    # ── Attendance logs: total records + unique students per month ──
+    att_pipeline = [
+        {"$match": query},
+        {"$group": {
+            "_id":      {"year": {"$year": "$timestamp"}, "month": {"$month": "$timestamp"}},
+            "total":    {"$sum": 1},
+            "students": {"$addToSet": "$user_id"},
+        }},
+    ]
+    att_map = {}
+    for row in attendance_col.aggregate(att_pipeline):
+        g = row["_id"]
+        key = f"{g['year']}-{g['month']:02d}"
+        att_map[key] = {
+            "total":    row["total"],
+            "students": len([u for u in row["students"] if u is not None]),
+        }
+
+    # ── Committed sessions: unique sessions held per month ──
+    sessions_col = get_collection("attendance", "attendance_sessions")
+    sess_query = {"committed_at": {"$gte": start_month}}
+    if "paper_id" in query:          # scoped to dept papers
+        sess_query["paper_id"] = query["paper_id"]
+    sess_pipeline = [
+        {"$match": sess_query},
+        {"$group": {
+            "_id": {"year": {"$year": "$committed_at"}, "month": {"$month": "$committed_at"}},
+            "sessions": {"$sum": 1},
+        }},
+    ]
+    sess_map = {}
+    for row in sessions_col.aggregate(sess_pipeline):
+        g = row["_id"]
+        key = f"{g['year']}-{g['month']:02d}"
+        sess_map[key] = row["sessions"]
 
     points = []
     for i in range(6):
         month_dt = _shift_month(start_month, i)
         key = f"{month_dt.year}-{month_dt.month:02d}"
+        a = att_map.get(key, {})
         points.append({
-            "key": key,
-            "label": month_dt.strftime("%b"),
-            "total": count_map.get(key, 0),
+            "key":      key,
+            "label":    month_dt.strftime("%b"),
+            "total":    a.get("total", 0),
+            "sessions": sess_map.get(key, 0),
+            "students": a.get("students", 0),
         })
 
     return jsonify(points)
+
 
 
 @admin_bp.route("/attendance/send-shortage-alerts", methods=["POST"])

@@ -4,7 +4,9 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../hooks/useAuth';
 import { useTheme } from '../../context/ThemeContext';
 import api from '../../api/axios';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion';
+import Cropper from 'react-easy-crop';
+import { getCroppedImg } from '../../utils/cropImage';
 import {
   HiOutlineBell,
   HiOutlineSun,
@@ -18,6 +20,8 @@ import {
   HiOutlineX,
   HiOutlineEye,
   HiOutlineEyeOff,
+  HiOutlineRefresh,
+  HiOutlineTrash,
 } from 'react-icons/hi';
 
 function getInitials(name = '') {
@@ -60,13 +64,39 @@ function ProfileModal({ user, onClose, onUploaded }) {
   const [previewUrl, setPreviewUrl] = useState('');
   const [uploading, setUploading] = useState(false);
 
+  const [imageToCrop, setImageToCrop] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
+      if (imageToCrop) URL.revokeObjectURL(imageToCrop);
     };
-  }, [previewUrl]);
+  }, [previewUrl, imageToCrop]);
 
   const currentPreview = previewUrl || user?.profile_picture_url || '';
+
+  const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  }, []);
+
+  const confirmCrop = async () => {
+    try {
+      const croppedImageBlob = await getCroppedImg(imageToCrop, croppedAreaPixels);
+      const file = new File([croppedImageBlob], "profile.jpg", { type: "image/jpeg" });
+      setSelectedFile(file);
+      
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const nextPreview = URL.createObjectURL(croppedImageBlob);
+      setPreviewUrl(nextPreview);
+      
+      setImageToCrop(null);
+    } catch (e) {
+      toast.error('Failed to crop image');
+    }
+  };
 
   const onFileChange = (event) => {
     const file = event.target.files?.[0];
@@ -76,10 +106,14 @@ function ProfileModal({ user, onClose, onUploaded }) {
       return;
     }
 
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    if (imageToCrop) URL.revokeObjectURL(imageToCrop);
     const nextPreview = URL.createObjectURL(file);
-    setSelectedFile(file);
-    setPreviewUrl(nextPreview);
+    setImageToCrop(nextPreview);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    
+    // Clear input value so selecting the same file again triggers onChange
+    event.target.value = '';
   };
 
   const onUpload = async () => {
@@ -137,44 +171,111 @@ function ProfileModal({ user, onClose, onUploaded }) {
           </button>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-          {currentPreview ? (
-            <img
-              src={currentPreview}
-              alt="Profile preview"
-              style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border-glass)' }}
-            />
-          ) : (
-            <ProfilePicture user={user} size={72} />
-          )}
+        {imageToCrop ? (
           <div>
-            <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>{user?.name || 'User'}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{user?.email || ''}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-              {(user?.role || '').replace('_', ' ').toUpperCase()}
+            <div style={{ position: 'relative', width: '100%', height: 280, background: 'var(--bg-secondary)', borderRadius: 12, overflow: 'hidden' }}>
+              <Cropper
+                image={imageToCrop}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                cropShape="round"
+                onCropChange={setCrop}
+                onCropComplete={onCropComplete}
+                onZoomChange={setZoom}
+                showGrid={false}
+              />
+            </div>
+            <div style={{ padding: '16px 0 0', display: 'flex', gap: 12, alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Zoom</span>
+                <input
+                  type="range"
+                  value={zoom}
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  aria-labelledby="Zoom"
+                  onChange={(e) => setZoom(e.target.value)}
+                  style={{ flex: 1, accentColor: 'var(--accent-purple)' }}
+                />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+              <button type="button" className="btn-secondary" onClick={() => setImageToCrop(null)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={confirmCrop}>
+                Apply Crop
+              </button>
             </div>
           </div>
-        </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+              {currentPreview ? (
+                <img
+                  src={currentPreview}
+                  alt="Profile preview"
+                  style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border-glass)' }}
+                />
+              ) : (
+                <ProfilePicture user={user} size={72} />
+              )}
+              <div>
+                <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>{user?.name || 'User'}</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{user?.email || ''}</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {(user?.role || '').replace('_', ' ').toUpperCase()}
+                </div>
+              </div>
+            </div>
 
-        <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
-          Upload Profile Picture
-        </label>
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          onChange={onFileChange}
-          className="input-field"
-          style={{ marginBottom: 16, padding: '8px 10px' }}
-        />
+            <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
+              Upload Profile Picture
+            </label>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={onFileChange}
+              className="input-field"
+              style={{ marginBottom: 16, padding: '8px 10px' }}
+            />
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn-primary" onClick={onUpload} disabled={!selectedFile || uploading}>
-            {uploading ? 'Uploading...' : 'Save Photo'}
-          </button>
-        </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {user?.profile_picture_url ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={async () => {
+                    if (uploading) return;
+                    setUploading(true);
+                    try {
+                      await api.delete('/auth/profile-picture');
+                      await onUploaded();
+                      toast.success('Profile picture removed');
+                      onClose();
+                    } catch (err) {
+                      toast.error(err.response?.data?.error || 'Failed to remove picture');
+                    } finally {
+                      setUploading(false);
+                    }
+                  }}
+                  style={{ color: 'var(--accent-red)', borderColor: 'var(--accent-red)' }}
+                  disabled={uploading}
+                >
+                  Remove Photo
+                </button>
+              ) : <div />}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="button" className="btn-secondary" onClick={onClose}>
+                  Cancel
+                </button>
+                <button type="button" className="btn-primary" onClick={onUpload} disabled={!selectedFile || uploading}>
+                  {uploading ? 'Uploading...' : 'Save Photo'}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -380,6 +481,116 @@ function formatNotificationTime(value) {
   });
 }
 
+function NotificationItem({ item, t, actionId, onOpen, onClear }) {
+  const unread = !item.is_read;
+  const x = useMotionValue(0);
+  const bgOpacity = useTransform(x, [0, -20], [0, 1]);
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 1, height: 'auto' }}
+      exit={{ opacity: 0, height: 0, scale: 0.9, marginBottom: 0, overflow: 'hidden' }}
+      transition={{ duration: 0.2 }}
+      style={{ position: 'relative', marginBottom: 0 }}
+    >
+      <motion.div style={{
+        position: 'absolute',
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: '50%',
+        background: t.errorBg,
+        borderRadius: 18,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        paddingRight: 24,
+        color: t.errorColor,
+        zIndex: 0,
+        opacity: bgOpacity,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.8rem' }}>
+          <span>Clear</span>
+          <HiOutlineTrash size={18} />
+        </div>
+      </motion.div>
+      
+      <motion.button
+        type="button"
+        onClick={() => onOpen(item)}
+        disabled={actionId === item._id}
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={{ left: 0.6, right: 0 }}
+        style={{
+          x,
+          position: 'relative',
+          zIndex: 1,
+          textAlign: 'left',
+          width: '100%',
+          padding: 16,
+          borderRadius: 18,
+          border: unread ? `1px solid ${t.unreadBorder}` : `1px solid ${t.readBorder}`,
+          background: unread ? t.unreadBg : t.readBg,
+          boxShadow: unread ? t.unreadShadow : 'none',
+          color: 'inherit',
+          cursor: 'pointer',
+          transition: 'border-color 180ms ease, background 180ms ease',
+          opacity: actionId === item._id ? 0.7 : 1,
+        }}
+        onDragEnd={(e, { offset, velocity }) => {
+          if (offset.x < -80 || velocity.x < -400) {
+            onClear(item);
+          }
+        }}
+        whileDrag={{ scale: 0.98, cursor: 'grabbing' }}
+      >
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <div style={{
+            width: 12,
+            height: 12,
+            marginTop: 6,
+            borderRadius: 999,
+            background: unread ? 'linear-gradient(135deg, #06b6d4, #10b981)' : t.dotRead,
+            boxShadow: unread ? '0 0 0 4px rgba(6,182,212,0.08)' : 'none',
+            flexShrink: 0,
+          }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+              <h4 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 800, color: t.itemTitle }}>{item.title}</h4>
+              <span style={{ color: t.itemTime, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                {formatNotificationTime(item.created_at)}
+              </span>
+            </div>
+            <p style={{ margin: '8px 0 10px', color: t.itemBody, fontSize: '0.84rem', lineHeight: 1.55 }}>
+              {item.body}
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{
+                padding: '4px 8px',
+                borderRadius: 999,
+                background: item.category === 'security' ? 'rgba(239,68,68,0.12)' : item.category === 'profile' ? 'rgba(139,92,246,0.12)' : 'rgba(6,182,212,0.12)',
+                color: item.category === 'security' ? t.catSecurity : item.category === 'profile' ? t.catProfile : t.catDefault,
+                fontSize: '0.7rem',
+                fontWeight: 700,
+                textTransform: 'capitalize',
+              }}>
+                {item.category || 'system'}
+              </span>
+              {item.action_url ? (
+                <span style={{ color: t.actionLink, fontSize: '0.72rem', fontWeight: 700 }}>
+                  Open related page
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </motion.button>
+    </motion.div>
+  );
+}
+
 function NotificationInboxModal({
   isOpen,
   onClose,
@@ -392,6 +603,7 @@ function NotificationInboxModal({
   onRefresh,
   onMarkAllRead,
   onOpenNotification,
+  onClearNotification,
   isDark = true,
 }) {
   const t = {
@@ -546,7 +758,20 @@ function NotificationInboxModal({
                 </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" className="btn-secondary" onClick={onRefresh} disabled={loading || refreshing}>
+                  <button 
+                    type="button" 
+                    className="btn-secondary" 
+                    onClick={onRefresh} 
+                    disabled={loading || refreshing}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <motion.div
+                      animate={{ rotate: (loading || refreshing) ? 360 : 0 }}
+                      transition={{ repeat: (loading || refreshing) ? Infinity : 0, duration: 1, ease: 'linear' }}
+                      style={{ display: 'flex', alignItems: 'center' }}
+                    >
+                      <HiOutlineRefresh size={16} />
+                    </motion.div>
                     {loading || refreshing ? 'Refreshing...' : 'Refresh'}
                   </button>
                   <button type="button" className="btn-primary" onClick={onMarkAllRead} disabled={loading || refreshing || unreadCount === 0}>
@@ -594,71 +819,18 @@ function NotificationInboxModal({
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: 12 }}>
-                  {items.map((item) => {
-                    const unread = !item.is_read;
-                    return (
-                      <button
+                  <AnimatePresence initial={false}>
+                    {items.map((item) => (
+                      <NotificationItem
                         key={item._id}
-                        type="button"
-                        onClick={() => onOpenNotification(item)}
-                        disabled={actionId === item._id}
-                        style={{
-                          textAlign: 'left',
-                          width: '100%',
-                          padding: 16,
-                          borderRadius: 18,
-                          border: unread ? `1px solid ${t.unreadBorder}` : `1px solid ${t.readBorder}`,
-                          background: unread ? t.unreadBg : t.readBg,
-                          boxShadow: unread ? t.unreadShadow : 'none',
-                          color: 'inherit',
-                          cursor: 'pointer',
-                          transition: 'transform 180ms ease, border-color 180ms ease, background 180ms ease',
-                          opacity: actionId === item._id ? 0.7 : 1,
-                        }}
-                      >
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                          <div style={{
-                            width: 12,
-                            height: 12,
-                            marginTop: 6,
-                            borderRadius: 999,
-                            background: unread ? 'linear-gradient(135deg, #06b6d4, #10b981)' : t.dotRead,
-                            boxShadow: unread ? '0 0 0 4px rgba(6,182,212,0.08)' : 'none',
-                            flexShrink: 0,
-                          }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-                              <h4 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 800, color: t.itemTitle }}>{item.title}</h4>
-                              <span style={{ color: t.itemTime, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
-                                {formatNotificationTime(item.created_at)}
-                              </span>
-                            </div>
-                            <p style={{ margin: '8px 0 10px', color: t.itemBody, fontSize: '0.84rem', lineHeight: 1.55 }}>
-                              {item.body}
-                            </p>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              <span style={{
-                                padding: '4px 8px',
-                                borderRadius: 999,
-                                background: item.category === 'security' ? 'rgba(239,68,68,0.12)' : item.category === 'profile' ? 'rgba(139,92,246,0.12)' : 'rgba(6,182,212,0.12)',
-                                color: item.category === 'security' ? t.catSecurity : item.category === 'profile' ? t.catProfile : t.catDefault,
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                textTransform: 'capitalize',
-                              }}>
-                                {item.category || 'system'}
-                              </span>
-                              {item.action_url ? (
-                                <span style={{ color: t.actionLink, fontSize: '0.72rem', fontWeight: 700 }}>
-                                  Open related page
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
+                        item={item}
+                        t={t}
+                        actionId={actionId}
+                        onOpen={onOpenNotification}
+                        onClear={onClearNotification}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </div>
               )}
             </div>
@@ -740,6 +912,27 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
       setNotificationRefreshing(false);
     }
   }, [notificationRefreshing]);
+
+  const clearNotification = useCallback(async (notification) => {
+    if (!notification?._id || notificationActionId) return;
+    setNotificationActionId(notification._id);
+    
+    // Optimistic UI update
+    setNotificationItems((prev) => prev.filter((item) => item._id !== notification._id));
+    if (!notification.is_read) {
+      setNotificationUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
+    try {
+      await api.delete(`/notifications/${notification._id}`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to clear notification');
+      // Revert optimistic update by reloading
+      loadNotifications({ silent: true });
+    } finally {
+      setNotificationActionId('');
+    }
+  }, [notificationActionId, loadNotifications]);
 
   const menuItems = useMemo(
     () => [
@@ -996,6 +1189,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
         onRefresh={() => loadNotifications()}
         onMarkAllRead={markAllNotificationsRead}
         onOpenNotification={markNotificationRead}
+        onClearNotification={clearNotification}
         isDark={theme === 'dark'}
       />
 

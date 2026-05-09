@@ -25,6 +25,8 @@ import CredentialsModal from './lecturers/CredentialsModal';
 import ExcelImportModal from './lecturers/ExcelImportModal';
 import LecturerFaceEnrollmentModal from '../../components/admin/LecturerFaceEnrollmentModal';
 import LecturerFaceSearchModal from '../../components/admin/LecturerFaceSearchModal';
+import { useTraining } from '../../context/TrainingContext';
+import { HiOutlineSparkles } from 'react-icons/hi';
 
 export default function ManageLecturers() {
   const ctx = useLecturerData();
@@ -33,6 +35,9 @@ export default function ManageLecturers() {
   const [deleteLecturer, setDeleteLecturer] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
   const [showFaceSearch, setShowFaceSearch] = useState(false);
+
+  const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
+  const { startTraining } = useTraining();
 
   // ── Action handlers (thin wrappers that call API + update hook state) ──
 
@@ -124,6 +129,62 @@ export default function ManageLecturers() {
     setShowFaceEnroll(false);
     setEnrollingLecturer(null);
     ctx.fetchLecturers(ctx.page);
+  };
+
+  const handleTrainFace = (lecturer) => {
+    const lid = lecturer._id;
+    if (!lid) return;
+    setConfirmAction({
+      title: 'Train Face',
+      message: `Train face embeddings from dataset for ${lecturer.name}?`,
+      confirmLabel: 'Train',
+      onConfirm: async () => {
+        try {
+          const res = await api.post(`/admin/lecturers/${lid}/train-face`, { async: true });
+          if (res.status === 202 || res.data?.job_id) {
+            startTraining(res, 1);
+            toast.success('Face training started');
+            return;
+          }
+          const trained = Number(res.data?.trained_embeddings || 0);
+          const skipped = Number(res.data?.skipped_images || 0);
+          toast.success(`Training done. Embeddings: ${trained}, skipped images: ${skipped}`);
+          ctx.fetchLecturers(ctx.page);
+        } catch (err) {
+          if (err.response?.status === 404) toast.error('Train Face endpoint not active. Restart backend server once and retry.');
+          else if (err.response?.status === 400) toast.error(err.response?.data?.error || 'Dataset images missing. Please run Enroll Face first.');
+          else toast.error(err.response?.data?.error || 'Failed to train face from dataset');
+        }
+      },
+    });
+  };
+
+  const handleRebuildAllFaces = () => {
+    setConfirmAction({
+      title: 'Rebuild All Lecturer Faces',
+      message: 'Rebuild face embeddings for every lecturer from their dataset folders? This may take a while.',
+      confirmLabel: 'Rebuild All',
+      onConfirm: async () => {
+        try {
+          setRebuildingAllFaces(true);
+          const res = await api.post('/admin/lecturers/train-face/rebuild-all', { async: true });
+          if (res.status === 202 || res.data?.job_id) {
+            startTraining(res, Number(res.data?.requested_count || 0));
+            toast.success(`Rebuild queued. Job: ${res.data?.job_id}`);
+            return;
+          }
+          const success = Number(res.data?.success_count || 0);
+          const failed = Number(res.data?.failure_count || 0);
+          const totalEmbeddings = Number(res.data?.total_trained_embeddings || 0);
+          toast.success(`Rebuild complete. Success: ${success}, Failed: ${failed}, Embeddings: ${totalEmbeddings}`);
+          ctx.fetchLecturers(ctx.page);
+        } catch (err) {
+          toast.error(err.response?.data?.error || 'Failed to rebuild all face embeddings');
+        } finally {
+          setRebuildingAllFaces(false);
+        }
+      },
+    });
   };
 
   const openAssignModal = async (lecturer) => {
@@ -226,6 +287,7 @@ export default function ManageLecturers() {
 
   return (
     <div className="admin-page">
+
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div className="lecturers-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
         <div>
@@ -238,6 +300,9 @@ export default function ManageLecturers() {
           </div>
         </div>
         <div className="lecturers-toolbar-actions-primary" style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" onClick={handleRebuildAllFaces} disabled={rebuildingAllFaces}>
+            <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
+          </button>
           <button className="btn-secondary" title="Find lecturer by face" onClick={() => setShowFaceSearch(true)}><HiOutlineCamera size={16} /> Find Face</button>
           <button className="btn-secondary" title="Export all filtered lecturers to Excel" onClick={handleExportLecturers} disabled={ctx.totalLecturers === 0 || ctx.exportingLecturers}>
             <HiOutlineDownload size={16} /> {ctx.exportingLecturers ? 'Exporting...' : `Export (${ctx.totalLecturers})`}
@@ -300,6 +365,7 @@ export default function ManageLecturers() {
             onResetPassword={handleResetPassword}
             onDelete={handleDeleteClick}
             onEnrollFace={handleEnrollFace}
+            onTrainFace={handleTrainFace}
           />
         )}
       </div>

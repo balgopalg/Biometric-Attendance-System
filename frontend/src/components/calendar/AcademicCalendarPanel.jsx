@@ -91,16 +91,6 @@ function formatLocalTime(date) {
   }).format(date);
 }
 
-function describeSlot(slot) {
-  const parts = [];
-  if (slot?.paper_code) parts.push(slot.paper_code);
-  if (slot?.paper_name) parts.push(slot.paper_name);
-  if (slot?.lecturer_name) parts.push(slot.lecturer_name);
-  if (slot?.location) parts.push(slot.location);
-  return parts.filter(Boolean).join(' · ') || 'No classes';
-}
-
-
 function getMonthDays(year, month) {
   const firstOfMonth = new Date(year, month, 1, 12, 0, 0, 0);
   const nextMonth = new Date(year, month + 1, 1, 12, 0, 0, 0);
@@ -200,6 +190,8 @@ function getUpcomingSlots(slots, now) {
   return upcoming.slice(0, 3);
 }
 
+const TODAY_KEY = formatDateKey(new Date());
+
 function CalendarMonth({ year, month, calendarLookup, slots, onSelectDate, selectedDateKey, showHeader = true, todosStore = {} }) {
   const cells = getMonthDays(year, month);
   const monthLabel = MONTH_NAMES[month];
@@ -241,56 +233,60 @@ function CalendarMonth({ year, month, calendarLookup, slots, onSelectDate, selec
                   ? `${weekdaySlots.length} classes scheduled`
                   : 'No classes scheduled';
 
+          const isToday = key === TODAY_KEY;
           return (
             <button
               key={key}
               type="button"
               title={tooltip}
               onClick={() => onSelectDate(date)}
-              className="ac-day-cell"
+              className={`ac-day-cell${isToday ? ' ac-day-today' : ''}`}
               style={{
                 position: 'relative',
                 aspectRatio: '1 / 1',
                 borderRadius: 10,
                 border: isSelected
-                  ? '1px solid var(--accent-cyan)'
-                  : holiday || isSunday
-                    ? '1px solid var(--calendar-holiday-border)'
-                    : optionalHoliday
-                      ? '1px solid var(--calendar-optional-border)'
-                      : hasSlots
-                        ? '1px solid rgba(34, 211, 238, 0.18)'
-                        : '1px solid var(--calendar-day-border-default)',
+                  ? '2px solid var(--accent-cyan)'
+                  : isToday
+                    ? '2px solid var(--accent-cyan)'
+                    : holiday || isSunday
+                      ? '1px solid var(--calendar-holiday-border)'
+                      : optionalHoliday
+                        ? '1px solid var(--calendar-optional-border)'
+                        : hasSlots
+                          ? '1px solid rgba(34, 211, 238, 0.18)'
+                          : '1px solid var(--calendar-day-border-default)',
                 background: isSelected
-                  ? 'rgba(34, 211, 238, 0.14)'
-                  : holiday || isSunday
-                    ? 'var(--calendar-holiday-bg)'
-                    : optionalHoliday
-                      ? 'var(--calendar-optional-bg)'
-                      : hasSlots
-                        ? 'rgba(34, 211, 238, 0.08)'
-                        : 'var(--calendar-day-default-bg)',
+                  ? 'rgba(34, 211, 238, 0.18)'
+                  : isToday
+                    ? 'rgba(34, 211, 238, 0.12)'
+                    : holiday || isSunday
+                      ? 'var(--calendar-holiday-bg)'
+                      : optionalHoliday
+                        ? 'var(--calendar-optional-bg)'
+                        : hasSlots
+                          ? 'rgba(34, 211, 238, 0.06)'
+                          : 'var(--calendar-day-default-bg)',
                 color: holiday || isSunday
                   ? 'var(--calendar-holiday-text)'
                   : optionalHoliday
                     ? 'var(--calendar-optional-text)'
-                    : 'var(--text-primary)',
+                    : isToday
+                      ? 'var(--accent-cyan)'
+                      : 'var(--text-primary)',
                 padding: 6,
                 display: 'flex',
+                flexDirection: 'column',
                 justifyContent: 'center',
                 alignItems: 'center',
                 textAlign: 'center',
                 cursor: 'pointer',
-                transition: 'transform 180ms ease, border-color 180ms ease, background 180ms ease',
               }}
             >
-              <span style={{ fontSize: '0.88rem', fontWeight: 800 }}>{date.getDate()}</span>
-              {hasPendingTodos && (
-                <div style={{ position: 'absolute', bottom: 4, right: 4, width: 6, height: 6, borderRadius: '50%', background: '#fbbf24' }} />
-              )}
-              {allTodosCompleted && (
-                <HiOutlineCheck style={{ position: 'absolute', bottom: 2, right: 2, color: '#10b981' }} size={12} strokeWidth={3} />
-              )}
+              <span style={{ fontSize: '0.82rem', fontWeight: isToday ? 900 : 700, lineHeight: 1 }}>{date.getDate()}</span>
+              {isToday && <span style={{ fontSize: '0.42rem', fontWeight: 700, letterSpacing: '0.04em', color: 'var(--accent-cyan)', lineHeight: 1, marginTop: 2 }}>TODAY</span>}
+              {hasPendingTodos && <div style={{ position: 'absolute', bottom: 3, right: 3, width: 5, height: 5, borderRadius: '50%', background: '#fbbf24' }} />}
+              {allTodosCompleted && <HiOutlineCheck style={{ position: 'absolute', bottom: 2, right: 2, color: '#10b981' }} size={10} strokeWidth={3} />}
             </button>
           );
         })}
@@ -903,37 +899,44 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
         </div>
       </div>
 
-      <div className="ac-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+      <div className="ac-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
         {summaryCards.map((item) => (
-          <div key={item.label} style={{ padding: 12, borderRadius: 14, border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{item.label}</p>
-              <item.icon size={16} style={{ color: 'var(--accent-cyan)' }} />
+          <div key={item.label} className="ac-stat-pill">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <p style={{ fontSize: '0.62rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)' }}>{item.label}</p>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(34,211,238,0.08)', display: 'grid', placeItems: 'center' }}>
+                <item.icon size={15} style={{ color: 'var(--accent-cyan)' }} />
+              </div>
             </div>
-            <p style={{ fontSize: '1rem', fontWeight: 800 }}>{item.value}</p>
+            <p style={{ fontSize: '1.05rem', fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{item.value}</p>
           </div>
         ))}
       </div>
 
-      <div className="ac-side-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 14 }}>
+      <div className="ac-side-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, marginBottom: 16 }}>
         {canViewSchedules ? (
           <div className="glass-card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <HiOutlineClock size={18} style={{ color: 'var(--accent-emerald)' }} />
-              <h4 style={{ fontSize: '0.92rem', fontWeight: 800 }}>Upcoming classes</h4>
+              <div style={{ width: 30, height: 30, borderRadius: 9, background: 'rgba(16,185,129,0.1)', display: 'grid', placeItems: 'center' }}>
+                <HiOutlineClock size={16} style={{ color: 'var(--accent-emerald)' }} />
+              </div>
+              <h4 style={{ fontSize: '0.92rem', fontWeight: 800 }}>Upcoming Classes</h4>
             </div>
             {upcomingSlots.filter(s => s.paper_name && s.paper_name.toLowerCase() !== 'no classes').length === 0 ? (
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No upcoming classes found for the current weekly schedule.</p>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '8px 0' }}>No upcoming classes in your schedule.</p>
             ) : (
-              <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {upcomingSlots.filter(s => s.paper_name && s.paper_name.toLowerCase() !== 'no classes').map((slot, index) => (
-                  <div key={`${slot.day_label}-${slot.start_time}-${slot.paper_id || index}`} style={{ padding: 12, borderRadius: 14, background: 'rgba(34, 211, 238, 0.06)', border: '1px solid rgba(34, 211, 238, 0.12)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                      <span className="badge badge-info">{slot.day_label}</span>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 800 }}>{slot.start_time} - {slot.end_time}</span>
+                  <div key={`${slot.day_label}-${slot.start_time}-${slot.paper_id || index}`} className={`ac-upcoming-chip${slot.is_today ? ' is-today' : ''}`}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className="badge badge-info" style={{ fontSize: '0.62rem' }}>{slot.day_label}</span>
+                        {slot.is_today && <span className="badge badge-success" style={{ fontSize: '0.58rem' }}>Today</span>}
+                      </div>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-cyan)', fontVariantNumeric: 'tabular-nums' }}>{slot.start_time} – {slot.end_time}</span>
                     </div>
-                    <p style={{ fontSize: '0.86rem', fontWeight: 700 }}>{slot.paper_code || 'Paper'} - {slot.paper_name}</p>
-                    <p style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: 4 }}>{describeSlot(slot)}</p>
+                    <p style={{ fontSize: '0.84rem', fontWeight: 700, marginBottom: 2 }}>{slot.paper_code} · {slot.paper_name}</p>
+                    {slot.location && <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>📍 {slot.location}</p>}
                   </div>
                 ))}
               </div>
@@ -976,18 +979,17 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
           </div>
         </div>
 
-        <div className="ac-board-metrics" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 10, marginBottom: 12 }}>
-          <div>
-            <p style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>Selected Month</p>
-            <p style={{ fontWeight: 800, fontSize: '0.95rem' }}>{selectedMonthLabel}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>Holiday Days</p>
-            <p style={{ fontWeight: 800, fontSize: '0.95rem' }}>{monthEvents.reduce((sum, ev) => sum + Math.round((ev.endDate - ev.startDate) / 86400000) + 1, 0)}</p>
-          </div>
-          <div>
-            <p style={{ fontSize: '0.66rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>Year</p>
-            <p style={{ fontWeight: 800, fontSize: '0.95rem' }}>{year}</p>
+        <div className="ac-board-metrics" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14, padding: '10px 14px', borderRadius: 12, background: 'var(--bg-glass)', border: '1px solid var(--border-glass)' }}>
+          {[{ label: 'Month', value: selectedMonthLabel }, { label: 'Holiday Days', value: monthEvents.reduce((sum, ev) => sum + Math.round((ev.endDate - ev.startDate) / 86400000) + 1, 0) }, { label: 'Year', value: year }].map(({ label, value }) => (
+            <div key={label} style={{ paddingRight: 16, borderRight: '1px solid var(--border-glass)' }}>
+              <p style={{ fontSize: '0.6rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--text-muted)', marginBottom: 2 }}>{label}</p>
+              <p style={{ fontWeight: 800, fontSize: '0.95rem' }}>{value}</p>
+            </div>
+          ))}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, fontSize: '0.7rem', color: 'var(--text-muted)', alignItems: 'center', flexWrap: 'wrap' }}>
+            {[{ color: 'var(--calendar-holiday-text)', label: 'Holiday' }, { color: 'var(--calendar-optional-text)', label: 'Optional' }, { color: 'var(--accent-cyan)', label: 'Has Class' }].map(({ color, label }) => (
+              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span className="ac-legend-dot" style={{ background: color }} />{label}</span>
+            ))}
           </div>
         </div>
 
@@ -1005,25 +1007,22 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
           selectedDateKey={selectedDateKey}
         />
 
-        <div style={{ marginTop: 10, borderTop: '1px solid var(--border-glass)', paddingTop: 10 }}>
-          <h4 style={{ fontSize: '0.94rem', fontWeight: 800, marginBottom: 10 }}>Events in {selectedMonthLabel} {year}</h4>
+        <div style={{ marginTop: 12, borderTop: '1px solid var(--border-glass)', paddingTop: 12 }}>
+          <h4 style={{ fontSize: '0.88rem', fontWeight: 700, marginBottom: 10, color: 'var(--text-secondary)' }}>📅 Events in {selectedMonthLabel} {year}</h4>
           {monthEvents.length === 0 ? (
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No holidays published for this month.</p>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '8px 0' }}>No holidays published for this month.</p>
           ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {monthEvents.map((event, index) => (
-                <div key={`${event.label}-${index}`} className="ac-event-row" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 10, alignItems: 'center', borderBottom: '1px solid var(--border-glass)', paddingBottom: 7 }}>
-                  <p style={{ fontSize: '0.82rem', fontWeight: 700 }}>
-                    Date: {event.startDate.getDate()}
-                    {event.startDate.getTime() !== event.endDate.getTime() ? ` - ${event.endDate.getDate()}` : ''}
+                <div key={`${event.label}-${index}`} className="ac-event-row" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: event.type === 'optional' ? 'var(--calendar-optional-text)' : 'var(--calendar-holiday-text)', flexShrink: 0 }} />
+                  <p style={{ flex: 1, fontSize: '0.82rem', fontWeight: 600 }}>{event.label}</p>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {event.startDate.getDate()} {MONTH_NAMES[event.startDate.getMonth()].slice(0,3)}
+                    {event.startDate.getTime() !== event.endDate.getTime() ? ` – ${event.endDate.getDate()} ${MONTH_NAMES[event.endDate.getMonth()].slice(0,3)}` : ''}
                   </p>
-                  <p style={{ fontSize: '0.82rem', fontWeight: 600 }}>{event.label}</p>
-                  <span className="badge" style={{
-                    background: event.type === 'optional' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                    color: event.type === 'optional' ? '#f59e0b' : '#ef4444',
-                    border: `1px solid ${event.type === 'optional' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
-                  }}>
-                    {event.type === 'optional' ? 'Optional Holiday' : 'Regular Holiday'}
+                  <span className="badge" style={{ fontSize: '0.6rem', background: event.type === 'optional' ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)', color: event.type === 'optional' ? '#f59e0b' : '#ef4444', border: `1px solid ${event.type === 'optional' ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)'}` }}>
+                    {event.type === 'optional' ? 'Optional' : 'Holiday'}
                   </span>
                 </div>
               ))}

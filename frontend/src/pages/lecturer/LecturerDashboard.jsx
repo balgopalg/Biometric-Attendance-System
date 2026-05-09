@@ -151,29 +151,49 @@ export default function LecturerDashboard() {
   return (
     <div className="lecturer-page">
       <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome, <span className="gradient-text">Lecturer</span></h1>
+        <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome back, <span className="gradient-text">{user?.name?.split(' ')[0] || 'Lecturer'}</span> 👋</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Set your 4-digit PIN, then select a paper to start attendance.</p>
       </div>
 
       <div className="lecturer-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
         <StatsCard icon={HiOutlineBookOpen} label="Assigned Papers" value={papers.length} color="var(--accent-cyan)" />
-        <div className="glass-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Commit PIN Status</p>
-            <p style={{ fontSize: '1rem', fontWeight: 700, marginTop: 6 }}>{pinStatus.has_pin ? 'Configured' : 'Not Set'}</p>
+
+        {/* PIN Card */}
+        <div className="glass-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Commit PIN</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: pinStatus.has_pin ? 'var(--accent-emerald)' : 'var(--accent-rose)', display: 'inline-block' }} />
+                <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>{pinStatus.has_pin ? 'Configured' : 'Not Set'}</p>
+              </div>
+            </div>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--bg-glass)', display: 'grid', placeItems: 'center', color: 'var(--accent-purple)' }}>
+              <HiOutlineKey size={18} />
+            </div>
           </div>
-          <button className="btn-primary" style={{ marginTop: 12, justifyContent: 'center' }} onClick={() => setShowPinModal(true)}>
-            <HiOutlineKey size={16} /> Manage PIN
+          <button className="btn-primary" style={{ justifyContent: 'center', width: '100%' }} onClick={() => setShowPinModal(true)}>
+            <HiOutlineKey size={15} /> {pinStatus.has_pin ? 'Change PIN' : 'Set PIN'}
           </button>
         </div>
-        <div className="glass-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Face Enrollment Status</p>
-            <p style={{ fontSize: '1rem', fontWeight: 700, marginTop: 6 }}>{user?.has_face_enrolled ? 'Enrolled' : 'Not Enrolled'}</p>
+
+        {/* Face Enrollment Card */}
+        <div className="glass-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Face Enrollment</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: user?.has_face_enrolled ? 'var(--accent-emerald)' : 'var(--accent-amber)', display: 'inline-block' }} />
+                <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>{user?.has_face_enrolled ? 'Enrolled' : 'Not Enrolled'}</p>
+              </div>
+            </div>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: 'var(--bg-glass)', display: 'grid', placeItems: 'center', color: 'var(--accent-cyan)' }}>
+              <HiOutlineCamera size={18} />
+            </div>
           </div>
           {!user?.has_face_enrolled && (
-            <button className="btn-primary" style={{ marginTop: 12, justifyContent: 'center' }} onClick={() => setShowFaceEnrollModal(true)}>
-              <HiOutlineCamera size={16} /> Enroll Face
+            <button className="btn-primary" style={{ justifyContent: 'center', width: '100%' }} onClick={() => setShowFaceEnrollModal(true)}>
+              <HiOutlineCamera size={15} /> Enroll Face
             </button>
           )}
         </div>
@@ -186,45 +206,36 @@ export default function LecturerDashboard() {
             key={p._id}
             whileHover={{ y: -4 }}
             className="glass-card"
-            style={{ padding: 20, cursor: p.is_course_inactive ? 'not-allowed' : 'pointer' }}
-            onClick={() => {
-              if (p.is_course_inactive) return;
-              navigate(`/lecturer/session?paper_id=${p._id}`);
-            }}
+            style={{ padding: 20, cursor: p.is_course_inactive ? 'not-allowed' : 'pointer', display: 'flex', flexDirection: 'column', gap: 12 }}
+            onClick={() => { if (p.is_course_inactive) return; navigate(`/lecturer/session?paper_id=${p._id}`); }}
           >
             <SoftLockWrapper locked={p.is_course_inactive} title="Locked: course inactive">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <span className="badge badge-info" style={{ marginBottom: 8 }}>{p.code}</span>
-                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: 8 }}>{p.name}</h4>
-                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                  {formatCourseName(p.course_name || 'No Course', { isInactive: p.is_course_inactive, status: p.course_status })} · Session {p.enrolled_academic_session_label || p.enrolled_academic_session || p.academic_year || 'N/A'}
-                </p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                  Semester {p.semester || 'N/A'}
-                </p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                  {p.total_classes} classes held
-                </p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 2 }}>
-                  {p.total_enrolled_students || 0} total enrolled students
-                </p>
-                {p.is_course_inactive && (
-                  <p style={{ fontSize: '0.72rem', color: 'var(--accent-amber)', marginTop: 6 }}>
-                    Course inactive: attendance locked
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <span className="badge badge-info">{p.code}</span>
+                    {p.is_course_inactive && <span className="badge badge-warning" style={{ fontSize: '0.62rem' }}>Locked</span>}
+                  </div>
+                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 4 }}>{p.name}</h4>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 2 }}>
+                    {formatCourseName(p.course_name || 'No Course', { isInactive: p.is_course_inactive, status: p.course_status })}
                   </p>
-                )}
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Sem {p.semester || 'N/A'} · {p.enrolled_academic_session_label || p.academic_year || 'N/A'}</p>
+                </div>
+                <button className="btn-primary" style={{ padding: '8px 14px', fontSize: '0.75rem', flexShrink: 0, marginLeft: 8 }} disabled={p.is_course_inactive} onClick={(e) => { e.stopPropagation(); if (!p.is_course_inactive) navigate(`/lecturer/session?paper_id=${p._id}`); }}>
+                  <HiOutlineCamera size={14} /> {p.is_course_inactive ? 'Locked' : 'Start'}
+                </button>
               </div>
-              <button className="btn-primary" style={{ padding: '8px 14px', fontSize: '0.75rem' }} disabled={p.is_course_inactive}>
-                <HiOutlineCamera size={14} /> {p.is_course_inactive ? 'Locked' : 'Start'}
-              </button>
+              <div style={{ display: 'flex', gap: 16, fontSize: '0.75rem', color: 'var(--text-muted)', paddingTop: 8, borderTop: '1px solid var(--border-glass)' }}>
+                <span><b style={{ color: 'var(--text-primary)' }}>{p.total_classes || 0}</b> classes held</span>
+                <span><b style={{ color: 'var(--accent-cyan)' }}>{p.total_enrolled_students || 0}</b> enrolled</span>
               </div>
             </SoftLockWrapper>
           </motion.div>
         ))}
-        {papers.length === 0 ? (
+        {papers.length === 0 && (
           <StatePanel variant="empty" title="No papers assigned" description="Contact your administrator to assign at least one subject." compact />
-        ) : null}
+        )}
       </div>
 
       <Modal isOpen={showPinModal} onClose={() => setShowPinModal(false)} title="Manage 4-Digit PIN" width={460}>

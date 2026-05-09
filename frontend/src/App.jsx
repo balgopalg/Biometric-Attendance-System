@@ -5,6 +5,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import { ThemeProvider } from './context/ThemeContext';
+import { TrainingProvider } from './context/TrainingContext';
+import GlobalTrainingProgressPanel from './components/admin/TrainingProgressPanel';
 import { Toaster } from 'react-hot-toast';
 import StatePanel from './components/ui/StatePanel';
 
@@ -95,6 +97,8 @@ function GlobalAppLoader({ children }) {
       }}>
         {children}
       </div>
+      {/* Global training panel — persists across all page navigations */}
+      <GlobalTrainingProgressPanel />
     </>
   );
 }
@@ -206,6 +210,7 @@ export default function App() {
           }}
         />
         <AuthProvider>
+          <TrainingProvider>
           <LoadContext.Provider value={{ firstLoadDone, handleFirstLoad }}>
             <GlobalAppLoader>
               <Routes>
@@ -251,6 +256,7 @@ export default function App() {
               </Routes>
             </GlobalAppLoader>
           </LoadContext.Provider>
+          </TrainingProvider>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

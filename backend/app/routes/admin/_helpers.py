@@ -14,6 +14,7 @@ import re
 import random
 import secrets
 import os
+import shutil
 import time
 import csv
 from io import BytesIO, StringIO
@@ -790,6 +791,105 @@ def _rebuild_all_faces_job(actor_id, job_id=None):
     }
 
 
+def _rebuild_all_lecturer_faces_job(actor_id, job_id=None):
+    lecturers = get_users_by_role("lecturer")
+    if not lecturers:
+        return {"error": "No lecturers found"}
+
+    items = []
+    success_count = 0
+    failure_count = 0
+    total_trained_embeddings = 0
+
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(lecturers),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message=f"Training 0 of {len(lecturers)} faces",
+        )
+
+    for index, lec in enumerate(lecturers, start=1):
+        _raise_if_job_cancelled(job_id)
+        user_id = _as_text(lec.get("_id"))
+        if not user_id:
+            failure_count += 1
+            items.append({"user_id": None, "success": False, "error": "Missing user_id"})
+            if job_id:
+                _update_training_job_progress(
+                    job_id,
+                    processed_faces=index,
+                    trained_faces=success_count,
+                    failed_faces=failure_count,
+                    stage="training",
+                    message=f"Training {success_count} of {len(lecturers)} faces",
+                )
+            continue
+
+        try:
+            result = _train_embeddings_from_dataset_for_user(user_id)
+            success_count += 1
+            total_trained_embeddings += int(result["trained_embeddings"])
+            items.append(
+                {
+                    "user_id": user_id,
+                    "success": True,
+                    "trained_embeddings": result["trained_embeddings"],
+                    "skipped_images": result["skipped_images"],
+                    "dataset_dir": result["dataset_dir"],
+                }
+            )
+        except Exception as exc:
+            failure_count += 1
+            items.append({"user_id": user_id, "success": False, "error": str(exc)})
+
+        if job_id:
+            _update_training_job_progress(
+                job_id,
+                processed_faces=index,
+                trained_faces=success_count,
+                failed_faces=failure_count,
+                stage="training",
+                message=f"Training {success_count} of {len(lecturers)} faces",
+            )
+
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(lecturers),
+            processed_faces=len(lecturers),
+            trained_faces=success_count,
+            failed_faces=failure_count,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
+    log_action(
+        "REBUILD_ALL_LECTURER_FACE_EMBEDDINGS",
+        actor_id,
+        details=(
+            f"requested={len(lecturers)}, success={success_count}, failure={failure_count}, "
+            f"trained_embeddings={total_trained_embeddings}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
+        ),
+    )
+
+    return {
+        "message": "Lecturer face embeddings rebuilt",
+        "requested_count": len(lecturers),
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "total_trained_embeddings": total_trained_embeddings,
+        "items": items,
+        "trainer": trainer_result,
+    }
+
+
 def _execute_background_job(job):
     job_type = _as_text(job.get("job_type"))
     payload = job.get("payload") or {}
@@ -808,6 +908,10 @@ def _execute_background_job(job):
     if job_type == "rebuild_all_face_embeddings":
         actor_id = _as_text(payload.get("actor_id"))
         return _rebuild_all_faces_job(actor_id, job_id=job_id)
+
+    if job_type == "rebuild_all_lecturer_face_embeddings":
+        actor_id = _as_text(payload.get("actor_id"))
+        return _rebuild_all_lecturer_faces_job(actor_id, job_id=job_id)
 
     raise ValueError(f"Unsupported background job type: {job_type}")
 
@@ -1217,23 +1321,38 @@ def _legacy_safe_name(raw_value):
 
 def _resolve_dataset_dir_for_user(user_id):
     user_id_text = _as_text(user_id)
-    dataset_dir = os.path.join("dataset", user_id_text)
-    if os.path.isdir(dataset_dir):
-        return dataset_dir
-
-    # Lecturer-specific prefix
-    lec_dir = os.path.join("dataset", f"lec_{user_id_text}")
-    if os.path.isdir(lec_dir):
-        return lec_dir
-
-    # Backward compatibility for previously created name-based dataset folders.
-    student = find_user_by_id(user_id) or {}
-    legacy_name = _as_text(student.get("name"))
-    legacy_dataset_dir = os.path.join("dataset", _legacy_safe_name(legacy_name))
-    if os.path.isdir(legacy_dataset_dir):
-        return legacy_dataset_dir
-
-    return dataset_dir
+    user = _safe_find_user(user_id_text) or {}
+    role = _as_text(user.get("role", "student")).lower()
+    
+    if role == "lecturer":
+        target_dir = os.path.join("dataset", "lecturers", user_id_text)
+    else:
+        target_dir = os.path.join("dataset", "students", user_id_text)
+        
+    if os.path.isdir(target_dir):
+        return target_dir
+        
+    # Automatic migration: check for legacy directories and move them if they exist
+    legacy_dirs = [
+        os.path.join("dataset", user_id_text),
+        os.path.join("dataset", f"lec_{user_id_text}")
+    ]
+    
+    legacy_name = _as_text(user.get("name"))
+    if legacy_name:
+        legacy_dirs.append(os.path.join("dataset", _legacy_safe_name(legacy_name)))
+        
+    for l_dir in legacy_dirs:
+        if os.path.isdir(l_dir) and l_dir != target_dir:
+            try:
+                os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+                shutil.move(l_dir, target_dir)
+                return target_dir
+            except Exception as e:
+                current_app.logger.error(f"Failed to migrate dataset from {l_dir} to {target_dir}: {e}")
+                return l_dir # fallback to reading from old dir if move fails
+                
+    return target_dir
 
 
 def _train_embeddings_from_dataset_for_user(user_id):
