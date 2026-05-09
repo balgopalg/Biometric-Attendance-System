@@ -1,3 +1,5 @@
+import re
+
 from . import admin_bp
 from ._helpers import *
 
@@ -8,14 +10,34 @@ def list_departments(user):
     include_inactive = _as_text(request.args.get("include_inactive", "")).lower() in ("1", "true", "yes")
     depts = get_all_departments(include_inactive=include_inactive)
 
-    # Enrich with user counts
+    # Enrich with user counts. Support legacy records where users may only have a department name.
     users_col = get_collection("auth", "users")
     for dept in depts:
         dept["_id"] = str(dept["_id"])
         dept_oid = ObjectId(dept["_id"]) if dept["_id"] else None
-        dept["admin_count"] = users_col.count_documents({"role": "department_admin", "department_id": dept_oid}) if dept_oid else 0
-        dept["lecturer_count"] = users_col.count_documents({"role": "lecturer", "department_id": dept_oid}) if dept_oid else 0
-        dept["student_count"] = users_col.count_documents({"role": "student", "department_id": dept_oid}) if dept_oid else 0
+        dept_name = _as_text(dept.get("name", "")).strip()
+
+        def count_role(role):
+            query = {"role": role}
+            if dept_oid:
+                query["$or"] = [{"department_id": dept_oid}]
+                if dept_name:
+                    query["$or"].append({
+                        "department": {
+                            "$regex": f"^{re.escape(dept_name)}$",
+                            "$options": "i",
+                        },
+                    })
+            elif dept_name:
+                query["department"] = {
+                    "$regex": f"^{re.escape(dept_name)}$",
+                    "$options": "i",
+                }
+            return users_col.count_documents(query)
+
+        dept["admin_count"] = count_role("department_admin")
+        dept["lecturer_count"] = count_role("lecturer")
+        dept["student_count"] = count_role("student")
         dept["created_at"] = str(dept.get("created_at") or "")
         dept["updated_at"] = str(dept.get("updated_at") or "")
 
