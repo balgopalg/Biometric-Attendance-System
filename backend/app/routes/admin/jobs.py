@@ -144,6 +144,55 @@ def _requeue_dead_letter_job_by_id(job_id):
     return True
 
 
+def _enrich_dead_letter_rows(rows):
+    if not rows:
+        return rows
+
+    # Enrich rows with student info if user_id exists in payload
+    user_ids = []
+    for r in rows:
+        uid = (r.get("payload") or {}).get("user_id")
+        if uid:
+            user_ids.append(uid)
+
+    if not user_ids:
+        return rows
+
+    # Batch fetch users and profiles
+    users_col = get_collection("auth", "users")
+    profiles_col = get_collection("academic", "student_profiles")
+
+    # Resolve user names
+    user_map = {
+        str(u["_id"]): u.get("name")
+        for u in users_col.find(
+            {"_id": {"$in": [_to_oid(uid) for uid in user_ids if _to_oid(uid)]}}, {"name": 1}
+        )
+    }
+
+    # Resolve reg numbers
+    profile_map = {
+        str(p["user_id"]): p.get("reg_number")
+        for p in profiles_col.find(
+            {"user_id": {"$in": [str(uid) for uid in user_ids]}},
+            {"user_id": 1, "reg_number": 1},
+        )
+    }
+
+    for r in rows:
+        uid = str((r.get("payload") or {}).get("user_id") or "")
+        if uid in user_map:
+            r["student_name"] = user_map[uid]
+        if uid in profile_map:
+            r["reg_number"] = profile_map[uid]
+        elif not r.get("reg_number") and uid:
+            # Fallback if reg_number not in profile but uid looks like a reg number
+            # (some legacy codes use reg_number as user_id)
+            r["reg_number"] = uid
+
+    return rows
+
+
 def _fetch_dead_letter_rows(filters=None, include_pagination=True):
     filters = filters or {}
     q = _as_text(filters.get("q", "")).lower()
@@ -203,6 +252,8 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
         ).sort(sort_by, sort_order)
     )
 
+    rows = _enrich_dead_letter_rows(rows)
+
     if q:
         filtered = []
         for row in rows:
@@ -210,6 +261,8 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
                 q in _as_text(row.get("job_id")).lower()
                 or q in _as_text(row.get("job_type")).lower()
                 or q in _as_text(row.get("error")).lower()
+                or q in _as_text(row.get("student_name", "")).lower()
+                or q in _as_text(row.get("reg_number", "")).lower()
             ):
                 filtered.append(row)
         rows = filtered
@@ -420,12 +473,14 @@ def get_job_metrics(user):
                     "updated_at": 1,
                     "attempts": 1,
                     "max_attempts": 1,
+                    "payload": 1,
                 },
             )
             .sort("updated_at", -1)
             .limit(5)
         )
     )
+    recent_dead_letter_jobs = _enrich_dead_letter_rows(recent_dead_letter_jobs)
 
     return jsonify(
         {
