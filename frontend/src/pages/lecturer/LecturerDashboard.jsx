@@ -19,7 +19,7 @@ export default function LecturerDashboard() {
   const [papers, setPapers] = useState([]);
   const [pinStatus, setPinStatus] = useState({ has_pin: false });
   const [showPinModal, setShowPinModal] = useState(false);
-  const [pin, setPin] = useState('');
+  const [pin, setPin] = useState(['', '', '', '']);
   const [generatedPin, setGeneratedPin] = useState('');
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
@@ -75,20 +75,53 @@ export default function LecturerDashboard() {
   };
 
   const handleSetPin = async () => {
-    if (pin.length !== 4) {
+    const pinStr = pin.join('');
+    if (pinStr.length !== 4) {
       toast.error('PIN must be 4 digits');
       return;
     }
     try {
-      await api.put('/lecturer/pin', { pin });
+      await api.put('/lecturer/pin', { pin: pinStr });
       toast.success('PIN updated');
-      setPin('');
+      setPin(['', '', '', '']);
       setGeneratedPin('');
       fetchAll();
       setShowPinModal(false);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to update PIN');
     }
+  };
+
+  const handlePinChange = (val, index) => {
+    const digit = val.replace(/\D/g, '').slice(-1);
+    const newPin = [...pin];
+    newPin[index] = digit;
+    setPin(newPin);
+
+    if (digit && index < 3) {
+      document.getElementById(`manage-pin-${index + 1}`)?.focus();
+    }
+  };
+
+  const handlePinKeyDown = (e, index) => {
+    if (e.key === 'Backspace' && !pin[index] && index > 0) {
+      document.getElementById(`manage-pin-${index - 1}`)?.focus();
+    }
+    if (e.key === 'Enter' && pin.join('').length === 4) {
+      handleSetPin();
+    }
+  };
+
+  const handlePinPaste = (e) => {
+    e.preventDefault();
+    const data = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 4);
+    const newPin = [...pin];
+    data.split('').forEach((char, i) => {
+      if (i < 4) newPin[i] = char;
+    });
+    setPin(newPin);
+    const focusIndex = Math.min(data.length, 3);
+    document.getElementById(`manage-pin-${focusIndex}`)?.focus();
   };
 
   if (loadingDashboard) {
@@ -206,16 +239,42 @@ export default function LecturerDashboard() {
           </div>
         )}
 
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Set PIN Manually</label>
-          <input
-            className="input-field"
-            type="password"
-            placeholder="Enter 4 digits"
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            style={{ textAlign: 'center', letterSpacing: '0.25em', fontSize: '1rem' }}
-          />
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: '0.74rem', fontWeight: 650, marginBottom: 10, display: 'block', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Set PIN Manually</label>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }} onPaste={handlePinPaste}>
+            {pin.map((digit, i) => (
+              <input
+                key={i}
+                id={`manage-pin-${i}`}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={digit}
+                onChange={(e) => handlePinChange(e.target.value, i)}
+                onKeyDown={(e) => handlePinKeyDown(e, i)}
+                style={{
+                  width: 50,
+                  height: 60,
+                  fontSize: '1.5rem',
+                  fontWeight: 700,
+                  textAlign: 'center',
+                  borderRadius: 'var(--radius-lg)',
+                  borderWidth: '2px',
+                  borderStyle: 'solid',
+                  borderTopColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
+                  borderRightColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
+                  borderBottomColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
+                  borderLeftColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
+                  background: 'var(--bg-primary, #f8fafc)',
+                  color: 'var(--text-main, #0f172a)',
+                  transition: 'all 0.2s ease',
+                  outline: 'none',
+                  boxShadow: digit ? '0 0 0 4px rgba(139, 92, 246, 0.15)' : '0 2px 4px rgba(0,0,0,0.02)'
+                }}
+                autoFocus={i === 0 && showPinModal}
+              />
+            ))}
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>

@@ -536,6 +536,12 @@ export default function AdminDashboard() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 4 }}>{job.job_type || 'unknown'}</p>
+                    {job.student_name && (
+                      <div style={{ marginBottom: 4 }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-main)' }}>{job.student_name}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 6 }}>({job.reg_number})</span>
+                      </div>
+                    )}
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all', marginBottom: 4 }}>{job.job_id}</p>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Attempts: {job.attempts || 0}/{job.max_attempts || 0}</p>
                   </div>

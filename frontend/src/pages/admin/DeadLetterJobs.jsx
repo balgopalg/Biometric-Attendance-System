@@ -387,6 +387,7 @@ export default function DeadLetterJobs() {
               <th>Updated At</th>
               <th>Job ID</th>
               <th>Type</th>
+              <th>Student</th>
               <th>Attempts</th>
               <th>Retry</th>
               <th>Error Detail</th>
@@ -404,6 +405,16 @@ export default function DeadLetterJobs() {
                 </td>
                 <td style={{ fontFamily: 'monospace', fontSize: '0.72rem' }}>{job.job_id}</td>
                 <td style={{ fontWeight: 600 }}>{job.job_type}</td>
+                <td style={{ fontSize: '0.8rem' }}>
+                  {job.student_name ? (
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{job.student_name}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{job.reg_number || '—'}</div>
+                    </div>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                  )}
+                </td>
                 <td>{job.attempts}/{job.max_attempts}</td>
                 <td>{job.retry_count}</td>
                 <td style={{ maxWidth: 300, fontSize: '0.74rem', color: 'var(--accent-rose)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -460,6 +471,15 @@ export default function DeadLetterJobs() {
               <span className="mobile-card-label">Updated</span>
               <span style={{ fontSize: '0.78rem' }}>{formatDateTimeIndia(job.updated_at, { dateStyle: 'short', timeStyle: 'short' })}</span>
             </div>
+            {job.student_name && (
+              <div className="mobile-card-row">
+                <span className="mobile-card-label">Student</span>
+                <span style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.8rem' }}>{job.student_name}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{job.reg_number}</div>
+                </span>
+              </div>
+            )}
             <div className="mobile-card-row">
               <span className="mobile-card-label">Attempts</span>
               <span style={{ fontSize: '0.78rem' }}>{job.attempts}/{job.max_attempts} (Retry: {job.retry_count})</span>
@@ -557,12 +577,14 @@ export default function DeadLetterJobs() {
       </Modal>
 
       <Modal isOpen={showDeleteSelectedConfirm} onClose={() => setShowDeleteSelectedConfirm(false)} title="Confirm Bulk Deletion">
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <HiOutlineExclamationCircle size={48} style={{ color: 'var(--accent-rose)', marginBottom: 16, display: 'block', margin: '0 auto 16px' }} />
-          <p style={{ marginBottom: 20 }}>Are you sure you want to permanently delete <strong>{selected.length}</strong> selected failed jobs?</p>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-            <button className="btn-secondary" onClick={() => setShowDeleteSelectedConfirm(false)}>Cancel</button>
-            <button className="btn-danger" onClick={runDeleteSelected} disabled={bulkDeleting}>
+        <div style={{ padding: '24px 32px', textAlign: 'center' }}>
+          <HiOutlineExclamationCircle size={48} style={{ color: 'var(--accent-rose)', marginBottom: 20, display: 'block', margin: '0 auto 20px' }} />
+          <p style={{ marginBottom: 24, fontSize: '0.92rem', lineHeight: '1.5', color: 'var(--text-main)' }}>
+            Are you sure you want to permanently delete <strong>{selected.length}</strong> selected failed jobs?
+          </p>
+          <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+            <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowDeleteSelectedConfirm(false)}>Cancel</button>
+            <button className="btn-danger" style={{ flex: 1 }} onClick={runDeleteSelected} disabled={bulkDeleting}>
               {bulkDeleting ? 'Deleting...' : 'Delete Selected'}
             </button>
           </div>
@@ -570,13 +592,19 @@ export default function DeadLetterJobs() {
       </Modal>
 
       <Modal isOpen={showDeleteFilteredConfirm} onClose={() => setShowDeleteFilteredConfirm(false)} title="Confirm Filtered Deletion">
-        <div style={{ padding: '20px', textAlign: 'center' }}>
-          <HiOutlineExclamationCircle size={48} style={{ color: 'var(--accent-rose)', marginBottom: 16, display: 'block', margin: '0 auto 16px' }} />
-          <p style={{ marginBottom: 20 }}>Are you sure you want to delete <strong>ALL</strong> jobs matching your current filters? This will affect approximately <strong>{total}</strong> jobs.</p>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-            <button className="btn-secondary" onClick={() => setShowDeleteFilteredConfirm(false)}>Cancel</button>
-            <button className="btn-danger" onClick={runDeleteFiltered} disabled={filteredDeleting}>
-              {filteredDeleting ? 'Deleting All...' : 'Delete All Filtered'}
+        <div style={{ padding: '24px 32px', textAlign: 'center' }}>
+          <HiOutlineExclamationCircle size={48} style={{ color: 'var(--accent-rose)', marginBottom: 20, display: 'block', margin: '0 auto 20px' }} />
+          <p style={{ marginBottom: 24, fontSize: '0.92rem', lineHeight: '1.5', color: 'var(--text-main)' }}>
+            Are you sure you want to delete <strong>ALL</strong> jobs matching your current filters?
+            <br />
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block', marginTop: 8 }}>
+              This will affect approximately <strong>{total}</strong> jobs.
+            </span>
+          </p>
+          <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+            <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowDeleteFilteredConfirm(false)}>Cancel</button>
+            <button className="btn-danger" style={{ flex: 1 }} onClick={runDeleteFiltered} disabled={filteredDeleting}>
+              {filteredDeleting ? 'Deleting...' : 'Delete All Filtered'}
             </button>
           </div>
         </div>

@@ -855,9 +855,9 @@ test.describe('Project end-to-end flows', () => {
     await expect(page.getByRole('button', { name: /Commit \(1\)/ })).toBeVisible({ timeout: 15000 });
 
     await page.getByRole('button', { name: /Commit \(1\)/ }).click();
-    await expect(page.getByPlaceholder('4-digit PIN')).toBeVisible();
+    await expect(page.locator('#pin-0')).toBeVisible();
     const confirmSaveButton = page.getByRole('button', { name: 'Confirm & Save' });
-    await page.getByPlaceholder('4-digit PIN').fill('1234');
+    await page.locator('#pin-0').pressSequentially('1234');
     await expect(confirmSaveButton).toBeEnabled({ timeout: 15000 });
     await confirmSaveButton.click();
     await expect(page.getByRole('heading', { name: 'Committed Attendance Review' })).toBeVisible({ timeout: 15000 });
