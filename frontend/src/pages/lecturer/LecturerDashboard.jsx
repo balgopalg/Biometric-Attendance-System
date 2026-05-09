@@ -11,9 +11,10 @@ import { HiOutlineBookOpen, HiOutlineCamera, HiOutlineKey } from 'react-icons/hi
 import { formatCourseName } from '../../utils/courseDisplay';
 import { useAuth } from '../../hooks/useAuth';
 import AcademicCalendarPanel from '../../components/calendar/AcademicCalendarPanel';
+import LecturerFaceEnrollmentModal from '../../components/admin/LecturerFaceEnrollmentModal';
 
 export default function LecturerDashboard() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const location = useLocation();
   const [papers, setPapers] = useState([]);
   const [pinStatus, setPinStatus] = useState({ has_pin: false });
@@ -22,6 +23,7 @@ export default function LecturerDashboard() {
   const [generatedPin, setGeneratedPin] = useState('');
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [dashboardError, setDashboardError] = useState('');
+  const [showFaceEnrollModal, setShowFaceEnrollModal] = useState(false);
   const navigate = useNavigate();
 
   const fetchAll = () => {
@@ -131,6 +133,17 @@ export default function LecturerDashboard() {
             <HiOutlineKey size={16} /> Manage PIN
           </button>
         </div>
+        <div className="glass-card" style={{ padding: 16, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Face Enrollment Status</p>
+            <p style={{ fontSize: '1rem', fontWeight: 700, marginTop: 6 }}>{user?.has_face_enrolled ? 'Enrolled' : 'Not Enrolled'}</p>
+          </div>
+          {!user?.has_face_enrolled && (
+            <button className="btn-primary" style={{ marginTop: 12, justifyContent: 'center' }} onClick={() => setShowFaceEnrollModal(true)}>
+              <HiOutlineCamera size={16} /> Enroll Face
+            </button>
+          )}
+        </div>
       </div>
 
       <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Your Papers</h3>
@@ -214,6 +227,8 @@ export default function LecturerDashboard() {
       <div style={{ marginTop: 28 }}>
         <AcademicCalendarPanel compact />
       </div>
+
+      {showFaceEnrollModal && <LecturerFaceEnrollmentModal lecturer={{ _id: user._id, name: user.name }} onClose={() => setShowFaceEnrollModal(false)} onSuccess={() => { setShowFaceEnrollModal(false); fetchAll(); refreshUser(); }} />}
     </div>
   );
 }

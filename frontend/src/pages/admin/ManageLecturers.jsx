@@ -5,6 +5,7 @@ import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
+import { useState } from 'react';
 import {
   HiOutlinePlus,
   HiOutlineSearch,
@@ -12,6 +13,8 @@ import {
   HiOutlineDocumentAdd,
   HiOutlineDownload,
   HiOutlineDotsHorizontal,
+  HiOutlineTrash,
+  HiOutlineCamera,
 } from 'react-icons/hi';
 
 import useLecturerData from './lecturers/useLecturerData';
@@ -20,9 +23,16 @@ import AddLecturerModal from './lecturers/AddLecturerModal';
 import AssignPapersModal from './lecturers/AssignPapersModal';
 import CredentialsModal from './lecturers/CredentialsModal';
 import ExcelImportModal from './lecturers/ExcelImportModal';
+import LecturerFaceEnrollmentModal from '../../components/admin/LecturerFaceEnrollmentModal';
+import LecturerFaceSearchModal from '../../components/admin/LecturerFaceSearchModal';
 
 export default function ManageLecturers() {
   const ctx = useLecturerData();
+  const [showFaceEnroll, setShowFaceEnroll] = useState(false);
+  const [enrollingLecturer, setEnrollingLecturer] = useState(null);
+  const [deleteLecturer, setDeleteLecturer] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [showFaceSearch, setShowFaceSearch] = useState(false);
 
   // ── Action handlers (thin wrappers that call API + update hook state) ──
 
@@ -52,14 +62,31 @@ export default function ManageLecturers() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this lecturer?')) return;
+  const handleDeleteClick = (lecturer) => {
+    setDeleteLecturer(lecturer);
+  };
+
+  const handleDeleteProfile = async () => {
+    if (!deleteLecturer) return;
     try {
-      await api.delete(`/admin/lecturers/${id}`);
-      toast.success('Deleted');
+      await api.delete(`/admin/lecturers/${deleteLecturer._id}`);
+      toast.success('Deleted profile');
+      setDeleteLecturer(null);
       ctx.fetchLecturers(ctx.page);
     } catch {
-      toast.error('Failed to delete');
+      toast.error('Failed to delete profile');
+    }
+  };
+
+  const handleDeleteFaceProfile = async () => {
+    if (!deleteLecturer) return;
+    try {
+      await api.delete(`/admin/lecturers/${deleteLecturer._id}/face`);
+      toast.success('Face profile deleted');
+      setDeleteLecturer(null);
+      ctx.fetchLecturers(ctx.page);
+    } catch {
+      toast.error('Failed to delete face profile');
     }
   };
 
@@ -86,6 +113,17 @@ export default function ManageLecturers() {
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed to reset PIN');
     }
+  };
+
+  const handleEnrollFace = (lecturer) => {
+    setEnrollingLecturer(lecturer);
+    setShowFaceEnroll(true);
+  };
+
+  const handleFaceEnrollSuccess = () => {
+    setShowFaceEnroll(false);
+    setEnrollingLecturer(null);
+    ctx.fetchLecturers(ctx.page);
   };
 
   const openAssignModal = async (lecturer) => {
@@ -194,11 +232,13 @@ export default function ManageLecturers() {
           <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Lecturers</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{ctx.totalLecturers} lecturers in current filter</p>
           <div className="lecturers-toolbar-actions-mobile">
+            <button className="btn-secondary" title="Find lecturer by face" onClick={() => setShowFaceSearch(true)}><HiOutlineCamera size={16} /> Find Face</button>
             <button className="btn-secondary" title="Import lecturers from Excel" onClick={openLecturerImportModal}><HiOutlineDocumentAdd size={16} /> Import Excel</button>
             <button className="btn-primary" onClick={openAddLecturerModal}><HiOutlinePlus size={16} /> Add Lecturer</button>
           </div>
         </div>
         <div className="lecturers-toolbar-actions-primary" style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-secondary" title="Find lecturer by face" onClick={() => setShowFaceSearch(true)}><HiOutlineCamera size={16} /> Find Face</button>
           <button className="btn-secondary" title="Export all filtered lecturers to Excel" onClick={handleExportLecturers} disabled={ctx.totalLecturers === 0 || ctx.exportingLecturers}>
             <HiOutlineDownload size={16} /> {ctx.exportingLecturers ? 'Exporting...' : `Export (${ctx.totalLecturers})`}
           </button>
@@ -242,7 +282,7 @@ export default function ManageLecturers() {
       </div>
 
       {/* ── Table ────────────────────────────────────────────────── */}
-      <div className="glass-card">
+      <div className="glass-card lecturers-table-card">
         {ctx.loadingLecturers && <StatePanel variant="loading" title="Loading lecturers" description="Retrieving lecturer records and assignments." compact />}
         {ctx.lecturersError && <StatePanel variant="error" title="Unable to load lecturers" description={ctx.lecturersError} actionLabel="Retry" onAction={() => ctx.fetchLecturers(ctx.page)} compact />}
         {!ctx.loadingLecturers && !ctx.lecturersError && ctx.lecturers.length === 0 && <StatePanel variant="empty" title="No lecturers found" description="Try another filter or add a new lecturer." compact />}
@@ -258,7 +298,8 @@ export default function ManageLecturers() {
             onAssign={openAssignModal}
             onResetPin={handleResetPin}
             onResetPassword={handleResetPassword}
-            onDelete={handleDelete}
+            onDelete={handleDeleteClick}
+            onEnrollFace={handleEnrollFace}
           />
         )}
       </div>
@@ -282,6 +323,44 @@ export default function ManageLecturers() {
       </Modal>
 
       <ExcelImportModal isOpen={ctx.showExcelImport} onClose={() => ctx.setShowExcelImport(false)} excelFile={ctx.excelFile} setExcelFile={ctx.setExcelFile} excelFileInputRef={ctx.excelFileInputRef} excelImporting={ctx.excelImporting} excelResults={ctx.excelResults} setExcelResults={ctx.setExcelResults} onImport={handleLecturerExcelImport} />
+
+      {showFaceEnroll && enrollingLecturer && <LecturerFaceEnrollmentModal lecturer={enrollingLecturer} onClose={() => setShowFaceEnroll(false)} onSuccess={handleFaceEnrollSuccess} />}
+      
+      <Modal isOpen={!!deleteLecturer} onClose={() => setDeleteLecturer(null)} title="Delete Options" width={400}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Choose what you want to delete for <strong>{deleteLecturer?.name}</strong>:</p>
+          <button className="btn-secondary danger" style={{ justifyContent: 'center', padding: '12px' }} onClick={() => setConfirmAction({
+            title: 'Delete Entire Profile',
+            message: `Delete entire profile for ${deleteLecturer?.name}? This cannot be undone.`,
+            confirmLabel: 'Delete',
+            onConfirm: async () => { await handleDeleteProfile(); }
+          })}>
+            <HiOutlineTrash size={18} /> Delete Entire Profile
+          </button>
+          <button className="btn-secondary danger" style={{ justifyContent: 'center', padding: '12px' }} onClick={() => setConfirmAction({
+            title: 'Delete Face Profile',
+            message: `Delete face profile for ${deleteLecturer?.name}?`,
+            confirmLabel: 'Delete',
+            onConfirm: async () => { await handleDeleteFaceProfile(); }
+          })} disabled={!deleteLecturer?.has_face}>
+            <HiOutlineCamera size={18} /> Delete Face Profile
+          </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!confirmAction} onClose={() => setConfirmAction(null)} title={confirmAction?.title || 'Confirm Action'} width={420}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>{confirmAction?.message}</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button className="btn-secondary" onClick={() => setConfirmAction(null)}>Cancel</button>
+            <button className="btn-primary" onClick={() => { confirmAction?.onConfirm?.(); setConfirmAction(null); }}>
+              {confirmAction?.confirmLabel || 'Confirm'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <LecturerFaceSearchModal isOpen={showFaceSearch} onClose={() => setShowFaceSearch(false)} />
     </div>
   );
 }

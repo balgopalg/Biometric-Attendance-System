@@ -169,26 +169,6 @@ def list_course_sessions(user, cid):
     return jsonify(sorted(sessions))
 
 
-def _normalise_course_semester(course_id, semester):
-    cid = _as_text(course_id)
-    if not cid:
-        return None, None, "course_id is required"
-
-    course = _safe_get_course(cid)
-    if not course:
-        return None, None, "Course not found"
-    if _course_is_inactive(course):
-        return None, None, "Course is inactive. Reassign entities to an active course first"
-
-    sem = _to_int(semester, 0)
-    if sem <= 0:
-        return None, None, "semester must be a positive integer"
-
-    max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
-    if sem > max_sem:
-        return None, None, f"semester must be between 1 and {max_sem} for selected course"
-
-    return cid, sem, None
 
 
 @admin_bp.route("/courses/<cid>", methods=["PUT"])

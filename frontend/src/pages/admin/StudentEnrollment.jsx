@@ -471,7 +471,7 @@ export default function StudentEnrollment() {
               }}
             >
               {preview ? (
-                <img src={preview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 250, borderRadius: 'var(--radius)', objectFit: 'cover' }} />
+                <img src={preview} alt="Preview" style={{ maxWidth: '100%', maxHeight: 250, borderRadius: 'var(--radius)', objectFit: 'contain' }} />
               ) : (
                 <>
                   <HiOutlineUpload size={32} style={{ color: 'var(--accent-purple)', marginBottom: 8 }} />

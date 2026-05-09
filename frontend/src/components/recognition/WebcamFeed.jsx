@@ -1,7 +1,9 @@
 import { forwardRef, useState, useEffect } from 'react';
 
-const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error }, ref) {
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 640);
+const getIsMobile = () => (typeof window !== 'undefined' ? window.innerWidth < 640 : false);
+
+const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error, onFlipCamera }, ref) {
+  const [isMobile, setIsMobile] = useState(getIsMobile);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 640);
@@ -82,6 +84,32 @@ const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error }, ref) {
               }} />
               <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#fff' }}>LIVE</span>
             </div>
+            {/* Camera flip button */}
+            {onFlipCamera && (
+              <button
+                type="button"
+                onClick={onFlipCamera}
+                title="Switch camera"
+                style={{
+                  position: 'absolute', top: 12, right: 12,
+                  width: 36, height: 36,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(0,0,0,0.6)', border: 'none',
+                  borderRadius: 999, cursor: 'pointer',
+                  color: '#fff', padding: 0,
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.85)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.6)')}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" />
+                  <path d="M13 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5" />
+                  <path d="m14 3 3 3-3 3" />
+                  <path d="m10 21-3-3 3-3" />
+                </svg>
+              </button>
+            )}
           </>
         )}
       </div>

@@ -34,10 +34,10 @@
   --scrollbar-thumb-hover: rgba(139, 92, 246, 0.5);
   --card-hover-border: rgba(139, 92, 246, 0.2);
   /* Sidebar */
-  --sidebar-bg: linear-gradient(180deg, #1a237e 0%, #1565c0 50%, #1976d2 100%);
-  --sidebar-text: rgba(255, 255, 255, 0.85);
-  --sidebar-text-muted: rgba(255, 255, 255, 0.5);
-  --sidebar-active-bg: rgba(255, 255, 255, 0.18);
+  --sidebar-bg: linear-gradient(180deg, #0f172a 0%, #12213d 46%, #173d77 100%);
+  --sidebar-text: rgba(255, 255, 255, 0.92);
+  --sidebar-text-muted: rgba(226, 232, 240, 0.68);
+  --sidebar-active-bg: rgba(255, 255, 255, 0.14);
   --sidebar-hover-bg: rgba(255, 255, 255, 0.08);
   --sidebar-divider: rgba(255, 255, 255, 0.12);
   /* Search */
@@ -84,13 +84,12 @@
   --scrollbar-thumb: rgba(124, 58, 237, 0.2);
   --scrollbar-thumb-hover: rgba(124, 58, 237, 0.35);
   --card-hover-border: rgba(124, 58, 237, 0.15);
-  /* Sidebar stays blue gradient in both modes */
-  --sidebar-bg: linear-gradient(180deg, #1a237e 0%, #1565c0 50%, #1976d2 100%);
-  --sidebar-text: rgba(255, 255, 255, 0.85);
-  --sidebar-text-muted: rgba(255, 255, 255, 0.5);
-  --sidebar-active-bg: rgba(255, 255, 255, 0.18);
-  --sidebar-hover-bg: rgba(255, 255, 255, 0.08);
-  --sidebar-divider: rgba(255, 255, 255, 0.12);
+  --sidebar-bg: #ffffff;
+  --sidebar-text: #1e293b;
+  --sidebar-text-muted: #64748b;
+  --sidebar-active-bg: rgba(14, 165, 233, 0.11);
+  --sidebar-hover-bg: rgba(14, 165, 233, 0.05);
+  --sidebar-divider: #e2e8f0;
   --search-bg: #f8fafc;
   --search-border: #e2e8f0;
   --soft-lock-opacity: 0.5;
@@ -286,6 +285,7 @@ textarea:focus-visible,
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   transition: all 0.3s ease;
+  overflow: hidden;
 }
 
 .glass-card:hover {
@@ -716,6 +716,10 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--bg-card) 97%, #ffffff 3%), var(--bg-card));
   box-shadow: 0 6px 14px rgba(2, 8, 23, 0.1);
+}
+
+.lecturer-page .lecturers-table-card {
+  overflow: visible;
 }
 
 .admin-page .glass-card:hover {

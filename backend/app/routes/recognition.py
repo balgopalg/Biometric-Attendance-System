@@ -118,3 +118,157 @@ def identify_faces(user):
         "matches": matches,
         "faces_detected": len(faces),
     })
+
+@recognition_bp.route("/find-student", methods=["POST"])
+@role_required("admin")
+@limiter.limit("10 per minute")
+def find_student_by_face(user):
+    """Search across all student profiles to identify a student from a face frame."""
+    d = request.get_json(silent=True) or {}
+    frame = d.get("frame")
+    if not frame:
+        return jsonify({"error": "frame (base64) is required"}), 400
+
+    try:
+        img = decode_base64_image(frame)
+    except ValueError as e:
+        return jsonify({"error": f"Invalid image data: {e}"}), 400
+
+    detector = get_detector()
+    faces = detector.detect_faces(img)
+
+    if not faces:
+        return jsonify({"error": "No face detected in the frame"}), 400
+
+    # Get all student profiles for matching
+    from app.models.enrollment import get_all_profiles
+    profiles = get_all_profiles(["user_id", "face_embeddings", "reg_number"])
+    
+    if not profiles:
+        return jsonify({"error": "No student profiles found for matching"}), 404
+
+    candidates = prepare_profile_candidates(profiles)
+    threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
+
+    # Use the largest detected face
+    face = faces[0]
+    embedding = generate_embedding(face["crop"])
+    match, _score = find_best_match_cached(embedding, candidates, threshold=threshold)
+
+    if not match:
+        return jsonify({"error": "No matching student found"}), 404
+
+    # Fetch full student details
+    matched_user_id = match["user_id"]
+    from app.models.user import find_user_by_id
+    from app.models.enrollment import get_profile_by_user
+    from app.extensions import get_collection
+    from bson import ObjectId
+
+    matched_user = find_user_by_id(matched_user_id)
+    profile = get_profile_by_user(matched_user_id)
+
+    if not matched_user or not profile:
+        return jsonify({"error": "Matched student record is incomplete"}), 404
+
+    # Resolve Department and Course names
+    dept_name = "N/A"
+    course_name = "N/A"
+
+    if profile.get("department_id"):
+        dept = get_collection("academic", "departments").find_one({"_id": ObjectId(str(profile["department_id"]))})
+        if dept:
+            dept_name = dept.get("name", "N/A")
+    
+    if profile.get("course_id"):
+        course = get_collection("academic", "courses").find_one({"_id": ObjectId(str(profile["course_id"]))})
+        if course:
+            course_name = course.get("name", "N/A")
+            if course.get("code"):
+                course_name += f" ({course['code']})"
+
+    return jsonify({
+        "student": {
+            "name": matched_user.get("name", "N/A"),
+            "reg_number": profile.get("reg_number", "N/A"),
+            "department": dept_name,
+            "course": course_name,
+            "academic_session": profile.get("academic_session", profile.get("academic_year", "N/A")),
+            "current_semester": profile.get("current_semester", "N/A"),
+            "photo_url": profile.get("photo_urls")[0] if profile.get("photo_urls") else None,
+            "similarity": match["similarity"]
+        }
+    })
+
+
+@recognition_bp.route("/find-lecturer", methods=["POST"])
+@role_required("admin")
+@limiter.limit("10 per minute")
+def find_lecturer_by_face(user):
+    """Search across all lecturer profiles to identify a lecturer from a face frame."""
+    d = request.get_json(silent=True) or {}
+    frame = d.get("frame")
+    if not frame:
+        return jsonify({"error": "frame (base64) is required"}), 400
+
+    try:
+        img = decode_base64_image(frame)
+    except ValueError as e:
+        return jsonify({"error": f"Invalid image data: {e}"}), 400
+
+    detector = get_detector()
+    faces = detector.detect_faces(img)
+
+    if not faces:
+        return jsonify({"error": "No face detected in the frame"}), 400
+
+    # Get all lecturer profiles for matching
+    from app.models.user import get_users_by_role
+    lecturers = get_users_by_role("lecturer")
+    
+    if not lecturers:
+        return jsonify({"error": "No lecturer profiles found for matching"}), 404
+
+    # Filter lecturers with face embeddings
+    profiles = [l for l in lecturers if l.get("face_embeddings")]
+    
+    if not profiles:
+        return jsonify({"error": "No lecturer face profiles found"}), 404
+
+    candidates = prepare_profile_candidates(profiles)
+    threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
+
+    # Use the largest detected face
+    face = faces[0]
+    embedding = generate_embedding(face["crop"])
+    match, _score = find_best_match_cached(embedding, candidates, threshold=threshold)
+
+    if not match:
+        return jsonify({"error": "No matching lecturer found"}), 404
+
+    # Fetch full lecturer details
+    matched_user_id = match["user_id"]
+    from app.extensions import get_collection
+    from bson import ObjectId
+
+    matched_user = find_user_by_id(matched_user_id)
+
+    if not matched_user:
+        return jsonify({"error": "Matched lecturer record is incomplete"}), 404
+
+    # Resolve Department name
+    dept_name = matched_user.get("department", "N/A")
+    if matched_user.get("department_id"):
+        dept = get_collection("academic", "departments").find_one({"_id": ObjectId(str(matched_user["department_id"]))})
+        if dept:
+            dept_name = dept.get("name", "N/A")
+
+    return jsonify({
+        "lecturer": {
+            "name": matched_user.get("name", "N/A"),
+            "email": matched_user.get("email", "N/A"),
+            "department": dept_name,
+            "photo_url": matched_user.get("profile_photo_url"),
+            "similarity": match["similarity"]
+        }
+    })

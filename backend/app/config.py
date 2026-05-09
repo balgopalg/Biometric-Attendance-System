@@ -35,6 +35,7 @@ class Config:
     LEAVE_ADJUSTED_ATTENDANCE_ENABLED = _env_bool("LEAVE_ADJUSTED_ATTENDANCE_ENABLED", False)
 
     ENV = os.getenv("FLASK_ENV", "development").lower()
+    _IS_PROD_LIKE = ENV in {"production", "prod", "staging"}
     DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
 
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/biometric_attendance")
@@ -51,7 +52,7 @@ class Config:
             "CRITICAL: JWT_SECRET_KEY not set in production. "
             "Set via environment variable to a strong random string (64+ characters)"
         )
-    JWT_SECRET_KEY = _JWT_SECRET_KEY or "dev-only-strong-secret-change-in-prod"
+    JWT_SECRET_KEY = _JWT_SECRET_KEY or ("dev_secret_key_change_in_production" if ENV not in {"production", "prod", "staging"} else os.urandom(32).hex())
     
     # Enforce secret strength validation
     STRICT_JWT_SECRET = _env_bool("STRICT_JWT_SECRET", ENV in {"production", "prod", "staging"})
@@ -86,6 +87,19 @@ class Config:
     # Rate Limiting
     RATELIMIT_ENABLED = _env_bool("RATELIMIT_ENABLED", True)
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")  # Use "redis://localhost:6379" for distributed
+    RATELIMIT_FAIL_CLOSED = _env_bool("RATELIMIT_FAIL_CLOSED", _IS_PROD_LIKE)
+
+    if RATELIMIT_ENABLED and _IS_PROD_LIKE:
+        if not RATELIMIT_STORAGE_URI:
+            raise RuntimeError(
+                "CRITICAL: RATELIMIT_STORAGE_URI must be set in production/staging "
+                "(for example redis://redis:6379/1)."
+            )
+        if RATELIMIT_STORAGE_URI.strip().lower() == "memory://":
+            raise RuntimeError(
+                "CRITICAL: RATELIMIT_STORAGE_URI=memory:// is not allowed in production/staging. "
+                "Use a shared backend such as Redis."
+            )
     
     # Brute Force Protection
     BRUTE_FORCE_PROTECTION_ENABLED = _env_bool("BRUTE_FORCE_PROTECTION_ENABLED", True)

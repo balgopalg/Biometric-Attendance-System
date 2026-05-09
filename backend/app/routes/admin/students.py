@@ -1,5 +1,8 @@
 from . import admin_bp
 from ._helpers import *
+import os
+import shutil
+from flask import send_from_directory
 
 @admin_bp.route("/students", methods=["GET"])
 @role_required("super_admin", "department_admin")
@@ -187,6 +190,7 @@ def list_students(user):
         item["year"] = item.get("academic_session")
         item["enrollment_year"] = enrollment_year
         item["mobile_no"] = (u or {}).get("mobile_no", "")
+        item["profile_picture_file"] = (u or {}).get("profile_picture_file", "")
         item["course_name"] = (course or {}).get("name")
         item["course_code"] = (course or {}).get("code")
         item["course_status"] = _as_text((course or {}).get("status") or "active").lower() or "active"
@@ -618,6 +622,32 @@ def remove_student(user, sid):
     return jsonify({"message": "Deleted"}), 200
 
 
+@admin_bp.route("/students/<sid>/face", methods=["DELETE"])
+@role_required("super_admin", "department_admin")
+@validate_ids("sid")
+def remove_student_face(user, sid):
+    user_id, profile = _resolve_user_identity(sid)
+    if not user_id:
+        return jsonify({"error": "Student not found"}), 404
+
+    if profile:
+        profiles_col = get_collection("academic", "student_profiles")
+        profiles_col.update_one(
+            {"user_id": user_id},
+            {"$set": {"face_embeddings": []}}
+        )
+
+    log_action("DELETE_STUDENT_FACE", str(user["_id"]), target_user=user_id, details="Deleted face embeddings")
+    _clear_query_cache()
+    
+    # Delete dataset if exists
+    dataset_dir = _resolve_dataset_dir_for_user(user_id)
+    if os.path.isdir(dataset_dir):
+        shutil.rmtree(dataset_dir, ignore_errors=True)
+
+    return jsonify({"message": "Face profile deleted successfully"}), 200
+
+
 @admin_bp.route("/students/bulk-promote", methods=["POST"])
 @admin_bp.route("/student-bulk-promote", methods=["POST"])
 @role_required("department_admin")
@@ -948,4 +978,46 @@ def reset_student_password(user, sid):
 
 
 # ─── Student Enrollment (Photo → Embedding) ────────────────────────────────
+
+
+@admin_bp.route("/students/profile-picture/<path:file_name>", methods=["GET"])
+@role_required("super_admin", "department_admin")
+def get_student_profile_picture(user, file_name):
+    """Serve student profile pictures for administrators.
+    
+    Enforces department-level tenant isolation:
+    - super_admin can access any student's profile picture
+    - department_admin can only access students in their department
+    """
+    safe_name = os.path.basename(file_name or "")
+    if not safe_name:
+        return jsonify({"error": "Profile picture not found"}), 404
+
+    # Resolve folder from auth module's internal helper logic
+    from ..auth import _safe_profile_upload_folder
+    from app.security.rbac import get_user_department_id, is_super_admin
+    
+    profile_dir = _safe_profile_upload_folder()
+    file_path = os.path.join(profile_dir, safe_name)
+
+    if not os.path.isfile(file_path):
+        return jsonify({"error": "Profile picture not found"}), 404
+
+    # Department isolation: verify the file belongs to a student in the requester's department
+    if not is_super_admin(user):
+        requester_dept = get_user_department_id(user)
+        
+        # Find which student owns this profile picture
+        users_col = get_collection("auth", "users")
+        owner = users_col.find_one({"profile_picture_file": safe_name})
+        
+        if not owner:
+            return jsonify({"error": "Profile picture not found"}), 404
+        
+        # For department_admin, enforce same-department access
+        owner_dept = get_user_department_id(owner) if isinstance(owner, dict) else None
+        if requester_dept != owner_dept:
+            return jsonify({"error": "Unauthorized to access this resource"}), 403
+
+    return send_from_directory(profile_dir, safe_name)
 

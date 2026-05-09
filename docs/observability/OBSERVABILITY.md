@@ -1,4 +1,4 @@
-# Observability
+﻿# Observability
 
 The application includes the main observability hooks needed for the current backend surface: structured logging, health checks, and metrics exposure.
 
@@ -19,11 +19,11 @@ The application includes the main observability hooks needed for the current bac
 ## Health Checks
 
 - `GET /api/auth/health`
-- `GET /api/health`
-- `GET /api/health/database`
-- `GET /api/health/redis`
-- `GET /api/health/queue`
-- `GET /api/health/storage`
+- `GET /api/health/health`
+- `GET /api/health/health/database`
+- `GET /api/health/health/redis`
+- `GET /api/health/health/queue`
+- `GET /api/health/health/storage`
 
 ## Logging Notes
 
@@ -70,7 +70,7 @@ Comprehensive health check endpoints for API, database, Redis, queue, and storag
 
 #### Endpoints
 
-**`GET /api/health`** - Full health check
+**`GET /api/health/health`** - Full health check
 ```json
 {
   "status": "healthy",
@@ -107,14 +107,14 @@ Comprehensive health check endpoints for API, database, Redis, queue, and storag
 }
 ```
 
-**`GET /api/health/database`** - Database health only
-**`GET /api/health/redis`** - Redis health only
-**`GET /api/health/queue`** - Queue health only
-**`GET /api/health/storage`** - Storage health only
+**`GET /api/health/health/database`** - Database health only
+**`GET /api/health/health/redis`** - Redis health only
+**`GET /api/health/health/queue`** - Queue health only
+**`GET /api/health/health/storage`** - Storage health only
 
 **Kubernetes Probes**
-- `GET /api/health/live` - Liveness probe (is process running?)
-- `GET /api/health/ready` - Readiness probe (can accept traffic?)
+- `GET /api/health/health/live` - Liveness probe (is process running?)
+- `GET /api/health/health/ready` - Readiness probe (can accept traffic?)
 
 #### Usage
 
@@ -141,13 +141,13 @@ spec:
   - name: app
     livenessProbe:
       httpGet:
-        path: /api/health/live
+        path: /api/health/health/live
         port: 5000
       initialDelaySeconds: 10
       periodSeconds: 30
     readinessProbe:
       httpGet:
-        path: /api/health/ready
+        path: /api/health/health/ready
         port: 5000
       initialDelaySeconds: 5
       periodSeconds: 10
@@ -447,8 +447,8 @@ sentry_sdk.set_tag("deployment", "prod-us-west")
 
 ### Pre-Production
 
-- [ ] Verify /api/health returns 200
-- [ ] Test /api/health/database, /redis, /queue
+- [ ] Verify /api/health/health returns 200
+- [ ] Test /api/health/health/database, /redis, /queue
 - [ ] Configure Prometheus scraping
 - [ ] Setup Grafana dashboards
 - [ ] Configure Sentry project
@@ -463,7 +463,7 @@ sentry_sdk.set_tag("deployment", "prod-us-west")
 - [ ] Configure SENTRY_DSN
 - [ ] Set METRICS_ENABLED=1
 - [ ] Configure health check monitoring
-- [ ] Setup alerting on /api/health failures
+- [ ] Setup alerting on /api/health/health failures
 - [ ] Monitor error rate increase
 - [ ] Reserve 500MB+ for logs/metrics
 
@@ -517,3 +517,4 @@ from app.observability.health import (
 - [/docs/security/SECURITY_HARDENING.md](../security/SECURITY_HARDENING.md) - Security implementation
 - [/docs/testing/TESTING.md](../testing/TESTING.md) - Test suite
 - [backend/.env.example](../../backend/.env.example) - Configuration template
+

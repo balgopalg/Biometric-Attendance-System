@@ -3,6 +3,7 @@
 import logging
 import os
 import uuid
+import time
 
 import cv2
 from flask import current_app, has_app_context
@@ -159,13 +160,9 @@ def capture_faces_for_user(user_name, dataset_root="dataset", total_images=50, d
                 raise RuntimeError(f"Failed to save image: {file_path}") from exc
 
             saved_paths.append(file_path)
-
-            cv2.imshow("Face Capture", gray)
-            if cv2.waitKey(delay_ms) & 0xFF == ord("q"):
-                break
+            time.sleep(delay_ms / 1000.0)
     finally:
         cap.release()
-        cv2.destroyAllWindows()
 
     if len(saved_paths) < total_images:
         raise RuntimeError(

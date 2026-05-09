@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo.errors import DuplicateKeyError
 from app.extensions import get_collection
 from app.utils.timezone import to_india_time
@@ -69,8 +70,12 @@ def count_attendance(user_id: str, paper_id: str) -> int:
 
 
 def delete_attendance_log(log_id: str) -> None:
+    try:
+        oid = ObjectId(log_id)
+    except InvalidId:
+        return
     logs = get_collection("attendance", "attendance_logs")
-    logs.delete_one({"_id": ObjectId(log_id)})
+    logs.delete_one({"_id": oid})
 
 
 def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
@@ -101,6 +106,9 @@ def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
                 # Expand range into individual YYYY-MM-DD strings
                 s_dt = datetime.strptime(str(start), "%Y-%m-%d")
                 e_dt = datetime.strptime(str(end), "%Y-%m-%d")
+                # Fix: swap if dates are inverted (data corruption guard)
+                if s_dt > e_dt:
+                    s_dt, e_dt = e_dt, s_dt
                 delta = (e_dt - s_dt).days
                 for i in range(delta + 1):
                     covered_dates.add((s_dt + timedelta(days=i)).strftime("%Y-%m-%d"))

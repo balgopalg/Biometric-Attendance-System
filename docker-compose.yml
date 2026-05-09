@@ -21,7 +21,7 @@ services:
     pull_policy: if_not_present
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -40,7 +40,7 @@ services:
     environment:
       FLASK_ENV: production
       FLASK_DEBUG: "0"
-      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS}@mongo:27017/biometric_attendance?authSource=admin
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:?MONGO_PASS must be set}@mongo:27017/biometric_attendance?authSource=admin
       # Database isolation for specific features
       MONGO_DB_AUTH: biometric_auth
       MONGO_DB_ACADEMIC: biometric_academic
@@ -81,7 +81,7 @@ services:
     environment:
       FLASK_ENV: production
       FLASK_DEBUG: "0"
-      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS}@mongo:27017/biometric_attendance?authSource=admin
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:?MONGO_PASS must be set}@mongo:27017/biometric_attendance?authSource=admin
       MONGO_DB_AUTH: biometric_auth
       MONGO_DB_ACADEMIC: biometric_academic
       MONGO_DB_ATTENDANCE: biometric_attendance_ops

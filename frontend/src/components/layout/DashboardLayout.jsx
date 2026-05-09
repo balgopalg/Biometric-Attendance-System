@@ -6,6 +6,8 @@ import Topbar from './Topbar';
 const SIDEBAR_EXPANDED = 220;
 const SIDEBAR_COLLAPSED = 76;
 
+const getViewportWidth = () => (typeof window !== 'undefined' ? window.innerWidth : 0);
+
 const titleMap = {
   '/admin': 'Admin Dashboard',
   '/admin/departments': 'Manage Departments',
@@ -36,7 +38,7 @@ const titleMap = {
 export default function DashboardLayout() {
   const { pathname } = useLocation();
   const title = titleMap[pathname] || 'Dashboard';
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
+  const [isMobile, setIsMobile] = useState(() => getViewportWidth() < 1024);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem('sidebar-collapsed') === '1';
@@ -44,7 +46,7 @@ export default function DashboardLayout() {
       return false;
     }
   });
-  const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => getViewportWidth() >= 1024);
 
   useEffect(() => {
     const onResize = () => {

@@ -15,7 +15,7 @@ The backend already includes the main hardening controls needed for the current 
 ## Relevant Code Paths
 
 - [backend/app/routes/auth.py](../../backend/app/routes/auth.py)
-- [backend/app/routes/admin.py](../../backend/app/routes/admin.py)
+- [backend/app/routes/admin/](../../backend/app/routes/admin/)
 - [backend/app/routes/lecturer.py](../../backend/app/routes/lecturer.py)
 - [backend/app/routes/student.py](../../backend/app/routes/student.py)
 - [backend/app/security/](../../backend/app/security/)
@@ -119,7 +119,7 @@ def login():
 
 Passwords must meet ALL requirements:
 
-- **Minimum Length:** 12 characters  
+- **Minimum Length:** 8 characters  
 - **Uppercase Letters:** At least 1 (A-Z)
 - **Lowercase Letters:** At least 1 (a-z)
 - **Digits:** At least 1 (0-9)
@@ -159,7 +159,8 @@ CORS_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
 
 # Rate Limiting
 RATELIMIT_ENABLED=true
-RATELIMIT_STORAGE_URL=redis://your-redis-server:6379/0
+RATELIMIT_STORAGE_URI=redis://your-redis-server:6379/1
+RATELIMIT_FAIL_CLOSED=true
 
 # Brute Force Protection
 BRUTE_FORCE_PROTECTION_ENABLED=true
@@ -167,7 +168,7 @@ LOGIN_LOCKOUT_THRESHOLD=5
 LOGIN_LOCKOUT_DURATION_MINUTES=15
 
 # Password Policy
-PASSWORD_MIN_LENGTH=12
+PASSWORD_MIN_LENGTH=8
 PASSWORD_REQUIRE_UPPERCASE=true
 PASSWORD_REQUIRE_LOWERCASE=true
 PASSWORD_REQUIRE_DIGITS=true

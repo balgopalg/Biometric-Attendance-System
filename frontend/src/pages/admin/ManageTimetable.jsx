@@ -1,13 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { HiOutlineCalendar, HiOutlineFilter, HiOutlinePencil, HiOutlineRefresh, HiOutlineTrash, HiOutlineDownload, HiOutlineEye, HiOutlineCheck } from 'react-icons/hi';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import toast from 'react-hot-toast';
-
+import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../api/axios';
 import Modal from '../../components/ui/Modal';
 import StatePanel from '../../components/ui/StatePanel';
 import WeeklyTimetableGrid from '../../components/timetable/WeeklyTimetableGrid';
-import { useAuth } from '../../hooks/useAuth';
 import { formatCourseName } from '../../utils/courseDisplay';
+import { 
+  HiOutlineCalendar, 
+  HiOutlineRefresh, 
+  HiOutlineTrash, 
+  HiOutlineEye, 
+  HiOutlineCheck, 
+  HiOutlineDownload, 
+  HiOutlinePencil, 
+  HiOutlineFilter,
+  HiOutlineSearch,
+  HiOutlineClock
+} from 'react-icons/hi';
+import { useAuth } from '../../hooks/useAuth';
 
 const CREATE_DEFAULTS = {
   department_id: '',
@@ -23,75 +34,65 @@ const CREATE_DEFAULTS = {
   status: 'draft',
 };
 
-const FILTER_DEFAULTS = {
-  department_id: '',
-  course_id: '',
-  academic_session: '',
-  semester: '',
-  status: '',
-};
-
-const createFormSignature = (form) => ([
-  form.department_id || '',
-  form.course_id || '',
-  form.academic_session || '',
-  form.semester || '',
-  form.max_classes_per_day || '',
-  form.class_duration_minutes || '',
-  form.class_start_time || '',
-  form.class_end_time || '',
-  form.recess_start_time || '',
-  form.recess_end_time || '',
-  form.status || 'draft',
-].join('|'));
+function createFormSignature(form) {
+  return [
+    form.department_id,
+    form.course_id,
+    form.academic_session,
+    form.semester,
+    form.max_classes_per_day,
+    form.class_duration_minutes,
+    form.class_start_time,
+    form.class_end_time,
+    form.recess_start_time,
+    form.recess_end_time,
+  ].join('|');
+}
 
 export default function ManageTimetable() {
-  const { isDepartmentAdmin, departmentId, departmentName } = useAuth();
-
-  const [departments, setDepartments] = useState([]);
-  const [courses, setCourses] = useState([]);
-
-  const [filters, setFilters] = useState(() => ({
-    ...FILTER_DEFAULTS,
-    department_id: isDepartmentAdmin ? String(departmentId || '') : '',
-  }));
-  const [showMobileFilters, setShowMobileFilters] = useState(false);
-  const [filterAcademicSessions, setFilterAcademicSessions] = useState([]);
-  const [filterSemesters, setFilterSemesters] = useState([]);
+  const { user } = useAuth();
+  const isDepartmentAdmin = user?.role === 'department_admin';
+  const departmentId = user?.department_id;
+  const departmentName = user?.department;
 
   const [timetables, setTimetables] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [departments, setDepartments] = useState([]);
+  const [courses, setCourses] = useState([]);
+  const [filterAcademicSessions, setFilterAcademicSessions] = useState([]);
+  const [filterSemesters, setFilterSemesters] = useState([]);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    department_id: isDepartmentAdmin ? String(departmentId || '') : '',
+    course_id: '',
+    academic_session: '',
+    semester: '',
+    status: '',
+  });
 
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState(() => ({
-    ...CREATE_DEFAULTS,
-    department_id: isDepartmentAdmin ? String(departmentId || '') : '',
-  }));
+  const [createForm, setCreateForm] = useState(CREATE_DEFAULTS);
   const [createCourses, setCreateCourses] = useState([]);
   const [createAcademicSessions, setCreateAcademicSessions] = useState([]);
   const [createSemesters, setCreateSemesters] = useState([]);
   const [createMaxClassOptions, setCreateMaxClassOptions] = useState([]);
   const [submittingCreate, setSubmittingCreate] = useState(false);
   const [createConflictRetry, setCreateConflictRetry] = useState(null);
+  const [conflictData, setConflictData] = useState(null);
+  const [showConflictModal, setShowConflictModal] = useState(false);
 
-  const [editingPaperOptions, setEditingPaperOptions] = useState([]);
+  const [showViewModal, setShowViewModal] = useState(false);
+  const [selectedTimetable, setSelectedTimetable] = useState(null);
   const [isEditModeInView, setIsEditModeInView] = useState(false);
+  const [editingPaperOptions, setEditingPaperOptions] = useState([]);
   const [slotEditor, setSlotEditor] = useState(null);
   const [slotEditorTargetKey, setSlotEditorTargetKey] = useState('');
   const [slotEditorPaperId, setSlotEditorPaperId] = useState('');
   const [savingSlotEdit, setSavingSlotEdit] = useState(false);
-
-  const [selectedTimetable, setSelectedTimetable] = useState(null);
-  const [showViewModal, setShowViewModal] = useState(false);
   const timetableExportRef = useRef(null);
 
   const loadDepartments = async () => {
-    if (isDepartmentAdmin) {
-      setDepartments(departmentId ? [{ _id: departmentId, name: departmentName || 'Department' }] : []);
-      return;
-    }
-
     try {
       const res = await api.get('/admin/departments');
       setDepartments(Array.isArray(res.data) ? res.data : []);
@@ -107,26 +108,17 @@ export default function ManageTimetable() {
     }
     try {
       const res = await api.get('/admin/courses', { params: { department_id: depId } });
-      const items = Array.isArray(res.data?.items) ? res.data.items : (Array.isArray(res.data) ? res.data : []);
-      setter(items);
+      setter(Array.isArray(res.data) ? res.data : []);
     } catch {
       setter([]);
     }
   };
 
   const loadTimetables = async () => {
-    if (!filters.department_id && !isDepartmentAdmin) {
-      setTimetables([]);
-      setSelectedTimetable(null);
-      return;
-    }
-
     setLoading(true);
     setError('');
     try {
-      const params = {
-        include_slots: false,
-      };
+      const params = {};
       if (filters.department_id) params.department_id = filters.department_id;
       if (filters.course_id) params.course_id = filters.course_id;
       if (filters.academic_session) params.academic_session = filters.academic_session;
@@ -329,6 +321,7 @@ export default function ManageTimetable() {
 
       toast.success('Timetable generated successfully');
       setCreateConflictRetry(null);
+      setConflictData(null);
       setShowCreate(false);
 
       if (created) {
@@ -348,12 +341,17 @@ export default function ManageTimetable() {
     } catch (err) {
       const statusCode = err?.response?.status;
       const message = err?.response?.data?.error || 'Failed to generate timetable';
-      const hasConflictPayload = Boolean(err?.response?.data?.conflicts);
+      const conflicts = err?.response?.data?.conflicts;
+      const hasConflictPayload = Boolean(conflicts);
+
       if (statusCode === 409 && hasConflictPayload) {
         setCreateConflictRetry({ signature, at: Date.now() });
-        toast.error('Conflict detected. Click Generate Timetable again to retry with randomized order.');
+        setConflictData(conflicts);
+        setShowConflictModal(true);
+        toast.error('Scheduling conflict detected');
       } else {
         setCreateConflictRetry(null);
+        setConflictData(null);
         toast.error(message);
       }
     } finally {
@@ -476,10 +474,19 @@ export default function ManageTimetable() {
         setSelectedTimetable(refreshed);
       }
       setSlotEditor(null);
+      setConflictData(null);
       toast.success('Slot updated');
       await loadTimetables();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to update slot');
+      const statusCode = err?.response?.status;
+      const conflicts = err?.response?.data?.conflicts;
+      if (statusCode === 409 && conflicts) {
+        setConflictData(conflicts);
+        setShowConflictModal(true);
+        toast.error('Update failed: Conflict detected');
+      } else {
+        toast.error(err.response?.data?.error || 'Failed to update slot');
+      }
     } finally {
       setSavingSlotEdit(false);
     }
@@ -785,86 +792,135 @@ export default function ManageTimetable() {
       </Modal>
 
       <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Create Timetable" width={720}>
-        <div className="timetable-filter-grid is-mobile-open" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
-          <select
-            className="input-field"
-            value={createForm.department_id}
-            onChange={(e) => setCreateForm((prev) => ({ ...prev, department_id: e.target.value, course_id: '', academic_session: '', semester: '', max_classes_per_day: '' }))}
-            disabled={isDepartmentAdmin}
-          >
-            <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'Select Department'}</option>
-            {departments.map((d) => (
-              <option key={d._id} value={d._id}>{d.name}</option>
-            ))}
-          </select>
+        <div className="timetable-filter-grid is-mobile-open" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+          <div>
+            <label className="mobile-card-label">Department</label>
+            <select
+              className="input-field"
+              value={createForm.department_id}
+              onChange={(e) => setCreateForm((prev) => ({ ...prev, department_id: e.target.value, course_id: '', academic_session: '', semester: '', max_classes_per_day: '' }))}
+              disabled={isDepartmentAdmin}
+            >
+              <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'Select Department'}</option>
+              {departments.map((d) => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            className="input-field"
-            value={createForm.course_id}
-            onChange={(e) => setCreateForm((prev) => ({ ...prev, course_id: e.target.value, academic_session: '', semester: '', max_classes_per_day: '' }))}
-            disabled={!createForm.department_id}
-          >
-            <option value="">Select Course</option>
-            {createCourses.map((c) => (
-              <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>
-            ))}
-          </select>
+          <div>
+            <label className="mobile-card-label">Course</label>
+            <select
+              className="input-field"
+              value={createForm.course_id}
+              onChange={(e) => setCreateForm((prev) => ({ ...prev, course_id: e.target.value, academic_session: '', semester: '', max_classes_per_day: '' }))}
+              disabled={!createForm.department_id}
+            >
+              <option value="">Select Course</option>
+              {createCourses.map((c) => (
+                <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            className="input-field"
-            value={createForm.academic_session}
-            onChange={(e) => setCreateForm((prev) => ({ ...prev, academic_session: e.target.value }))}
-            disabled={!createForm.course_id}
-          >
-            <option value="">Select Academic Session</option>
-            {createAcademicSessions.map((session) => (
-              <option key={session} value={session}>{session}</option>
-            ))}
-          </select>
+          <div>
+            <label className="mobile-card-label">Academic Session</label>
+            <select
+              className="input-field"
+              value={createForm.academic_session}
+              onChange={(e) => setCreateForm((prev) => ({ ...prev, academic_session: e.target.value }))}
+              disabled={!createForm.course_id}
+            >
+              <option value="">Select Session</option>
+              {createAcademicSessions.map((session) => (
+                <option key={session} value={session}>{session}</option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            className="input-field"
-            value={createForm.semester}
-            onChange={(e) => setCreateForm((prev) => ({ ...prev, semester: e.target.value, max_classes_per_day: '' }))}
-            disabled={!createForm.course_id}
-          >
-            <option value="">Select Semester</option>
-            {createSemesters.map((sem) => (
-              <option key={sem} value={String(sem)}>Semester {sem}</option>
-            ))}
-          </select>
+          <div>
+            <label className="mobile-card-label">Semester</label>
+            <select
+              className="input-field"
+              value={createForm.semester}
+              onChange={(e) => setCreateForm((prev) => ({ ...prev, semester: e.target.value, max_classes_per_day: '' }))}
+              disabled={!createForm.course_id}
+            >
+              <option value="">Select Semester</option>
+              {createSemesters.map((sem) => (
+                <option key={sem} value={String(sem)}>Semester {sem}</option>
+              ))}
+            </select>
+          </div>
 
-          <select
-            className="input-field"
-            value={createForm.max_classes_per_day}
-            onChange={(e) => setCreateForm((prev) => ({ ...prev, max_classes_per_day: e.target.value }))}
-            disabled={!createForm.course_id || !createForm.semester || createMaxClassOptions.length === 0}
-          >
-            <option value="">Max Classes / Day</option>
-            {createMaxClassOptions.map((count) => (
-              <option key={count} value={count}>{count}</option>
-            ))}
-          </select>
+          <div>
+            <label className="mobile-card-label">Max Classes / Day</label>
+            <select
+              className="input-field"
+              value={createForm.max_classes_per_day}
+              onChange={(e) => setCreateForm((prev) => ({ ...prev, max_classes_per_day: e.target.value }))}
+              disabled={!createForm.course_id || !createForm.semester || createMaxClassOptions.length === 0}
+            >
+              <option value="">Select Option</option>
+              {createMaxClassOptions.map((count) => (
+                <option key={count} value={count}>{count}</option>
+              ))}
+            </select>
+          </div>
 
-          <input className="input-field" type="number" min="30" max="180" placeholder="Each Class Duration (minutes)" value={createForm.class_duration_minutes} onChange={(e) => setCreateForm((prev) => ({ ...prev, class_duration_minutes: e.target.value }))} />
-          <input className="input-field" type="time" value={createForm.class_start_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, class_start_time: e.target.value }))} />
-          <input className="input-field" type="time" value={createForm.class_end_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, class_end_time: e.target.value }))} />
-          <input className="input-field" type="time" value={createForm.recess_start_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, recess_start_time: e.target.value }))} />
-          <input className="input-field" type="time" value={createForm.recess_end_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, recess_end_time: e.target.value }))} />
+          <div>
+            <label className="mobile-card-label">Class Duration (min)</label>
+            <input className="input-field" type="number" min="30" max="180" placeholder="60" value={createForm.class_duration_minutes} onChange={(e) => setCreateForm((prev) => ({ ...prev, class_duration_minutes: e.target.value }))} />
+          </div>
 
-          <select className="input-field" value={createForm.status} onChange={(e) => setCreateForm((prev) => ({ ...prev, status: e.target.value }))}>
-            <option value="draft">Draft</option>
-            <option value="active">Active</option>
-          </select>
+          <div>
+            <label className="mobile-card-label">Day Starts At</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input-field" type="time" style={{ paddingLeft: 40 }} value={createForm.class_start_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, class_start_time: e.target.value }))} />
+              <HiOutlineClock size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            </div>
+          </div>
+
+          <div>
+            <label className="mobile-card-label">Day Ends At</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input-field" type="time" style={{ paddingLeft: 40 }} value={createForm.class_end_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, class_end_time: e.target.value }))} />
+              <HiOutlineClock size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            </div>
+          </div>
+
+          <div>
+            <label className="mobile-card-label">Recess Starts</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input-field" type="time" style={{ paddingLeft: 40 }} value={createForm.recess_start_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, recess_start_time: e.target.value }))} />
+              <HiOutlineClock size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            </div>
+          </div>
+
+          <div>
+            <label className="mobile-card-label">Recess Ends</label>
+            <div style={{ position: 'relative' }}>
+              <input className="input-field" type="time" style={{ paddingLeft: 40 }} value={createForm.recess_end_time} onChange={(e) => setCreateForm((prev) => ({ ...prev, recess_end_time: e.target.value }))} />
+              <HiOutlineClock size={16} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            </div>
+          </div>
+
+          <div>
+            <label className="mobile-card-label">Initial Status</label>
+            <select className="input-field" value={createForm.status} onChange={(e) => setCreateForm((prev) => ({ ...prev, status: e.target.value }))}>
+              <option value="draft">Draft</option>
+              <option value="active">Active</option>
+            </select>
+          </div>
         </div>
 
         {createConflictRetry?.signature === createFormSignature(createForm) ? (
-          <p style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--warning-700, #9a6700)' }}>
+          <p style={{ marginTop: 14, fontSize: '0.78rem', color: 'var(--warning-700, #9a6700)', padding: 10, background: 'rgba(245, 158, 11, 0.08)', borderRadius: 6, border: '1px solid rgba(245, 158, 11, 0.2)' }}>
             Conflict was detected in the previous attempt. Next click will retry using randomized assignment order against current DB conflicts.
           </p>
         ) : null}
 
-        <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button className="btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
           <button className="btn-primary" onClick={handleCreateGenerate} disabled={submittingCreate}>
             <HiOutlineCalendar size={16} />
@@ -925,6 +981,77 @@ export default function ManageTimetable() {
             </div>
           </>
         ) : null}
+      </Modal>
+
+      <Modal isOpen={showConflictModal} onClose={() => setShowConflictModal(false)} title="Scheduling Conflicts Detected" width={580}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 8, border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--accent-rose)', fontWeight: 600 }}>
+              The current schedule has overlaps for lecturers. Review the details below:
+            </p>
+          </div>
+
+          <div style={{ maxHeight: 400, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {conflictData?.intra_timetable?.length > 0 && (
+              <div>
+                <p className="mobile-card-label" style={{ marginBottom: 8, color: 'var(--accent-rose)' }}>Internal Overlaps (Same Timetable)</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {conflictData.intra_timetable.map((c, i) => (
+                    <div key={i} className="glass-card" style={{ padding: 10, fontSize: '0.78rem' }}>
+                      <p style={{ fontWeight: 700, marginBottom: 4 }}>Lecturer: {c.lecturer_name}</p>
+                      <p style={{ color: 'var(--text-muted)' }}>{c.day} | {c.slot_a?.start_time}-{c.slot_a?.end_time}</p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 6 }}>
+                        <div style={{ padding: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+                          <span style={{ display: 'block', fontSize: '0.7rem', opacity: 0.6 }}>Class A</span>
+                          {c.slot_a?.paper_name}
+                        </div>
+                        <div style={{ padding: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+                          <span style={{ display: 'block', fontSize: '0.7rem', opacity: 0.6 }}>Class B</span>
+                          {c.slot_b?.paper_name}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {conflictData?.active_timetable?.length > 0 && (
+              <div>
+                <p className="mobile-card-label" style={{ marginBottom: 8, color: 'var(--accent-amber)' }}>External Overlaps (Other Active Timetables)</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {conflictData.active_timetable.map((c, i) => (
+                    <div key={i} className="glass-card" style={{ padding: 10, fontSize: '0.78rem' }}>
+                      <p style={{ fontWeight: 700, marginBottom: 4 }}>Lecturer: {c.lecturer_name}</p>
+                      <p style={{ color: 'var(--text-muted)' }}>{c.day} | {c.candidate_slot?.start_time}-{c.candidate_slot?.end_time}</p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 6 }}>
+                        <div style={{ padding: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+                          <span style={{ display: 'block', fontSize: '0.7rem', opacity: 0.6 }}>New Schedule</span>
+                          {c.candidate_slot?.paper_name}
+                        </div>
+                        <div style={{ padding: 6, background: 'rgba(139, 92, 246, 0.1)', borderRadius: 4 }}>
+                          <span style={{ display: 'block', fontSize: '0.7rem', opacity: 0.6 }}>{c.existing_slot?.timetable_label}</span>
+                          {c.existing_slot?.paper_name}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            <p>Tip: If you are generating a new timetable, try clicking <b>Generate Timetable</b> again. The system will randomize the assignment order to attempt to find a slot without conflicts.</p>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <button className="btn-secondary" onClick={() => setShowConflictModal(false)}>Close</button>
+            <button className="btn-primary" onClick={() => { setShowConflictModal(false); handleCreateGenerate(); }} disabled={submittingCreate}>
+              Retry Generation
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

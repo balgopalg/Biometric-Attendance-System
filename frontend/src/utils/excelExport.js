@@ -133,15 +133,17 @@ export function exportToCSV({
     const timestamp = new Date().toISOString().split('T')[0];
     const finalFileName = `${fileName}_Export_${timestamp}.csv`;
 
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', finalFileName);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    if (typeof window !== 'undefined' && document) {
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', finalFileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
 
     return true;
   } catch (error) {
@@ -181,6 +183,6 @@ export const EXPORT_COLUMN_PRESETS = {
     { key: 'name', header: 'Paper Name' },
     { key: 'code', header: 'Code' },
     { key: 'semester', header: 'Semester' },
-    { key: 'lecturer_id', header: 'Lecturer' },
+    { key: 'lecturer_name', header: 'Lecturer' },
   ],
 };

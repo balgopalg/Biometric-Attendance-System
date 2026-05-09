@@ -49,7 +49,9 @@ def create_app(config_class=Config, seed_default_admin=False):
             token_session_version = int(jwt_payload.get("sv", 1) or 1)
             current_session_version = int(user.get("session_version", 1) or 1)
             return token_session_version != current_session_version
-        except Exception:
+        except Exception as exc:
+            from flask import current_app
+            current_app.logger.error("Token revocation check failed: %s", exc, exc_info=True)
             return True  # Fail-closed: deny access if revocation check fails
 
     cors.init_app(
@@ -66,6 +68,11 @@ def create_app(config_class=Config, seed_default_admin=False):
             app.config["RATELIMIT_HEADERS_ENABLED"] = True
             limiter.init_app(app)
         except Exception as exc:
+            if app.config.get("RATELIMIT_FAIL_CLOSED", False):
+                raise RuntimeError(
+                    "CRITICAL: Rate limiter initialization failed while RATELIMIT_FAIL_CLOSED=1. "
+                    "Refusing to start without effective brute-force protection."
+                ) from exc
             app.logger.warning("Rate limiter disabled: %s", exc)
 
     # Initialize observability (logging, error tracking, metrics)

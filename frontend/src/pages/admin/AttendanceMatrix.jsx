@@ -64,8 +64,17 @@ function formatSubjectHeader(subject) {
   return code || name || 'SUB';
 }
 
+const getIsMobile = () => (typeof window !== 'undefined' ? window.innerWidth < 1024 : false);
+
 export default function AttendanceMatrix() {
   const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+  const [isMobile, setIsMobile] = useState(getIsMobile);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 1024);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const [loading, setLoading] = useState(false);
   const [downloadingExcel, setDownloadingExcel] = useState(false);
@@ -102,17 +111,18 @@ export default function AttendanceMatrix() {
   const safeDates = useMemo(() => (Array.isArray(payload.dates) ? payload.dates : []), [payload.dates]);
   const safeRows = useMemo(() => (Array.isArray(payload.rows) ? payload.rows : []), [payload.rows]);
   // Matrix renders as soon as dept+course are chosen; session/semester narrow it further
-  const isFilterComplete = Boolean(filters.course_id);
+  const isFilterComplete = Boolean(filters.department_id && filters.course_id);
   // Exports remain gated on full filter selection for meaningful data
   const isExportReady = Boolean(filters.department_id && filters.course_id && filters.academic_session && filters.semester);
   const visibleDates = isFilterComplete ? safeDates : [];
   const visibleRows = isFilterComplete ? safeRows : [];
 
   const fetchMatrix = async (signal) => {
-    // For dept admins, always have department_id; super admins can browse all
-    if (!filters.course_id) {
+    // Only fetch once both department and course are selected to improve performance
+    if (!filters.department_id || !filters.course_id) {
        setPayload({ dates: [], rows: [], meta: {}, options: {} });
        setMatrixError('');
+       setLoading(false);
        return;
     }
     if (filters.from_date && filters.to_date && filters.from_date > filters.to_date) {
@@ -250,6 +260,56 @@ export default function AttendanceMatrix() {
     );
   }
 
+  if (!loading && !matrixError && !isFilterComplete) {
+    return (
+      <div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance Matrix</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 3 }}>
+              Month/period-wise attendance grouped by date and subject.
+            </p>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: 18, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, alignItems: 'center' }}>
+            <select
+              className="input-field"
+              value={filters.department_id}
+              onChange={(e) => setFilters((prev) => ({ ...prev, department_id: e.target.value, course_id: '', semester: '' }))}
+              disabled={isDepartmentAdmin}
+            >
+              <option value="">
+                {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+              </option>
+              {departments.map((d) => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </select>
+            <select
+              className="input-field"
+              value={filters.course_id}
+              onChange={(e) => setFilters((prev) => ({ ...prev, course_id: e.target.value, academic_session: '', semester: '' }))}
+              disabled={!filters.department_id}
+            >
+              <option value="">Select Course...</option>
+              {activeCourses.map((c) => (
+                <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <StatePanel
+          variant="empty"
+          title="Selection Required"
+          description="Please select a department and course to display the attendance matrix."
+          compact
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="admin-page" style={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'hidden' }}>
 
@@ -379,26 +439,27 @@ export default function AttendanceMatrix() {
         {!isFilterComplete ? (
           <StatePanel
             variant="empty"
-            title="Select a Course"
-            description="Choose a course (and optionally session/semester) to display the attendance matrix."
+            title="Selection Required"
+            description="Please select a department and course to display the attendance matrix."
             compact
           />
         ) : null}
 
         {!loading && !matrixError && isFilterComplete && visibleRows.length > 0 ? (
         <div style={{ width: '100%', maxWidth: '100%', overflowX: 'auto', overflowY: 'hidden' }}>
-        <table className="data-table attendance-matrix-table" style={{ width: 'max-content', minWidth: '100%' }}>
+        <table className="data-table attendance-matrix-table" style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
           <thead>
             <tr>
               <th
                 rowSpan={2}
                 style={{
-                  position: 'sticky',
+                  position: isMobile ? 'static' : 'sticky',
                   left: STICKY_ROLL_LEFT,
-                  zIndex: 7,
+                  zIndex: 10,
                   background: 'var(--bg-card)',
                   minWidth: 148,
-                  pointerEvents: 'auto',
+                  borderRight: '1px solid var(--border-color)',
+                  boxShadow: '4px 0 8px -4px rgba(0,0,0,0.1)',
                 }}
               >
                 Roll No
@@ -406,34 +467,45 @@ export default function AttendanceMatrix() {
               <th
                 rowSpan={2}
                 style={{
-                  position: 'sticky',
+                  position: isMobile ? 'static' : 'sticky',
                   left: STICKY_NAME_LEFT,
-                  zIndex: 7,
+                  zIndex: 10,
                   background: 'var(--bg-card)',
                   minWidth: 220,
-                  pointerEvents: 'auto',
-                  textAlign: 'center',
+                  borderRight: '1px solid var(--border-color)',
+                  boxShadow: '4px 0 8px -4px rgba(0,0,0,0.1)',
+                  textAlign: 'left',
+                  paddingLeft: 20
                 }}
               >
-                Name
+                Student Name
               </th>
               {visibleDates.map((dateEntry, idx) => (
-                <th key={`${dateEntry.date}-${idx}`} colSpan={(Array.isArray(dateEntry.subjects) ? dateEntry.subjects : []).length} style={{ textAlign: 'center', top: 'auto', position: 'static' }}>
+                <th 
+                  key={`${dateEntry.date}-${idx}`} 
+                  colSpan={(Array.isArray(dateEntry.subjects) ? dateEntry.subjects : []).length} 
+                  style={{ 
+                    textAlign: 'center', 
+                    background: 'rgba(var(--accent-primary-rgb), 0.03)',
+                    fontSize: '0.75rem',
+                    letterSpacing: '0.05em',
+                    borderBottom: '1px solid var(--border-color)'
+                  }}
+                >
                   {dateEntry.date}
                 </th>
               ))}
               <th
                 rowSpan={2}
                 style={{
-                  position: 'sticky',
+                  position: isMobile ? 'static' : 'sticky',
                   right: TOTAL_ATTENDED_RIGHT,
-                  zIndex: 8,
+                  zIndex: 11,
                   background: 'var(--bg-card)',
                   minWidth: TOTAL_ATTENDED_WIDTH,
-                  maxWidth: TOTAL_ATTENDED_WIDTH,
-                  width: TOTAL_ATTENDED_WIDTH,
+                  borderLeft: '1px solid var(--border-color)',
+                  boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.1)',
                   textAlign: 'center',
-                  padding: '10px 8px',
                 }}
               >
                 TCA
@@ -441,15 +513,12 @@ export default function AttendanceMatrix() {
               <th
                 rowSpan={2}
                 style={{
-                  position: 'sticky',
+                  position: isMobile ? 'static' : 'sticky',
                   right: TOTAL_HELD_RIGHT,
-                  zIndex: 8,
+                  zIndex: 11,
                   background: 'var(--bg-card)',
                   minWidth: TOTAL_HELD_WIDTH,
-                  maxWidth: TOTAL_HELD_WIDTH,
-                  width: TOTAL_HELD_WIDTH,
                   textAlign: 'center',
-                  padding: '10px 8px',
                 }}
               >
                 TCH
@@ -457,15 +526,12 @@ export default function AttendanceMatrix() {
               <th
                 rowSpan={2}
                 style={{
-                  position: 'sticky',
+                  position: isMobile ? 'static' : 'sticky',
                   right: TOTAL_PERCENT_RIGHT,
-                  zIndex: 8,
+                  zIndex: 11,
                   background: 'var(--bg-card)',
                   minWidth: TOTAL_PERCENT_WIDTH,
-                  maxWidth: TOTAL_PERCENT_WIDTH,
-                  width: TOTAL_PERCENT_WIDTH,
                   textAlign: 'center',
-                  padding: '10px 8px',
                 }}
               >
                 %
@@ -475,7 +541,13 @@ export default function AttendanceMatrix() {
               {visibleDates.flatMap((dateEntry, dateIndex) => (Array.isArray(dateEntry.subjects) ? dateEntry.subjects : []).map((subject, subIndex) => (
                 <th
                   key={`${subject.column_key || 'sub'}-${dateIndex}-${subIndex}`}
-                  style={{ textAlign: 'center', top: 'auto', position: 'static' }}
+                  style={{ 
+                    textAlign: 'center', 
+                    fontSize: '0.7rem',
+                    padding: '8px 4px',
+                    color: 'var(--text-muted)',
+                    background: 'rgba(var(--accent-primary-rgb), 0.01)'
+                  }}
                   title={`${subject.subject_name || subject.subject_code || 'Subject'}${subject.period_number ? ` | Period ${subject.period_number}` : ''}`}
                 >
                   {formatSubjectHeader(subject)}
@@ -487,85 +559,111 @@ export default function AttendanceMatrix() {
             {visibleRows.map((row) => (
               (() => {
                 const totals = getRowTotals(row);
+                const pct = parseFloat(totals.percentage);
+                const pctColor = pct >= 75 ? 'var(--accent-emerald)' : pct >= 60 ? 'var(--accent-amber)' : 'var(--accent-rose)';
+                const pctBg = pct >= 75 ? 'rgba(16, 185, 129, 0.1)' : pct >= 60 ? 'rgba(245, 158, 11, 0.1)' : 'rgba(244, 63, 94, 0.1)';
+
                 return (
-              <tr key={row.user_id}>
+              <tr key={row.user_id} className="matrix-row-hover">
                 <td
                   style={{
-                    position: 'sticky',
+                    position: isMobile ? 'static' : 'sticky',
                     left: STICKY_ROLL_LEFT,
-                    zIndex: 3,
+                    zIndex: 5,
                     background: 'var(--bg-card)',
                     minWidth: 148,
-                    pointerEvents: 'auto',
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    color: 'var(--text-muted)',
+                    borderRight: '1px solid var(--border-color)',
                   }}
                 >
                   {row.roll_no}
                 </td>
                 <td
                   style={{
-                    position: 'sticky',
+                    position: isMobile ? 'static' : 'sticky',
                     left: STICKY_NAME_LEFT,
-                    zIndex: 3,
+                    zIndex: 5,
                     background: 'var(--bg-card)',
                     minWidth: 220,
-                    pointerEvents: 'auto',
-                    textAlign: 'center',
+                    textAlign: 'left',
+                    paddingLeft: 20,
+                    borderRight: '1px solid var(--border-color)',
                   }}
                 >
-                  {row.name}
+                  <p style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--text-main)' }}>{row.name}</p>
                 </td>
-                {visibleDates.flatMap((dateEntry, dateIndex) => (Array.isArray(dateEntry.subjects) ? dateEntry.subjects : []).map((subject, subIndex) => (
-                  <td key={`${row.user_id}-${subject.column_key || 'sub'}-${dateIndex}-${subIndex}`} style={{ textAlign: 'center', fontWeight: 700 }}>
-                    {(row.cells || {})[subject.column_key] || 'X'}
-                  </td>
-                )))}
+                {visibleDates.flatMap((dateEntry, dateIndex) => (Array.isArray(dateEntry.subjects) ? dateEntry.subjects : []).map((subject, subIndex) => {
+                  const val = (row.cells || {})[subject.column_key] || 'X';
+                  const isPresent = val === 'P';
+                  return (
+                    <td 
+                      key={`${row.user_id}-${subject.column_key || 'sub'}-${dateIndex}-${subIndex}`} 
+                      style={{ 
+                        textAlign: 'center', 
+                        fontWeight: 700,
+                        fontSize: '0.75rem',
+                        color: isPresent ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                        opacity: isPresent ? 1 : 0.4
+                      }}
+                    >
+                      {val}
+                    </td>
+                  );
+                }))}
                 <td
                   style={{
-                    position: 'sticky',
+                    position: isMobile ? 'static' : 'sticky',
                     right: TOTAL_ATTENDED_RIGHT,
-                    zIndex: 4,
+                    zIndex: 6,
                     background: 'var(--bg-card)',
                     minWidth: TOTAL_ATTENDED_WIDTH,
-                    maxWidth: TOTAL_ATTENDED_WIDTH,
-                    width: TOTAL_ATTENDED_WIDTH,
                     textAlign: 'center',
                     fontWeight: 700,
-                    padding: '10px 8px',
+                    borderLeft: '1px solid var(--border-color)',
+                    color: 'var(--text-main)'
                   }}
                 >
                   {totals.totalAttended}
                 </td>
                 <td
                   style={{
-                    position: 'sticky',
+                    position: isMobile ? 'static' : 'sticky',
                     right: TOTAL_HELD_RIGHT,
-                    zIndex: 4,
+                    zIndex: 6,
                     background: 'var(--bg-card)',
                     minWidth: TOTAL_HELD_WIDTH,
-                    maxWidth: TOTAL_HELD_WIDTH,
-                    width: TOTAL_HELD_WIDTH,
                     textAlign: 'center',
                     fontWeight: 700,
-                    padding: '10px 8px',
+                    color: 'var(--text-muted)'
                   }}
                 >
                   {totals.totalHeld}
                 </td>
                 <td
                   style={{
-                    position: 'sticky',
+                    position: isMobile ? 'static' : 'sticky',
                     right: TOTAL_PERCENT_RIGHT,
-                    zIndex: 4,
+                    zIndex: 6,
                     background: 'var(--bg-card)',
                     minWidth: TOTAL_PERCENT_WIDTH,
-                    maxWidth: TOTAL_PERCENT_WIDTH,
-                    width: TOTAL_PERCENT_WIDTH,
                     textAlign: 'center',
-                    fontWeight: 700,
-                    padding: '10px 8px',
+                    padding: '8px'
                   }}
                 >
-                  {totals.percentage}
+                  <div style={{
+                    background: pctBg,
+                    color: pctColor,
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    display: 'inline-block',
+                    minWidth: '45px'
+                  }}>
+                    {totals.percentage}
+                  </div>
                 </td>
               </tr>
                 );

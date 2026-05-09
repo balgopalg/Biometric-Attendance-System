@@ -26,11 +26,25 @@ def create_paper(
             dept_oid = ObjectId(str(department_id))
         except (InvalidId, Exception):
             dept_oid = None
+    lec_oid = None
+    if lecturer_id and str(lecturer_id).strip():
+        try:
+            lec_oid = ObjectId(str(lecturer_id))
+        except:
+            lec_oid = None
+
+    course_oid = None
+    if course_id and str(course_id).strip():
+        try:
+            course_oid = ObjectId(str(course_id))
+        except:
+            course_oid = None
+
     doc = {
         "name": name,
         "code": code,
-        "course_id": course_id,
-        "lecturer_id": lecturer_id,
+        "course_id": course_oid or course_id,
+        "lecturer_id": lec_oid or lecturer_id,
         "semester": semester,
         "total_classes": total_classes,
         "department_id": dept_oid,
@@ -80,7 +94,11 @@ def get_papers_by_course(course_id: str) -> List[dict]:
 
 def get_papers_by_lecturer(lecturer_id: str) -> List[dict]:
     papers = get_collection("academic", "papers")
-    return list(papers.find({"lecturer_id": lecturer_id}))
+    try:
+        oid = ObjectId(lecturer_id)
+        return list(papers.find({"$or": [{"lecturer_id": oid}, {"lecturer_id": lecturer_id}]}))
+    except:
+        return list(papers.find({"lecturer_id": lecturer_id}))
 
 
 def update_paper(paper_id: str, fields: dict) -> Optional[dict]:
@@ -105,9 +123,14 @@ def delete_paper(paper_id: str) -> None:
 def bulk_assign_lecturer(paper_ids: List[str], lecturer_id: str) -> None:
     """Assign a lecturer to multiple papers at once."""
     papers = get_collection("academic", "papers")
+    try:
+        lec_oid = ObjectId(lecturer_id)
+    except:
+        lec_oid = lecturer_id
+
     papers.update_many(
         {"_id": {"$in": [ObjectId(pid) for pid in paper_ids]}},
-        {"$set": {"lecturer_id": lecturer_id}},
+        {"$set": {"lecturer_id": lec_oid}},
     )
 
 

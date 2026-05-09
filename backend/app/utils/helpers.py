@@ -2,12 +2,37 @@
 
 import base64
 import io
+import os
 from datetime import datetime, timezone
+from typing import Optional, Any
 
 import cv2
 import numpy as np
 from bson import ObjectId
 from PIL import Image, ImageOps
+
+try:
+    from flask import has_app_context, current_app
+except ImportError:  # pragma: no cover - allows use outside Flask
+    has_app_context = lambda: False  # noqa: E731
+    current_app = None
+
+
+def _current_env() -> str:
+    """Return the current environment name (e.g. 'production', 'development').
+
+    Checks Flask app config first, then falls back to environment variables.
+    Shared utility to avoid duplication across modules.
+    """
+    if has_app_context():
+        try:
+            env = current_app.config.get("ENV")
+            if env:
+                return str(env).strip().lower()
+        except Exception:
+            pass  # nosec B110
+
+    return (os.getenv("FLASK_ENV") or os.getenv("ENV") or "").strip().lower()
 
 
 def _as_text(value) -> str:
@@ -21,9 +46,31 @@ def _to_int(value, default=0) -> int:
         return default
 
 
+def _to_float(value, default=0.0) -> float:
+    """Safely convert a value to float with a fallback default."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_oid(value) -> Optional[ObjectId]:
+    if isinstance(value, ObjectId):
+        return value
+    text = _as_text(value)
+    if not text:
+        return None
+    try:
+        return ObjectId(text)
+    except Exception:
+        return None
+
+
 def _to_bool(value) -> bool:
     if isinstance(value, bool):
         return value
+    if value is None or value == 0:
+        return False
     return _as_text(value).lower() in {"1", "true", "yes", "y"}
 
 
@@ -202,7 +249,7 @@ def sanitise_mongo_doc(doc: dict) -> dict:
     from bson import ObjectId
 
     if doc is None:
-        return None
+        return {}
 
     def _convert(value):
         if isinstance(value, ObjectId):
@@ -221,5 +268,4 @@ def sanitise_mongo_doc(doc: dict) -> dict:
 def sanitise_many(docs) -> list:
     """Sanitise a list of Mongo documents."""
     return [sanitise_mongo_doc(d) for d in docs]
-
 

@@ -37,22 +37,15 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _to_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return _text(value).lower() in {"1", "true", "yes", "y"}
-
-
-def _to_oid(value: Any) -> Optional[ObjectId]:
-    if isinstance(value, ObjectId):
-        return value
-    text = _text(value)
-    if not text:
-        return None
-    try:
-        return ObjectId(text)
-    except Exception:
-        return None
+from app.utils.helpers import (
+    sanitise_mongo_doc, 
+    sanitise_many, 
+    _to_int, 
+    _as_text, 
+    _id_variants,
+    _to_oid,
+    _to_bool
+)
 
 
 def _normalize_user_role(user: dict) -> str:
@@ -161,10 +154,13 @@ def _build_timetable_payload(doc: dict, include_slots: bool = True) -> dict:
 
 
 def _slot_overlaps(a: dict, b: dict) -> bool:
-    return (
-        int(a.get("start_minutes") or -1) < int(b.get("end_minutes") or -1)
-        and int(a.get("end_minutes") or -1) > int(b.get("start_minutes") or -1)
-    )
+    a_start = a.get("start_minutes")
+    a_end = a.get("end_minutes")
+    b_start = b.get("start_minutes")
+    b_end = b.get("end_minutes")
+    if any(v is None for v in (a_start, a_end, b_start, b_end)):
+        return False
+    return int(a_start) < int(b_end) and int(a_end) > int(b_start)
 
 
 def _time_to_minutes(value: Any) -> Optional[int]:
@@ -235,6 +231,26 @@ def _intra_conflicts(slots: List[dict]) -> List[dict]:
     normalized = [item for item in (_normalize_slot_for_conflict(slot) for slot in slots) if item]
     conflicts: List[dict] = []
 
+    # Cache for enrichment
+    lecturer_names = {}
+    paper_names = {}
+
+    def get_lec_name(lid):
+        lid_str = str(lid)
+        if lid_str in lecturer_names: return lecturer_names[lid_str]
+        doc = get_collection("auth", "users").find_one({"_id": _to_oid(lid)}, {"name": 1})
+        name = doc.get("name") if doc else "Unknown Lecturer"
+        lecturer_names[lid_str] = name
+        return name
+
+    def get_pap_name(pid):
+        pid_str = str(pid)
+        if pid_str in paper_names: return paper_names[pid_str]
+        doc = get_collection("academic", "papers").find_one({"_id": _to_oid(pid)}, {"name": 1, "code": 1})
+        name = f"{doc.get('code')} - {doc.get('name')}" if doc else "Unknown Paper"
+        paper_names[pid_str] = name
+        return name
+
     for i in range(len(normalized)):
         left = normalized[i]
         for j in range(i + 1, len(normalized)):
@@ -246,20 +262,25 @@ def _intra_conflicts(slots: List[dict]) -> List[dict]:
             if not _slot_overlaps(left, right):
                 continue
 
+            lid = left.get("lecturer_id")
+            lec_name = get_lec_name(lid)
+
             conflicts.append(
                 {
                     "type": "intra_timetable",
-                    "lecturer_id": str(left.get("lecturer_id")),
+                    "lecturer_id": str(lid),
+                    "lecturer_name": lec_name,
                     "day_index": left.get("day_index"),
+                    "day": left.get("day"),
                     "slot_a": {
                         "slot_id": _text(left.get("_id") or left.get("slot_id")),
-                        "day": left.get("day"),
+                        "paper_name": get_pap_name(left.get("paper_id")),
                         "start_time": left.get("start_time"),
                         "end_time": left.get("end_time"),
                     },
                     "slot_b": {
                         "slot_id": _text(right.get("_id") or right.get("slot_id")),
-                        "day": right.get("day"),
+                        "paper_name": get_pap_name(right.get("paper_id")),
                         "start_time": right.get("start_time"),
                         "end_time": right.get("end_time"),
                     },
@@ -300,6 +321,41 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
     )
 
     conflicts: List[dict] = []
+    
+    # Enrichment cache
+    lecturer_names = {}
+    paper_names = {}
+    timetable_info = {}
+
+    def get_lec_name(lid):
+        lid_str = str(lid)
+        if lid_str in lecturer_names: return lecturer_names[lid_str]
+        doc = get_collection("auth", "users").find_one({"_id": _to_oid(lid)}, {"name": 1})
+        name = doc.get("name") if doc else "Unknown Lecturer"
+        lecturer_names[lid_str] = name
+        return name
+
+    def get_pap_name(pid):
+        pid_str = str(pid)
+        if pid_str in paper_names: return paper_names[pid_str]
+        doc = get_collection("academic", "papers").find_one({"_id": _to_oid(pid)}, {"name": 1, "code": 1})
+        name = f"{doc.get('code')} - {doc.get('name')}" if doc else "Unknown Paper"
+        paper_names[pid_str] = name
+        return name
+
+    def get_tt_info(ttid):
+        ttid_str = str(ttid)
+        if ttid_str in timetable_info: return timetable_info[ttid_str]
+        tt_doc = get_collection("academic", "timetables").find_one({"_id": _to_oid(ttid)})
+        if not tt_doc: return {"label": "Unknown Timetable"}
+        
+        course_doc = get_collection("academic", "courses").find_one({"_id": _to_oid(tt_doc.get("course_id"))}, {"name": 1})
+        course_name = course_doc.get("name") if course_doc else "Unknown Course"
+        label = f"{course_name} (Sem {tt_doc.get('semester')})"
+        info = {"label": label, "academic_session": tt_doc.get("academic_session")}
+        timetable_info[ttid_str] = info
+        return info
+
     for candidate in normalized:
         for existing in existing_slots:
             existing_norm = _normalize_slot_for_conflict(existing)
@@ -312,21 +368,30 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
             if not _slot_overlaps(existing_norm, candidate):
                 continue
 
+            lid = candidate.get("lecturer_id")
+            lec_name = get_lec_name(lid)
+            tt_id = existing_norm.get("timetable_id")
+            tt_details = get_tt_info(tt_id)
+
             conflicts.append(
                 {
                     "type": "active_timetable",
-                    "lecturer_id": str(candidate.get("lecturer_id")),
+                    "lecturer_id": str(lid),
+                    "lecturer_name": lec_name,
                     "day_index": candidate.get("day_index"),
+                    "day": candidate.get("day"),
                     "candidate_slot": {
                         "slot_id": _text(candidate.get("_id") or candidate.get("slot_id")),
-                        "day": candidate.get("day"),
+                        "paper_name": get_pap_name(candidate.get("paper_id")),
                         "start_time": candidate.get("start_time"),
                         "end_time": candidate.get("end_time"),
                     },
                     "existing_slot": {
                         "slot_id": _text(existing_norm.get("_id") or existing_norm.get("slot_id")),
-                        "timetable_id": _text(existing_norm.get("timetable_id")),
-                        "day": existing_norm.get("day"),
+                        "timetable_id": _text(tt_id),
+                        "timetable_label": tt_details.get("label"),
+                        "academic_session": tt_details.get("academic_session"),
+                        "paper_name": get_pap_name(existing_norm.get("paper_id")),
                         "start_time": existing_norm.get("start_time"),
                         "end_time": existing_norm.get("end_time"),
                     },

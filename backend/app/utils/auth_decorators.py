@@ -16,7 +16,7 @@ from __future__ import annotations
 from functools import wraps
 
 from flask import g, jsonify
-from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended import get_jwt, get_jwt_identity, verify_jwt_in_request
 
 from app.extensions import get_collection
 from app.security.rbac import (
@@ -54,6 +54,12 @@ def role_required(*allowed_roles):
 
             if not user:
                 return jsonify({"error": "Access denied"}), 403
+
+            # C-4 fix: Verify session_version to reject stale JWTs after password reset
+            claims = get_jwt() or {}
+            token_sv = claims.get("sv")
+            if token_sv is not None and int(user.get("session_version", 1)) != int(token_sv):
+                return jsonify({"error": "Session expired. Please log in again."}), 401
 
             # Normalize legacy "admin" role → "super_admin"
             user_role = user.get("role", "")

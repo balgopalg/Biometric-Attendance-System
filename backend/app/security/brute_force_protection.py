@@ -123,7 +123,7 @@ class BruteForceProtector:
         collection.delete_many({"email": email.lower()})
 
     @classmethod
-    def record_pin_failure(cls, session_id, lecturer_id, ip_address, attempt_number=1):
+    def record_pin_failure(cls, session_id, lecturer_id, ip_address):
         """Record a failed PIN entry attempt for a session."""
         collection = get_collection("attendance", "pin_failures")
         now = datetime.now(timezone.utc)
@@ -132,7 +132,6 @@ class BruteForceProtector:
             "session_id": session_id,
             "lecturer_id": lecturer_id,
             "ip_address": ip_address,
-            "attempt_number": attempt_number,
             "failed_at": now,
             "ttl": now + timedelta(hours=24),
         })

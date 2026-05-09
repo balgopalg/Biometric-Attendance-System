@@ -1,8 +1,10 @@
 from . import admin_bp
 from ._helpers import *
+from app.models.enrollment import encode_face_embedding
+from app.services.face_recognition import find_best_match
 
 @admin_bp.route("/students/enroll", methods=["POST"])
-@role_required("department_admin")
+@role_required("department_admin", "student")
 def enroll_student_face(user):
     """Accept a student photo, extract FaceNet embedding, and store it."""
     d = request.get_json(silent=True) or {}
@@ -13,9 +15,13 @@ def enroll_student_face(user):
     if not user_id or not photo_b64:
         return jsonify({"error": "user_id and photo are required"}), 400
 
-    resolved_user_id, _ = _resolve_user_identity(user_id)
+    resolved_user_id, profile = _resolve_user_identity(user_id)
     if not resolved_user_id:
         return jsonify({"error": "Student not found"}), 404
+
+    # Security check: Students can only enroll themselves
+    if user["role"] == "student" and str(user["_id"]) != str(resolved_user_id):
+        return jsonify({"error": "Access Denied: You can only enroll your own face profile."}), 403
 
     try:
         img = decode_base64_image(photo_b64)
@@ -41,6 +47,43 @@ def enroll_student_face(user):
     face_crop = faces[0]["crop"]
     try:
         embedding = generate_embedding(face_crop)
+        
+        # Check for face uniqueness within the same context (dept, course, semester)
+        force = _to_bool(d.get("force", False))
+        if not force:
+            query = {
+                "user_id": {"$ne": resolved_user_id},
+                "course_id": profile.get("course_id"),
+                "current_semester": profile.get("current_semester")
+            }
+            if profile.get("department_id"):
+                query["department_id"] = profile.get("department_id")
+            
+            other_profiles = list(get_collection("academic", "student_profiles").find(
+                query, {"user_id": 1, "face_embeddings": 1, "reg_number": 1}
+            ))
+            
+            if other_profiles:
+                match = find_best_match(embedding, other_profiles, threshold=0.7)
+                if match:
+                    matching_user = find_user_by_id(match["user_id"])
+                    other_name = matching_user.get("name", "another student")
+                    other_reg = match.get("reg_number") or "N/A"
+                    
+                    # If current user is a student, we don't allow "force" via popup
+                    if user["role"] == "student":
+                        return jsonify({
+                            "error": f"This face profile already exists for user {other_name} (Reg No: {other_reg}). Please re-enroll with a clearer photo."
+                        }), 400
+                        
+                    return jsonify({
+                        "match_found": True,
+                        "similarity": match["similarity"],
+                        "matching_user": f"{other_name} (Reg No: {other_reg})",
+                        "error": f"Face profile matches {other_name} [{other_reg}] ({match['similarity']*100:.1f}% similarity).",
+                        "message": f"Face matches {other_name} ({other_reg}) with {match['similarity']*100:.1f}% similarity. Enroll anyway?"
+                    }), 409
+
         add_face_embedding(resolved_user_id, embedding)
     except Exception as exc:
         current_app.logger.exception("Embedding persistence failed")
@@ -136,6 +179,7 @@ def upload_student_photo(user):
 
     log_action(
         "UPLOAD_STUDENT_PHOTO",
+        # Use ID of person who uploaded
         str(user["_id"]),
         details=f"Stored photo for {student_name} as {saved_path}",
     )
@@ -147,254 +191,164 @@ def upload_student_photo(user):
     }), 201
 
 
-def _train_single_face_job(actor_id, user_id, job_id=None):
-    _raise_if_job_cancelled(job_id)
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=1,
-            processed_faces=0,
-            trained_faces=0,
-            failed_faces=0,
-            stage="training",
-            message="Training 1 of 1 face",
-        )
+def _add_lecturer_face_embedding(user_id, embedding, photo_url=None):
+    users = get_collection("auth", "users")
+    push_fields = {"face_embeddings": encode_face_embedding(embedding)}
+    if photo_url:
+        push_fields["photo_urls"] = photo_url
 
-    train_result = _train_embeddings_from_dataset_for_user(user_id)
-    _raise_if_job_cancelled(job_id)
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=1,
-            processed_faces=1,
-            trained_faces=1,
-            failed_faces=0,
-            stage="saving",
-            message="Saving trainer artifact",
-        )
-    trainer_result = _refresh_face_trainer_artifact()
-    _raise_if_job_cancelled(job_id)
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=1,
-            processed_faces=1,
-            trained_faces=1,
-            failed_faces=0,
-            stage="completed",
-            message="Training complete",
-        )
-    log_action(
-        "TRAIN_FACE_FROM_DATASET",
-        actor_id,
-        target_user=user_id,
-        details=(
-            f"dataset={train_result['dataset_dir']}, "
-            f"trained={train_result['trained_embeddings']}, "
-            f"skipped={train_result['skipped_images']}, "
-            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
-        ),
+    users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$push": push_fields},
     )
-    return {
-        "message": "Face training completed",
-        "trained_embeddings": train_result["trained_embeddings"],
-        "skipped_images": train_result["skipped_images"],
-        "dataset_dir": train_result["dataset_dir"],
-        "trainer": trainer_result,
-    }
 
 
-def _train_bulk_faces_job(actor_id, user_ids, job_id=None):
-    items = []
-    total_trained_embeddings = 0
-    success_count = 0
-    failure_count = 0
+@admin_bp.route("/lecturers/enroll", methods=["POST"])
+@role_required("department_admin", "lecturer")
+def enroll_lecturer_face(user):
+    """Accept a lecturer photo, extract FaceNet embedding, and store it."""
+    d = request.get_json(silent=True) or {}
+    user_id = d.get("user_id") or d.get("lecturer_id") or d.get("id")
+    photo_b64 = d.get("photo")
+    dataset_photos = d.get("dataset_photos") or []
 
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=len(user_ids),
-            processed_faces=0,
-            trained_faces=0,
-            failed_faces=0,
-            stage="training",
-            message=f"Training 0 of {len(user_ids)} faces",
-        )
+    if not user_id or not photo_b64:
+        return jsonify({"error": "user_id and photo are required"}), 400
 
-    for index, sid in enumerate(user_ids, start=1):
-        _raise_if_job_cancelled(job_id)
-        user_id, _ = _resolve_user_identity(sid)
-        if not user_id:
-            items.append({"user_id": sid, "success": False, "error": "Student not found"})
-            failure_count += 1
-            if job_id:
-                _update_training_job_progress(
-                    job_id,
-                    processed_faces=index,
-                    trained_faces=success_count,
-                    failed_faces=failure_count,
-                    stage="training",
-                    message=f"Training {success_count} of {len(user_ids)} faces",
-                )
-            continue
+    resolved_user_id, profile = _resolve_user_identity(user_id)
+    if not resolved_user_id:
+        return jsonify({"error": "Lecturer not found"}), 404
 
+    try:
+        img = decode_base64_image(photo_b64)
+    except ValueError:
+        # User error: invalid/corrupt image, do not log traceback
+        return jsonify({"error": "Invalid image format. Please upload a valid PNG or JPEG photo."}), 400
+    except Exception:
+        # Unexpected error: log traceback
+        current_app.logger.exception("Unexpected error during image decoding")
+        return jsonify({"error": "Unexpected error while processing image. Please try again or contact support."}), 500
+
+    try:
+        detector = get_detector()
+        faces = detector.detect_faces(img)
+    except Exception as exc:
+        current_app.logger.exception("Face detector failed")
+        return jsonify({"error": f"Face detector unavailable: {exc}"}), 500
+
+    if not faces:
+        return jsonify({"error": "No face detected in the photo"}), 400
+
+    # Use the first (largest confidence) face
+    face_crop = faces[0]["crop"]
+    try:
+        embedding = generate_embedding(face_crop)
+        
+        # Check for face uniqueness across all lecturers
+        force = _to_bool(d.get("force", False))
+        if not force:
+            # Get all lecturers with face embeddings
+            all_lecturers = list(get_collection("auth", "users").find(
+                {"role": "lecturer", "face_embeddings": {"$exists": True, "$ne": []}},
+                {"_id": 1, "face_embeddings": 1, "name": 1}
+            ))
+            
+            if all_lecturers:
+                other_lecturers = [l for l in all_lecturers if str(l.get("_id")) != str(resolved_user_id)]
+                if other_lecturers:
+                    match = find_best_match(embedding, other_lecturers, threshold=0.7)
+                    if match:
+                        matching_user = find_user_by_id(match["user_id"])
+                        other_name = matching_user.get("name", "another lecturer")
+                        
+                        return jsonify({
+                            "match_found": True,
+                            "similarity": match["similarity"],
+                            "matching_user": other_name,
+                            "error": f"Face profile matches {other_name} ({match['similarity']*100:.1f}% similarity).",
+                            "message": f"Face matches {other_name} with {match['similarity']*100:.1f}% similarity. Enroll anyway?"
+                        }), 409
+        
+        _add_lecturer_face_embedding(resolved_user_id, embedding)
+    except Exception as exc:
+        current_app.logger.exception("Lecturer embedding persistence failed")
+        return jsonify({"error": f"Failed to store face embedding: {exc}"}), 500
+
+    dataset_saved_count = 0
+    dataset_warning = None
+    dataset_user_key = f"lec_{_as_text(resolved_user_id)}"
+
+    if isinstance(dataset_photos, list) and dataset_photos:
         try:
-            result = _train_embeddings_from_dataset_for_user(user_id)
-            total_trained_embeddings += int(result["trained_embeddings"])
-            success_count += 1
-            items.append(
-                {
-                    "user_id": _as_text(user_id),
-                    "success": True,
-                    "trained_embeddings": result["trained_embeddings"],
-                    "skipped_images": result["skipped_images"],
-                    "dataset_dir": result["dataset_dir"],
-                }
-            )
-        except ValueError as exc:
-            items.append({"user_id": _as_text(user_id), "success": False, "error": str(exc)})
-            failure_count += 1
+            dataset_crops = []
+            last_valid_crop = face_crop
+            for frame_b64 in dataset_photos[:50]:
+                if not isinstance(frame_b64, str) or not frame_b64:
+                    if last_valid_crop is not None:
+                        dataset_crops.append(last_valid_crop)
+                    continue
+                try:
+                    frame_img = decode_base64_image(frame_b64)
+                    frame_faces = detector.detect_faces(frame_img)
+                    if frame_faces:
+                        last_valid_crop = frame_faces[0]["crop"]
+                        dataset_crops.append(last_valid_crop)
+                    elif last_valid_crop is not None:
+                        dataset_crops.append(last_valid_crop)
+                except Exception:
+                    if last_valid_crop is not None:
+                        dataset_crops.append(last_valid_crop)
+                    continue
 
-        if job_id:
-            _update_training_job_progress(
-                job_id,
-                processed_faces=index,
-                trained_faces=success_count,
-                failed_faces=failure_count,
-                stage="training",
-                message=f"Training {success_count} of {len(user_ids)} faces",
-            )
+            if not dataset_crops and last_valid_crop is not None:
+                dataset_crops.append(last_valid_crop)
 
-    _raise_if_job_cancelled(job_id)
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=len(user_ids),
-            processed_faces=len(user_ids),
-            trained_faces=success_count,
-            failed_faces=failure_count,
-            stage="saving",
-            message="Saving trainer artifact",
-        )
-    trainer_result = _refresh_face_trainer_artifact()
-    _raise_if_job_cancelled(job_id)
-    log_action(
-        "BULK_TRAIN_FACE_FROM_DATASET",
-        actor_id,
-        details=(
-            f"requested={len(user_ids)}, success={success_count}, "
-            f"failed={failure_count}, trained_embeddings={total_trained_embeddings}, "
-            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
-        ),
-    )
-    return {
-        "message": "Bulk training completed",
-        "requested_count": len(user_ids),
-        "success_count": success_count,
-        "failure_count": failure_count,
-        "total_trained_embeddings": total_trained_embeddings,
-        "items": items,
-        "trainer": trainer_result,
-    }
+            while len(dataset_crops) < 50 and last_valid_crop is not None:
+                dataset_crops.append(last_valid_crop)
 
-
-def _rebuild_all_faces_job(actor_id, job_id=None):
-    profiles = get_all_profiles(["user_id"])
-    if not profiles:
-        return {"error": "No student profiles found"}
-
-    items = []
-    success_count = 0
-    failure_count = 0
-    total_trained_embeddings = 0
-
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=len(profiles),
-            processed_faces=0,
-            trained_faces=0,
-            failed_faces=0,
-            stage="training",
-            message=f"Training 0 of {len(profiles)} faces",
-        )
-
-    for index, profile in enumerate(profiles, start=1):
-        _raise_if_job_cancelled(job_id)
-        user_id = _as_text(profile.get("user_id"))
-        if not user_id:
-            failure_count += 1
-            items.append({"user_id": None, "success": False, "error": "Missing user_id"})
-            if job_id:
-                _update_training_job_progress(
-                    job_id,
-                    processed_faces=index,
-                    trained_faces=success_count,
-                    failed_faces=failure_count,
-                    stage="training",
-                    message=f"Training {success_count} of {len(profiles)} faces",
+            if dataset_crops:
+                saved_paths = save_cropped_face_dataset(
+                    dataset_user_key,
+                    dataset_crops,
+                    dataset_root="dataset",
+                    max_images=50,
                 )
-            continue
-
-        try:
-            result = _train_embeddings_from_dataset_for_user(user_id)
-            success_count += 1
-            total_trained_embeddings += int(result["trained_embeddings"])
-            items.append(
-                {
-                    "user_id": user_id,
-                    "success": True,
-                    "trained_embeddings": result["trained_embeddings"],
-                    "skipped_images": result["skipped_images"],
-                    "dataset_dir": result["dataset_dir"],
-                }
-            )
+                dataset_saved_count = len(saved_paths)
         except Exception as exc:
-            failure_count += 1
-            items.append({"user_id": user_id, "success": False, "error": str(exc)})
-
-        if job_id:
-            _update_training_job_progress(
-                job_id,
-                processed_faces=index,
-                trained_faces=success_count,
-                failed_faces=failure_count,
-                stage="training",
-                message=f"Training {success_count} of {len(profiles)} faces",
+            current_app.logger.exception("Dataset save failed during lecturer face enrollment")
+            dataset_warning = f"Dataset save failed: {exc}"
+    else:
+        # Single photo upload — save the detected face crop to the dataset folder
+        try:
+            saved_paths = save_cropped_face_dataset(
+                dataset_user_key,
+                [face_crop] * 50,
+                dataset_root="dataset",
+                max_images=50,
             )
+            dataset_saved_count = len(saved_paths)
+        except Exception as exc:
+            current_app.logger.exception("Dataset save failed during lecturer single-photo enrollment")
+            dataset_warning = f"Dataset save failed: {exc}"
 
-    _raise_if_job_cancelled(job_id)
-    if job_id:
-        _update_training_job_progress(
-            job_id,
-            total_faces=len(profiles),
-            processed_faces=len(profiles),
-            trained_faces=success_count,
-            failed_faces=failure_count,
-            stage="saving",
-            message="Saving trainer artifact",
-        )
-    trainer_result = _refresh_face_trainer_artifact()
-    _raise_if_job_cancelled(job_id)
     log_action(
-        "REBUILD_ALL_FACE_EMBEDDINGS",
-        actor_id,
-        details=(
-            f"requested={len(profiles)}, success={success_count}, failure={failure_count}, "
-            f"trained_embeddings={total_trained_embeddings}, "
-            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
-        ),
+        "ENROLL_LECTURER_FACE",
+        str(user["_id"]),
+        target_user=_as_text(resolved_user_id),
+        details="Face embedding added",
     )
+    _clear_query_cache()
 
-    return {
-        "message": "Face embeddings rebuilt",
-        "requested_count": len(profiles),
-        "success_count": success_count,
-        "failure_count": failure_count,
-        "total_trained_embeddings": total_trained_embeddings,
-        "items": items,
-        "trainer": trainer_result,
+    response = {
+        "message": "Face enrolled successfully",
+        "faces_detected": len(faces),
+        "dataset_saved_count": dataset_saved_count,
     }
+    if dataset_warning:
+        response["dataset_warning"] = dataset_warning
+
+    return jsonify(response), 200
+
 
 
 @admin_bp.route("/students/<sid>/train-face", methods=["POST"])
@@ -564,5 +518,3 @@ def capture_faces_dataset(user):
         "captured_count": len(saved_paths),
         "dataset_folder": os.path.dirname(saved_paths[0]) if saved_paths else "dataset",
     }), 200
-
-

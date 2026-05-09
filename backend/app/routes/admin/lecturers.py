@@ -1,5 +1,8 @@
 from . import admin_bp
 from ._helpers import *
+import os
+import shutil
+from flask import send_from_directory
 
 @admin_bp.route("/lecturers/<lid>/papers", methods=["GET"])
 @role_required("department_admin")
@@ -144,6 +147,8 @@ def list_lecturers(user):
         lec["assigned_papers"] = assigned_papers
         lec["assigned_semesters"] = sorted(assigned_semesters, key=lambda v: int(v))
         lec["academic_years"] = sorted(list(set(years)))
+        lec["has_face"] = bool(lec.get("face_embeddings"))
+        lec.pop("face_embeddings", None)
         result.append(lec)
 
     return _paginate_items(sanitise_many(result))
@@ -231,6 +236,30 @@ def remove_lecturer(user, lid):
     )
     _clear_query_cache()
     return jsonify({"message": "Deleted"}), 200
+
+
+@admin_bp.route("/lecturers/<lid>/face", methods=["DELETE"])
+@role_required("department_admin")
+@validate_ids("lid")
+def remove_lecturer_face(user, lid):
+    if not find_user_by_id(lid):
+        return jsonify({"error": "Lecturer not found"}), 404
+
+    users_col = get_collection("auth", "users")
+    users_col.update_one(
+        {"_id": ObjectId(lid)},
+        {"$set": {"face_embeddings": []}}
+    )
+            
+    log_action("DELETE_LECTURER_FACE", str(user["_id"]), target_user=lid, details="Deleted face embeddings")
+    _clear_query_cache()
+    
+    # Delete dataset if exists
+    dataset_dir = _resolve_dataset_dir_for_user(lid)
+    if os.path.isdir(dataset_dir):
+        shutil.rmtree(dataset_dir, ignore_errors=True)
+        
+    return jsonify({"message": "Face profile deleted successfully"}), 200
 
 
 @admin_bp.route("/lecturers/<lid>/reset-password", methods=["POST"])
@@ -506,5 +535,47 @@ def _generate_import_temp_password(length=14):
         chars.append(secrets.choice(all_chars))
     secrets.SystemRandom().shuffle(chars)
     return "".join(chars)
+
+
+@admin_bp.route("/lecturers/profile-picture/<path:file_name>", methods=["GET"])
+@role_required("super_admin", "department_admin")
+def get_lecturer_profile_picture(user, file_name):
+    """Serve lecturer profile pictures for administrators.
+    
+    Enforces department-level tenant isolation:
+    - super_admin can access any lecturer's profile picture
+    - department_admin can only access lecturers in their department
+    """
+    safe_name = os.path.basename(file_name or "")
+    if not safe_name:
+        return jsonify({"error": "Profile picture not found"}), 404
+
+    # Resolve folder from auth module's internal helper logic
+    from ..auth import _safe_profile_upload_folder
+    from app.security.rbac import get_user_department_id, is_super_admin
+    
+    profile_dir = _safe_profile_upload_folder()
+    file_path = os.path.join(profile_dir, safe_name)
+
+    if not os.path.isfile(file_path):
+        return jsonify({"error": "Profile picture not found"}), 404
+
+    # Department isolation: verify the file belongs to a lecturer in the requester's department
+    if not is_super_admin(user):
+        requester_dept = get_user_department_id(user)
+        
+        # Find which lecturer owns this profile picture
+        users_col = get_collection("auth", "users")
+        owner = users_col.find_one({"profile_picture_file": safe_name})
+        
+        if not owner:
+            return jsonify({"error": "Profile picture not found"}), 404
+        
+        # For department_admin, enforce same-department access
+        owner_dept = get_user_department_id(owner) if isinstance(owner, dict) else None
+        if requester_dept != owner_dept:
+            return jsonify({"error": "Unauthorized to access this resource"}), 403
+
+    return send_from_directory(profile_dir, safe_name)
 
 

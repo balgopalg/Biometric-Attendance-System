@@ -1,9 +1,13 @@
-const INDIA_TIME_ZONE = 'Asia/Kolkata';
-const INDIA_TIMEZONE_OFFSET_MINUTES = -330;
+const SYSTEM_TIME_ZONE = import.meta.env.VITE_SYSTEM_TIMEZONE || 'Asia/Kolkata';
+// Default to IST offset if not specified (needed for some backend alignment logic)
+const SYSTEM_TIMEZONE_OFFSET_MINUTES = Number(import.meta.env.VITE_SYSTEM_TIMEZONE_OFFSET_MINUTES) || -330;
 
-export function getIndiaTimezoneOffsetMinutes() {
-  return INDIA_TIMEZONE_OFFSET_MINUTES;
+export function getSystemTimezoneOffsetMinutes() {
+  return SYSTEM_TIMEZONE_OFFSET_MINUTES;
 }
+
+// Backward compatibility for components that haven't been renamed yet
+export const getIndiaTimezoneOffsetMinutes = getSystemTimezoneOffsetMinutes;
 
 export function formatDateTimeIndia(value, options = {}) {
   if (!value) return '—';
@@ -16,11 +20,11 @@ export function formatDateTimeIndia(value, options = {}) {
   const hasStylePreset = options.dateStyle || options.timeStyle;
   const formatterOptions = hasStylePreset
     ? {
-        timeZone: INDIA_TIME_ZONE,
+        timeZone: SYSTEM_TIME_ZONE,
         ...options,
       }
     : {
-        timeZone: INDIA_TIME_ZONE,
+        timeZone: SYSTEM_TIME_ZONE,
         year: options.year || 'numeric',
         month: options.month || 'short',
         day: options.day || '2-digit',
@@ -35,7 +39,7 @@ export function formatDateTimeIndia(value, options = {}) {
     return new Intl.DateTimeFormat('en-IN', formatterOptions).format(date);
   } catch {
     // Never break rendering due to locale option mismatches.
-    return date.toLocaleString('en-IN', { timeZone: INDIA_TIME_ZONE });
+    return date.toLocaleString('en-IN', { timeZone: SYSTEM_TIME_ZONE });
   }
 }
 
@@ -46,7 +50,7 @@ export function formatDateIndia(value, options = {}) {
   if (Number.isNaN(date.getTime())) return '—';
 
   return new Intl.DateTimeFormat('en-IN', {
-    timeZone: INDIA_TIME_ZONE,
+    timeZone: SYSTEM_TIME_ZONE,
     year: options.year || 'numeric',
     month: options.month || 'short',
     day: options.day || '2-digit',
@@ -61,7 +65,7 @@ export function formatTimeIndia(value, options = {}) {
   if (Number.isNaN(date.getTime())) return '—';
 
   return new Intl.DateTimeFormat('en-IN', {
-    timeZone: INDIA_TIME_ZONE,
+    timeZone: SYSTEM_TIME_ZONE,
     hour: options.hour || '2-digit',
     minute: options.minute || '2-digit',
     second: options.second || '2-digit',

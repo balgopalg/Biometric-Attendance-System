@@ -13,7 +13,7 @@ from app.extensions import get_collection
 from app.repositories import find_many_by_ids
 from app.security.brute_force_protection import BruteForceProtector
 from app.utils.validation import validate_password_strength
-import re
+
 
 # Valid role values for the 4-tier RBAC model
 VALID_ROLES = {"super_admin", "department_admin", "lecturer", "student"}
@@ -107,7 +107,7 @@ def create_user(
     if department_id is not None and str(department_id).strip():
         try:
             dept_oid = ObjectId(str(department_id))
-        except (InvalidId, Exception):
+        except (InvalidId, TypeError, ValueError):
             dept_oid = None
 
     doc = {

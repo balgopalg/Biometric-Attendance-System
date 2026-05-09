@@ -103,8 +103,10 @@ from app.utils.helpers import (
     decode_base64_image, 
     decode_image_bytes,
     _to_int,
+    _to_float,
     _as_text,
-    _id_variants
+    _id_variants,
+    _to_oid
 )
 from app.utils.timezone import india_timestamp_token
 from app.utils.validation import validate_password_strength
@@ -130,6 +132,71 @@ _AUDIT_EXCLUDED_ACTIONS = [
     "student_profile_read",
     "student_profile_read_by_id",
     "student_profiles_bulk_read",
+]
+
+
+# ---------------------------------------------------------------------------
+# __all__ — controls `from ._helpers import *` to prevent namespace pollution
+# ---------------------------------------------------------------------------
+__all__ = [
+    # Flask / HTTP
+    "admin_bp", "request", "jsonify", "current_app", "send_file", "has_app_context",
+    "Blueprint", "ObjectId", "DuplicateKeyError",
+    # Re-exported helpers
+    "sanitise_mongo_doc", "sanitise_many", "decode_base64_image", "decode_image_bytes",
+    "_to_int", "_to_float", "_as_text", "_id_variants", "_to_oid",
+    # Standard library
+    "re", "random", "secrets", "os", "time", "csv", "openpyxl",
+    "BytesIO", "StringIO", "datetime", "timedelta", "timezone",
+    "cv2", "np", "uuid4",
+    # Models
+    "log_attendance", "get_approved_leave_dates", "session_date_str",
+    "log_action", "get_audit_logs", "get_audit_log_by_id", "mark_audit_log_rolled_back",
+    "create_course", "get_all_courses", "get_course_by_id", "get_course_by_code",
+    "update_course", "delete_course", "is_course_active",
+    "create_student_profile", "get_profile_by_user", "get_profile_by_id",
+    "add_face_embedding", "set_face_embeddings", "enroll_in_papers",
+    "get_all_profiles", "update_profile", "delete_profile",
+    "create_paper", "get_all_papers", "get_paper_by_id", "get_paper_by_code",
+    "get_papers_by_course", "update_paper", "delete_paper",
+    "bulk_assign_lecturer", "bulk_assign_course",
+    "create_user", "get_users_by_role", "get_users_by_ids", "update_user",
+    "delete_user", "find_user_by_id", "find_user_by_email",
+    "reset_user_password", "set_user_pin",
+    # Services
+    "get_detector", "generate_embedding", "generate_embeddings_batch",
+    "capture_faces_for_user", "save_student_upload", "save_cropped_face_dataset",
+    "train_and_save_face_model",
+    # Security / RBAC
+    "role_required", "super_admin_required", "validate_ids",
+    "dept_scope_filter", "is_super_admin", "get_user_department_id",
+    # Departments
+    "create_department", "get_all_departments", "get_department_by_id",
+    "get_department_by_code", "update_department", "soft_delete_department",
+    # Utilities
+    "india_timestamp_token", "validate_password_strength",
+    "send_welcome_email", "send_password_reset_email",
+    "send_shortage_alert_email", "is_email_delivery_enabled",
+    # Internal helpers exposed to route modules
+    "_dept_filter", "_user_dept_id", "_get_paginated_data",
+    "_utcnow", "_temp_pass_display_enabled",
+    "_cache_get", "_cache_set", "_cache_payload", "_clear_query_cache",
+    "_create_background_job", "_update_background_job", "_get_background_job",
+    "_enqueue_background_job", "_get_task_queue_client",
+    "_update_training_job_progress", "_raise_if_job_cancelled",
+    "_train_single_face_job", "_train_bulk_faces_job", "_rebuild_all_faces_job",
+    "_execute_background_job", "process_background_job",
+    "recover_stuck_background_jobs", "promote_due_delayed_jobs",
+    "_AUDIT_EXCLUDED_ACTIONS", "_ELIGIBILITY_CACHE_TTL_SECONDS",
+    "_QUERY_CACHE_TTL_SECONDS", "_JobCancelledError",
+    "_to_bool",
+    # Additional helpers used by route modules
+    "_parse_iso_date", "_local_midnight_to_utc", "_normalise_year",
+    "_resolve_user_identity", "_safe_get_course", "_get_active_course_or_error",
+    "_execute_rollback_operation",
+    "_train_embeddings_from_dataset_for_user", "_refresh_face_trainer_artifact",
+    "_schedule_local_retry", "_get_queue_names",
+    "get_collection",
 ]
 
 
@@ -346,7 +413,12 @@ def _get_task_queue_client():
 
     with _QUEUE_CLIENT_LOCK:
         if _QUEUE_CLIENT is not None:
-            return _QUEUE_CLIENT
+            # Verify the cached client is still alive; reset if stale.
+            try:
+                _QUEUE_CLIENT.ping()
+                return _QUEUE_CLIENT
+            except Exception:
+                _QUEUE_CLIENT = None
 
         queue_url = current_app.config.get("TASK_QUEUE_REDIS_URL")
         if not queue_url:
@@ -466,6 +538,256 @@ def _schedule_local_retry(job_id, delay_seconds):
             process_background_job(job_id)
 
     Thread(target=_runner, daemon=True).start()
+
+
+def _train_single_face_job(actor_id, user_id, job_id=None):
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message="Training 1 of 1 face",
+        )
+
+    train_result = _train_embeddings_from_dataset_for_user(user_id)
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=1,
+            trained_faces=1,
+            failed_faces=0,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=1,
+            processed_faces=1,
+            trained_faces=1,
+            failed_faces=0,
+            stage="completed",
+            message="Training complete",
+        )
+    log_action(
+        "TRAIN_FACE_FROM_DATASET",
+        actor_id,
+        target_user=user_id,
+        details=(
+            f"dataset={train_result['dataset_dir']}, "
+            f"trained={train_result['trained_embeddings']}, "
+            f"skipped={train_result['skipped_images']}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
+        ),
+    )
+    return {
+        "message": "Face training completed",
+        "trained_embeddings": train_result["trained_embeddings"],
+        "skipped_images": train_result["skipped_images"],
+        "dataset_dir": train_result["dataset_dir"],
+        "trainer": trainer_result,
+    }
+
+
+def _train_bulk_faces_job(actor_id, user_ids, job_id=None):
+    items = []
+    total_trained_embeddings = 0
+    success_count = 0
+    failure_count = 0
+
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(user_ids),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message=f"Training 0 of {len(user_ids)} faces",
+        )
+
+    for index, sid in enumerate(user_ids, start=1):
+        _raise_if_job_cancelled(job_id)
+        user_id, _ = _resolve_user_identity(sid)
+        if not user_id:
+            items.append({"user_id": sid, "success": False, "error": "Student not found"})
+            failure_count += 1
+            if job_id:
+                _update_training_job_progress(
+                    job_id,
+                    processed_faces=index,
+                    trained_faces=success_count,
+                    failed_faces=failure_count,
+                    stage="training",
+                    message=f"Training {success_count} of {len(user_ids)} faces",
+                )
+            continue
+
+        try:
+            result = _train_embeddings_from_dataset_for_user(user_id)
+            total_trained_embeddings += int(result["trained_embeddings"])
+            success_count += 1
+            items.append(
+                {
+                    "user_id": sid,
+                    "success": True,
+                    "trained_embeddings": result["trained_embeddings"],
+                    "skipped_images": result["skipped_images"],
+                    "dataset_dir": result["dataset_dir"],
+                }
+            )
+        except ValueError as exc:
+            items.append({"user_id": sid, "success": False, "error": str(exc)})
+            failure_count += 1
+
+        if job_id:
+            _update_training_job_progress(
+                job_id,
+                processed_faces=index,
+                trained_faces=success_count,
+                failed_faces=failure_count,
+                stage="training",
+                message=f"Training {success_count} of {len(user_ids)} faces",
+            )
+
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(user_ids),
+            processed_faces=len(user_ids),
+            trained_faces=success_count,
+            failed_faces=failure_count,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
+    log_action(
+        "BULK_TRAIN_FACE_FROM_DATASET",
+        actor_id,
+        details=(
+            f"requested={len(user_ids)}, success={success_count}, "
+            f"failed={failure_count}, trained_embeddings={total_trained_embeddings}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
+        ),
+    )
+    return {
+        "message": "Bulk training completed",
+        "requested_count": len(user_ids),
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "total_trained_embeddings": total_trained_embeddings,
+        "items": items,
+        "trainer": trainer_result,
+    }
+
+
+def _rebuild_all_faces_job(actor_id, job_id=None):
+    profiles = get_all_profiles(["user_id"])
+    if not profiles:
+        return {"error": "No student profiles found"}
+
+    items = []
+    success_count = 0
+    failure_count = 0
+    total_trained_embeddings = 0
+
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(profiles),
+            processed_faces=0,
+            trained_faces=0,
+            failed_faces=0,
+            stage="training",
+            message=f"Training 0 of {len(profiles)} faces",
+        )
+
+    for index, profile in enumerate(profiles, start=1):
+        _raise_if_job_cancelled(job_id)
+        user_id = _as_text(profile.get("user_id"))
+        if not user_id:
+            failure_count += 1
+            items.append({"user_id": None, "success": False, "error": "Missing user_id"})
+            if job_id:
+                _update_training_job_progress(
+                    job_id,
+                    processed_faces=index,
+                    trained_faces=success_count,
+                    failed_faces=failure_count,
+                    stage="training",
+                    message=f"Training {success_count} of {len(profiles)} faces",
+                )
+            continue
+
+        try:
+            result = _train_embeddings_from_dataset_for_user(user_id)
+            success_count += 1
+            total_trained_embeddings += int(result["trained_embeddings"])
+            items.append(
+                {
+                    "user_id": user_id,
+                    "success": True,
+                    "trained_embeddings": result["trained_embeddings"],
+                    "skipped_images": result["skipped_images"],
+                    "dataset_dir": result["dataset_dir"],
+                }
+            )
+        except Exception as exc:
+            failure_count += 1
+            items.append({"user_id": user_id, "success": False, "error": str(exc)})
+
+        if job_id:
+            _update_training_job_progress(
+                job_id,
+                processed_faces=index,
+                trained_faces=success_count,
+                failed_faces=failure_count,
+                stage="training",
+                message=f"Training {success_count} of {len(profiles)} faces",
+            )
+
+    _raise_if_job_cancelled(job_id)
+    if job_id:
+        _update_training_job_progress(
+            job_id,
+            total_faces=len(profiles),
+            processed_faces=len(profiles),
+            trained_faces=success_count,
+            failed_faces=failure_count,
+            stage="saving",
+            message="Saving trainer artifact",
+        )
+    trainer_result = _refresh_face_trainer_artifact()
+    _raise_if_job_cancelled(job_id)
+    log_action(
+        "REBUILD_ALL_FACE_EMBEDDINGS",
+        actor_id,
+        details=(
+            f"requested={len(profiles)}, success={success_count}, failure={failure_count}, "
+            f"trained_embeddings={total_trained_embeddings}, "
+            f"trainer={trainer_result.get('model_path') or 'not_saved'}"
+        ),
+    )
+
+    return {
+        "message": "Face embeddings rebuilt",
+        "requested_count": len(profiles),
+        "success_count": success_count,
+        "failure_count": failure_count,
+        "total_trained_embeddings": total_trained_embeddings,
+        "items": items,
+        "trainer": trainer_result,
+    }
 
 
 def _execute_background_job(job):
@@ -827,6 +1149,28 @@ def _ensure_student_course_active(user_id):
     return profile, None
 
 
+def _normalise_course_semester(course_id, semester):
+    cid = _as_text(course_id)
+    if not cid:
+        return None, None, "course_id is required"
+
+    course = _safe_get_course(cid)
+    if not course:
+        return None, None, "Course not found"
+    if _course_is_inactive(course):
+        return None, None, "Course is inactive. Reassign entities to an active course first"
+
+    sem = _to_int(semester, 0)
+    if sem <= 0:
+        return None, None, "semester must be a positive integer"
+
+    max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
+    if sem > max_sem:
+        return None, None, f"semester must be between 1 and {max_sem} for selected course"
+
+    return cid, sem, None
+
+
 def _ensure_paper_course_active(paper):
     course_id = _as_text((paper or {}).get("course_id"))
     if not course_id:
@@ -876,6 +1220,11 @@ def _resolve_dataset_dir_for_user(user_id):
     dataset_dir = os.path.join("dataset", user_id_text)
     if os.path.isdir(dataset_dir):
         return dataset_dir
+
+    # Lecturer-specific prefix
+    lec_dir = os.path.join("dataset", f"lec_{user_id_text}")
+    if os.path.isdir(lec_dir):
+        return lec_dir
 
     # Backward compatibility for previously created name-based dataset folders.
     student = find_user_by_id(user_id) or {}
@@ -981,8 +1330,12 @@ def _resolve_user_identity(user_identifier):
         return _as_text(profile.get("user_id")), profile
 
     user = _safe_find_user(user_identifier)
-    if user and user.get("role") == "student":
-        return _as_text(user_identifier), _get_profile_by_user_any(user_identifier)
+    if user:
+        role = _as_text(user.get("role")).lower()
+        if role == "student":
+            return _as_text(user_identifier), _get_profile_by_user_any(user_identifier)
+        if role == "lecturer":
+            return _as_text(user_identifier), user
 
     return None, None
 

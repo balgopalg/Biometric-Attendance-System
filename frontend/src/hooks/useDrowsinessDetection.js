@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import '@mediapipe/face_mesh';
 import '@mediapipe/camera_utils';
 
@@ -45,7 +45,7 @@ export function useDrowsinessDetection(videoRef, isActive) {
   // Fix #7: Use a ref to track drowsy state inside callbacks to avoid stale closures
   const isDrowsyRef = useRef(false);
 
-  const resetState = () => {
+  const resetState = useCallback(() => {
     drowsyFramesCount.current = 0;
     recoveryFramesCount.current = 0;
     facePresenceFrames.current = 0;
@@ -54,7 +54,7 @@ export function useDrowsinessDetection(videoRef, isActive) {
     baselineEar.current = null;
     isDrowsyRef.current = false;
     setIsDrowsy(false);
-  };
+  }, []);
 
   const updateDrowsy = (value) => {
     isDrowsyRef.current = value;
@@ -195,7 +195,7 @@ export function useDrowsinessDetection(videoRef, isActive) {
       resetState();
     };
   // Fix #8 & #19: videoRef is stable (useRef), removed from deps. isDrowsy tracked via ref.
-  }, [isActive]);
+  }, [isActive, resetState]);
 
   return isDrowsy;
 }
