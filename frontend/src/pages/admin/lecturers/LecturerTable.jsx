@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   HiOutlineChevronDown,
@@ -28,6 +28,73 @@ export default function LecturerTable({
   onEnrollFace,
 }) {
   const [previewImage, setPreviewImage] = useState(null);
+  const [activePopoverAnchor, setActivePopoverAnchor] = useState(null);
+
+  useEffect(() => {
+    if (!openDepartmentPopover.lecturerId || !openDepartmentPopover.department) {
+      setActivePopoverAnchor(null);
+    }
+  }, [openDepartmentPopover]);
+
+  const handleDepartmentButtonClick = (event, lecturerId, group) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const popoverKey = `${lecturerId}::${group.department}`;
+    const isAlreadyOpen = openDepartmentPopover.lecturerId === lecturerId && openDepartmentPopover.department === group.department;
+
+    if (isAlreadyOpen) {
+      setActivePopoverAnchor(null);
+      openDepartmentWithDefaultCourse(lecturerId, group);
+      return;
+    }
+
+    setActivePopoverAnchor({ popoverKey, rect });
+    openDepartmentWithDefaultCourse(lecturerId, group);
+  };
+
+  const getPopoverStyle = (popoverKey, isOpen) => {
+    const baseStyle = {
+      minWidth: 260,
+      maxWidth: 340,
+      maxHeight: 220,
+      overflowY: 'auto',
+      zIndex: 9999,
+      padding: 10,
+      borderRadius: 10,
+      border: '1px solid var(--border-glass)',
+      background: 'var(--bg-card)',
+      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.22)',
+    };
+
+    if (!isOpen || !activePopoverAnchor || activePopoverAnchor.popoverKey !== popoverKey) {
+      return {
+        position: 'absolute',
+        top: 'calc(100% + 8px)',
+        left: 0,
+        ...baseStyle,
+        zIndex: 8,
+      };
+    }
+
+    const { top, bottom, left } = activePopoverAnchor.rect;
+    const viewportWidth = window.innerWidth || 0;
+    const maxWidth = 340;
+    let fixedLeft = left;
+    if (fixedLeft + maxWidth > viewportWidth - 12) {
+      fixedLeft = Math.max(12, viewportWidth - maxWidth - 12);
+    }
+
+    const availableBelow = window.innerHeight - bottom - 8;
+    const availableAbove = top - 8;
+    const openAbove = availableBelow < 240 && availableAbove > 240;
+    const fixedTop = openAbove ? Math.max(12, top - 8 - 240) : bottom + 8;
+
+    return {
+      position: 'fixed',
+      top: fixedTop,
+      left: fixedLeft,
+      ...baseStyle,
+    };
+  };
 
   return (
     <div className="table-scroll lecturers-table-scroll">
@@ -102,7 +169,7 @@ export default function LecturerTable({
                                 gap: 4,
                                 cursor: 'pointer',
                               }}
-                              onClick={() => openDepartmentWithDefaultCourse(l._id, group)}
+                              onClick={(e) => handleDepartmentButtonClick(e, l._id, group)}
                               title={isOpen ? 'Hide assigned subjects' : 'Show assigned subjects'}
                             >
                               {group.department}
@@ -111,21 +178,7 @@ export default function LecturerTable({
 
                             {isOpen ? (
                               <div
-                                style={{
-                                  position: 'absolute',
-                                  top: 'calc(100% + 8px)',
-                                  left: 0,
-                                  minWidth: 260,
-                                  maxWidth: 340,
-                                  maxHeight: 220,
-                                  overflowY: 'auto',
-                                  zIndex: 8,
-                                  padding: 10,
-                                  borderRadius: 10,
-                                  border: '1px solid var(--border-glass)',
-                                  background: 'var(--bg-card)',
-                                  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.22)',
-                                }}
+                                style={getPopoverStyle(popoverKey, isOpen)}
                               >
                                 <p style={{ fontSize: '0.72rem', fontWeight: 700, marginBottom: 8 }}>{group.department} - Assigned Subjects</p>
                                 {(group.courses || []).length > 0 ? (
