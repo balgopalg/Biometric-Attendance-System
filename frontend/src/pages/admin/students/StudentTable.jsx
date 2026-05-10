@@ -4,6 +4,7 @@ import { formatCourseName } from '../../../utils/courseDisplay';
 import SoftLockWrapper from '../../../components/ui/SoftLockWrapper';
 import Pagination from '../../../components/ui/Pagination';
 import StatePanel from '../../../components/ui/StatePanel';
+import ProfilePreviewModal from '../../../components/ui/ProfilePreviewModal';
 import {
   HiOutlineCamera,
   HiOutlineClipboardList,
@@ -11,7 +12,6 @@ import {
   HiOutlineKey,
   HiOutlinePencil,
   HiOutlineSparkles,
-  HiX,
   HiArrowUp,
   HiArrowDown,
 } from 'react-icons/hi';
@@ -28,7 +28,7 @@ export default function StudentTable() {
     pageSize, setPageSize,
   } = useStudentContext();
 
-  const [previewImage, setPreviewImage] = useState(null);
+  const [previewStudent, setPreviewStudent] = useState(null);
   const [sortKey, setSortKey] = useState('');
   const [sortDir, setSortDir] = useState('asc');
 
@@ -157,18 +157,31 @@ export default function StudentTable() {
                         style={{
                           display: 'block', width: 30, height: 30, minWidth: 30, minHeight: 30,
                           maxWidth: 30, maxHeight: 30, borderRadius: 9999,
-                          objectFit: 'cover', cursor: 'pointer'
+                          objectFit: 'cover', cursor: 'pointer',
+                          boxShadow: '0 0 0 2px rgba(99,102,241,0.4)',
+                          transition: 'box-shadow 0.2s',
                         }}
-                        onClick={() => setPreviewImage(`/api/admin/students/profile-picture/${s.profile_picture_file}`)}
-                        onError={(e) => { e.target.onerror = null; e.target.src = ""; }} // Fallback if image fails
+                        onClick={() => setPreviewStudent(s)}
+                        onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.8)'}
+                        onMouseLeave={(e) => e.currentTarget.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.4)'}
+                        onError={(e) => { e.target.onerror = null; e.target.src = ""; }}
                       />
                     ) : (
-                      <div style={{
-                        width: 30, height: 30, borderRadius: '50%',
-                        background: 'var(--gradient-cool)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontWeight: 700, fontSize: '0.7rem', color: '#fff', flexShrink: 0,
-                      }}>
+                      <div
+                        style={{
+                          width: 30, height: 30, borderRadius: '50%',
+                          background: 'var(--gradient-cool)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontWeight: 700, fontSize: '0.7rem', color: '#fff', flexShrink: 0,
+                          cursor: 'pointer',
+                          transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                          boxShadow: '0 0 0 2px rgba(99,102,241,0.3)',
+                        }}
+                        onClick={() => setPreviewStudent(s)}
+                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.12)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(99,102,241,0.7)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.3)'; }}
+                        title="View profile"
+                      >
                         {s.name?.slice(0, 2).toUpperCase()}
                       </div>
                     )}
@@ -239,60 +252,26 @@ export default function StudentTable() {
         </div>
       </div>
 
-      <AnimatePresence>
-        {previewImage && (
-          <div
-            style={{
-              position: 'fixed', inset: 0, zIndex: 2000,
-              background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: 20
-            }}
-            onClick={() => setPreviewImage(null)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              style={{
-                position: 'relative',
-                width: 300,
-                height: 400,
-                background: 'var(--bg-secondary)',
-                borderRadius: 12,
-                overflow: 'hidden',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                border: '4px solid rgba(255,255,255,0.1)'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={previewImage}
-                alt="Profile Preview"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-              />
-              <button
-                onClick={() => setPreviewImage(null)}
-                style={{
-                  position: 'absolute', top: 10, right: 10,
-                  width: 32, height: 32, borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.5)', color: '#fff',
-                  backdropFilter: 'blur(4px)',
-                  border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  zIndex: 2001
-                }}
-              >
-                <HiX size={18} />
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ProfilePreviewModal
+        isOpen={!!previewStudent}
+        onClose={() => setPreviewStudent(null)}
+        imageSrc={previewStudent?.profile_picture_file
+          ? `/api/admin/students/profile-picture/${previewStudent.profile_picture_file}`
+          : null
+        }
+        name={previewStudent?.name || ''}
+        role="student"
+        hasFace={!!previewStudent?.has_face}
+        email={previewStudent?.email || ''}
+        phone={previewStudent?.mobile_no || null}
+        regNumber={previewStudent?.reg_number || null}
+        course={previewStudent?.course_name
+          ? `${formatCourseName(previewStudent.course_name, { isInactive: previewStudent.is_course_inactive })}`
+          : null
+        }
+        semester={previewStudent?.current_semester ? `Semester ${previewStudent.current_semester}` : null}
+        session={previewStudent?.academic_session || null}
+      />
     </>
   );
 }

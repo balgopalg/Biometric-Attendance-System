@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ProfilePreviewModal from '../../../components/ui/ProfilePreviewModal';
 import {
   HiOutlineKey,
   HiOutlineLockClosed,
@@ -8,7 +9,6 @@ import {
   HiOutlineSparkles,
   HiOutlinePencil,
   HiOutlineClipboardList,
-  HiX,
   HiArrowUp,
   HiArrowDown,
 } from 'react-icons/hi';
@@ -28,7 +28,7 @@ export default function LecturerTable({
   onEnrollFace,
   onTrainFace,
 }) {
-  const [previewImage, setPreviewImage] = useState(null);
+  const [previewLecturer, setPreviewLecturer] = useState(null);
   const [sortKey, setSortKey] = useState('');
   const [sortDir, setSortDir] = useState('asc');
 
@@ -114,25 +114,38 @@ export default function LecturerTable({
                         style={{
                           display: 'block', width: 30, height: 30, minWidth: 30, minHeight: 30,
                           maxWidth: 30, maxHeight: 30, borderRadius: 9999,
-                          objectFit: 'cover', cursor: 'pointer'
+                          objectFit: 'cover', cursor: 'pointer',
+                          boxShadow: '0 0 0 2px rgba(245,158,11,0.4)',
+                          transition: 'box-shadow 0.2s',
                         }}
-                        onClick={() => setPreviewImage(`/api/admin/lecturers/profile-picture/${l.profile_picture_file}`)}
+                        onClick={() => setPreviewLecturer(l)}
+                        onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.8)'}
+                        onMouseLeave={(e) => e.currentTarget.style.boxShadow = '0 0 0 2px rgba(245,158,11,0.4)'}
                         onError={(e) => { e.target.onerror = null; e.target.src = ""; }}
                       />
                     ) : (
-                      <div style={{
-                        width: 30,
-                        height: 30,
-                        borderRadius: '50%',
-                        background: 'var(--gradient-warm)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 700,
-                        fontSize: '0.7rem',
-                        color: '#fff',
-                        flexShrink: 0,
-                      }}>
+                      <div
+                        style={{
+                          width: 30,
+                          height: 30,
+                          borderRadius: '50%',
+                          background: 'var(--gradient-warm)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.7rem',
+                          color: '#fff',
+                          flexShrink: 0,
+                          cursor: 'pointer',
+                          transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                          boxShadow: '0 0 0 2px rgba(245,158,11,0.3)',
+                        }}
+                        onClick={() => setPreviewLecturer(l)}
+                        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.12)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(245,158,11,0.7)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 0 0 2px rgba(245,158,11,0.3)'; }}
+                        title="View profile"
+                      >
                         {l.name?.slice(0, 2).toUpperCase()}
                       </div>
                     )}
@@ -205,60 +218,24 @@ export default function LecturerTable({
         </tbody>
       </table>
 
-      <AnimatePresence>
-        {previewImage && (
-          <div
-            style={{
-              position: 'fixed', inset: 0, zIndex: 2000,
-              background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              padding: 20
-            }}
-            onClick={() => setPreviewImage(null)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              style={{
-                position: 'relative',
-                width: 300,
-                height: 400,
-                background: 'var(--bg-secondary)',
-                borderRadius: 12,
-                overflow: 'hidden',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-                border: '4px solid rgba(255,255,255,0.1)'
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={previewImage}
-                alt="Profile Preview"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                }}
-              />
-              <button
-                onClick={() => setPreviewImage(null)}
-                style={{
-                  position: 'absolute', top: 10, right: 10,
-                  width: 32, height: 32, borderRadius: '50%',
-                  background: 'rgba(0,0,0,0.5)', color: '#fff',
-                  backdropFilter: 'blur(4px)',
-                  border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  zIndex: 2001
-                }}
-              >
-                <HiX size={18} />
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <ProfilePreviewModal
+        isOpen={!!previewLecturer}
+        onClose={() => setPreviewLecturer(null)}
+        imageSrc={previewLecturer?.profile_picture_file
+          ? `/api/admin/lecturers/profile-picture/${previewLecturer.profile_picture_file}`
+          : null
+        }
+        name={previewLecturer?.name || ''}
+        role="lecturer"
+        hasFace={!!previewLecturer?.has_face}
+        email={previewLecturer?.email || ''}
+        phone={previewLecturer?.mobile_no || null}
+        department={previewLecturer
+          ? getLecturerDepartmentGroups(previewLecturer).map(g => g.department).join(', ') || null
+          : null
+        }
+        paperCount={previewLecturer?.paper_count != null ? previewLecturer.paper_count : null}
+      />
     </div>
   );
 }

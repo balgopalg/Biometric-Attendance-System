@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../../api/axios';
 import toast from 'react-hot-toast';
-import { motion } from 'framer-motion';
-import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle, HiX } from 'react-icons/hi';
+import { motion, AnimatePresence } from 'framer-motion';
+import { HiOutlineCamera, HiOutlineUpload, HiOutlineCheckCircle, HiX, HiOutlineExclamationCircle } from 'react-icons/hi';
 import useDebouncedValue from '../../hooks/useDebouncedValue';
 import StatePanel from '../../components/ui/StatePanel';
 import { formatCourseName } from '../../utils/courseDisplay';
@@ -57,6 +57,8 @@ export default function StudentEnrollment() {
   const [uploading, setUploading] = useState(false);
   const [loadingStudents, setLoadingStudents] = useState(false);
   const [studentsError, setStudentsError] = useState('');
+  const [matchDetails, setMatchDetails] = useState(null);
+  const [forceEnrolling, setForceEnrolling] = useState(false);
   const fileRef = useRef();
   const pickerRef = useRef();
   const debouncedFilters = useDebouncedValue(filters, 250);
@@ -256,15 +258,46 @@ export default function StudentEnrollment() {
         user_id: selectedStudent,
         photo: preview,
       });
-      toast.success(res.data.message || 'Face enrolled!');
+      const datasetSaved = Number(res.data?.dataset_saved_count || 0);
+      toast.success(`${res.data.message || 'Face enrolled!'} (dataset: ${datasetSaved})`);
       setPreview(null);
       if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Enrollment failed');
+      if (err.response?.status === 409 && err.response.data?.match_found) {
+        setMatchDetails(err.response.data);
+      } else {
+        toast.error(err.response?.data?.error || 'Enrollment failed');
+      }
     } finally {
       setUploading(false);
     }
   };
+
+  const handleForceEnroll = async () => {
+    if (!selectedStudent || !preview) return;
+    setForceEnrolling(true);
+    try {
+      const res = await api.post('/admin/students/enroll', {
+        user_id: selectedStudent,
+        photo: preview,
+        force: true,
+      });
+      toast.success(res.data.message || 'Face enrolled (force approved)!');
+      setMatchDetails(null);
+      setPreview(null);
+      if (fileRef.current) fileRef.current.value = '';
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Force enrollment failed');
+    } finally {
+      setForceEnrolling(false);
+    }
+  };
+
+  const handleRejectMatch = () => {
+    setMatchDetails(null);
+    toast.error('Enrollment cancelled. Please upload a different photo.');
+  };
+
 
   return (
     <div className="admin-page" style={{ paddingBottom: 40, overflowX: 'hidden' }}>
@@ -275,6 +308,7 @@ export default function StudentEnrollment() {
           Establish a biometric profile for students by capturing or uploading a high-quality face photo.
         </p>
       </div>
+
 
       <div className="filter-bar">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full">
@@ -546,6 +580,109 @@ export default function StudentEnrollment() {
           </div>
         </div>
       </div>
+
+      {/* ─── Similarity Match Confirmation ─── */}
+      <AnimatePresence>
+        {matchDetails && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 9999,
+              background: 'rgba(0, 0, 0, 0.45)',
+              backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 20,
+            }}
+            onClick={handleRejectMatch}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%', maxWidth: 420,
+                borderRadius: 16,
+                background: 'var(--bg-card, #1e293b)',
+                border: '1px solid var(--border-glass, rgba(255,255,255,0.08))',
+                boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+                padding: '32px 28px 24px',
+                textAlign: 'center',
+              }}
+            >
+              {/* Icon */}
+              <div style={{
+                width: 52, height: 52, borderRadius: '50%',
+                background: 'rgba(245, 158, 11, 0.12)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 16px',
+              }}>
+                <HiOutlineExclamationCircle size={28} color="#f59e0b" />
+              </div>
+
+              {/* Title */}
+              <h3 style={{
+                fontSize: '1.05rem', fontWeight: 700,
+                color: 'var(--text-primary)',
+                marginBottom: 12,
+              }}>
+                Similarity Match Detected
+              </h3>
+
+              {/* Description */}
+              <p style={{
+                fontSize: '0.85rem', color: 'var(--text-secondary)',
+                lineHeight: 1.6, marginBottom: 6,
+              }}>
+                This face matches <strong style={{ color: 'var(--text-primary)' }}>{matchDetails.matching_user || 'Unknown'}</strong> with{' '}
+                <strong style={{ color: '#f59e0b' }}>{(matchDetails.similarity * 100).toFixed(1)}%</strong> similarity.
+              </p>
+
+              {/* Question */}
+              <p style={{
+                fontSize: '0.82rem', color: 'var(--text-muted)',
+                marginBottom: 24,
+              }}>
+                Do you want to approve this enrollment anyway?
+              </p>
+
+              {/* Buttons */}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <button
+                  onClick={handleRejectMatch}
+                  style={{
+                    flex: 1, padding: '10px 16px',
+                    borderRadius: 8,
+                    background: 'transparent',
+                    border: '1px solid var(--border, rgba(255,255,255,0.15))',
+                    color: 'var(--text-primary)',
+                    fontWeight: 600, fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Reject &amp; Exit
+                </button>
+                <button
+                  onClick={handleForceEnroll}
+                  disabled={forceEnrolling}
+                  style={{
+                    flex: 1, padding: '10px 16px',
+                    borderRadius: 8,
+                    background: '#f59e0b',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: 600, fontSize: '0.85rem',
+                    cursor: forceEnrolling ? 'wait' : 'pointer',
+                    opacity: forceEnrolling ? 0.7 : 1,
+                  }}
+                >
+                  {forceEnrolling ? 'Processing...' : 'Approve & Enroll'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

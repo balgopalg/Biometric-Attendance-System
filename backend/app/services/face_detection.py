@@ -140,6 +140,12 @@ class FaceDetector:
         return faces
 
     def _detect_haar_fallback(self, image_rgb: np.ndarray):
+        return self._detect_haar(image_rgb, group_mode=False)
+
+    def _detect_haar_group(self, image_rgb: np.ndarray):
+        return self._detect_haar(image_rgb, group_mode=True)
+
+    def _detect_haar(self, image_rgb: np.ndarray, group_mode=False):
         if self.haar.empty():
             return []
 
@@ -157,12 +163,16 @@ class FaceDetector:
         gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
         gray = cv2.equalizeHist(gray)
 
+        # Group photos use smaller minSize and fewer neighbors for better recall
+        min_size = (30, 30) if group_mode else (60, 60)
+        min_neighbors = 4 if group_mode else 6
+
         try:
             raw_faces = self.haar.detectMultiScale(
                 gray,
                 scaleFactor=1.1,
-                minNeighbors=6,
-                minSize=(60, 60),
+                minNeighbors=min_neighbors,
+                minSize=min_size,
             )
         except cv2.error:
             return []
@@ -174,10 +184,13 @@ class FaceDetector:
             if ratio < 0.72 or ratio > 1.35:
                 continue
 
-            # Ignore detections too low in the frame; these are commonly false positives.
-            center_y = y + (bh / 2.0)
-            if center_y > (0.72 * h):
-                continue
+            # In group mode, don't discard faces at the bottom of the frame.
+            # The bottom-frame filter only applies to webcam feeds where
+            # lower detections are typically false positives.
+            if not group_mode:
+                center_y = y + (bh / 2.0)
+                if center_y > (0.72 * h):
+                    continue
 
             face = self._build_face_record(
                 image_rgb, int(x), int(y), int(bw), int(bh), 0.45
@@ -204,7 +217,7 @@ class FaceDetector:
 
     def detect_faces(self, image_rgb: np.ndarray):
         """
-        Detect faces in an RGB image.
+        Detect faces in an RGB image (optimized for live webcam feeds).
 
         Returns a list of dicts:
           [{"bbox": (x, y, w, h), "confidence": float, "crop": np.ndarray}, ...]
@@ -217,19 +230,51 @@ class FaceDetector:
         fallback_faces = self._detect_haar_fallback(image_rgb)
         return self._merge_faces(primary_faces, fallback_faces)
 
+    def detect_faces_group(self, image_rgb: np.ndarray):
+        """Detect faces in an uploaded group photo with relaxed thresholds.
+
+        Unlike ``detect_faces`` (webcam), this always runs both MediaPipe
+        and the Haar cascade with permissive settings to maximize recall
+        for dense classroom / group photos.
+
+        Returns a list of dicts:
+          [{"bbox": (x, y, w, h), "confidence": float, "crop": np.ndarray}, ...]
+        """
+        # Always run both detectors and merge for maximum face count
+        primary_faces = self._detect_mediapipe(image_rgb)
+        fallback_faces = self._detect_haar_group(image_rgb)
+        return self._merge_faces(primary_faces, fallback_faces)
+
     def close(self):
         self.detector.close()
 
 
-# Module-level singleton
+# Module-level singletons
 _detector = None
 _detector_lock = threading.Lock()
 
+# Separate detector for uploaded group photos with lower confidence threshold
+_group_detector = None
+_group_detector_lock = threading.Lock()
+
 
 def get_detector() -> FaceDetector:
+    """Return the default detector (webcam, min_confidence=0.5)."""
     global _detector
     if _detector is None:
         with _detector_lock:
             if _detector is None:
                 _detector = FaceDetector()
     return _detector
+
+
+def get_group_detector() -> FaceDetector:
+    """Return a permissive detector for uploaded group photos (min_confidence=0.3)."""
+    global _group_detector
+    if _group_detector is None:
+        with _group_detector_lock:
+            if _group_detector is None:
+                _group_detector = FaceDetector(
+                    min_confidence=0.3, fallback_min_faces=1
+                )
+    return _group_detector
