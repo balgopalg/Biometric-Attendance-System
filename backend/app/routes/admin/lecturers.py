@@ -705,27 +705,6 @@ def import_lecturers_excel(user):
     ), (207 if (skipped_count + error_count) > 0 else 201)
 
 
-def _generate_import_temp_password(length=14):
-    """Generate a cryptographically random temporary password for bulk imports."""
-    import string
-
-    upper = string.ascii_uppercase.replace("I", "").replace("O", "")
-    lower = string.ascii_lowercase.replace("l", "").replace("o", "")
-    digits = "23456789"
-    symbols = "!@#$%^&*"
-    all_chars = upper + lower + digits + symbols
-    chars = [
-        secrets.choice(upper),
-        secrets.choice(lower),
-        secrets.choice(digits),
-        secrets.choice(symbols),
-    ]
-    while len(chars) < length:
-        chars.append(secrets.choice(all_chars))
-    secrets.SystemRandom().shuffle(chars)
-    return "".join(chars)
-
-
 @admin_bp.route("/lecturers/profile-picture/<path:file_name>", methods=["GET"])
 @role_required("super_admin", "department_admin")
 def get_lecturer_profile_picture(user, file_name):

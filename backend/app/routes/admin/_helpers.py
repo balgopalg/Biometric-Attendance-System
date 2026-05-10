@@ -1715,7 +1715,7 @@ def _get_requested_pagination():
         return None
 
     page = max(1, _to_int(page_raw, 1))
-    per_page = max(1, min(_to_int(per_page_raw, 20), 100))
+    per_page = max(1, min(_to_int(per_page_raw, 20), 2000))
     return page, per_page
 
 
@@ -1737,6 +1737,30 @@ def _paginate_items(items):
             "per_page": per_page,
         }
     )
+
+
+# ─── Temp Password Generation ───────────────────────────────────────────────
+
+
+def _generate_import_temp_password(length=14):
+    """Generate a cryptographically random temporary password for bulk imports."""
+    import string
+
+    upper = string.ascii_uppercase.replace("I", "").replace("O", "")
+    lower = string.ascii_lowercase.replace("l", "").replace("o", "")
+    digits = "23456789"
+    symbols = "!@#$%^&*"
+    all_chars = upper + lower + digits + symbols
+    chars = [
+        secrets.choice(upper),
+        secrets.choice(lower),
+        secrets.choice(digits),
+        secrets.choice(symbols),
+    ]
+    while len(chars) < length:
+        chars.append(secrets.choice(all_chars))
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
 
 
 # ─── Courses ────────────────────────────────────────────────────────────────

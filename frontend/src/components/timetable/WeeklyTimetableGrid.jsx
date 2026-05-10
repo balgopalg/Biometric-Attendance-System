@@ -189,13 +189,13 @@ export default function WeeklyTimetableGrid({
         <table className="data-table timetable-grid-table timetable-sketch-table">
           <thead>
             <tr>
-              <th style={{ minWidth: 100 }}>Day</th>
+              <th style={{ width: 90 }}>Day</th>
               {timeRows.map((row, idx) => (
                 <Fragment key={row.key}>
                   {hasRecessColumn && idx === recessInsertIndex ? (
                     <th className="timetable-recess-header">☕ Break</th>
                   ) : null}
-                  <th style={{ whiteSpace: 'nowrap', minWidth: 110 }}>
+                  <th style={{ width: 140 }}>
                     <div style={{ fontSize: '0.7rem', fontWeight: 700 }}>{to12h(row.start_time)}</div>
                     <div style={{ fontSize: '0.6rem', fontWeight: 400, color: 'var(--text-muted)', marginTop: 1 }}>to {to12h(row.end_time)}</div>
                   </th>

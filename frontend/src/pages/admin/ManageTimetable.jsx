@@ -601,7 +601,7 @@ export default function ManageTimetable() {
         </button>
       </div>
 
-      <div className="mobile-filters-toggle-wrap" style={{ marginBottom: 8 }}>
+      <div className="mobile-filters-toggle-wrap timetable-mobile-filters-toggle-wrap">
         <button
           className="icon-btn mobile-filters-icon-btn"
           type="button"

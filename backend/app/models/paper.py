@@ -98,7 +98,11 @@ def get_paper_by_code(code: str) -> Optional[dict]:
 
 def get_papers_by_course(course_id: str) -> List[dict]:
     papers = get_collection("academic", "papers")
-    return list(papers.find({"course_id": course_id}))
+    try:
+        oid = ObjectId(str(course_id))
+        return list(papers.find({"$or": [{"course_id": oid}, {"course_id": str(course_id)}]}))
+    except:
+        return list(papers.find({"course_id": str(course_id)}))
 
 
 def get_papers_by_lecturer(lecturer_id: str) -> List[dict]:

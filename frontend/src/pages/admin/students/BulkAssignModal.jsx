@@ -6,34 +6,70 @@ export default function BulkAssignModal({
   onClose,
   bulkForm,
   setBulkForm,
+  departments,
   visibleCourses,
+  bulkSessions,
   bulkSemesters,
   bulkAssignAllPapers,
   setBulkAssignAllPapers,
   bulkPapers,
   eligibleBulkStudents,
   areAllBulkStudentsSelected,
-  onAssign
+  onAssign,
+  isDepartmentAdmin,
+  departmentName
 }) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Bulk Assign Paper" width={520}>
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 1: Course</label>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 1: Department</label>
+        <select
+          className="input-field"
+          value={bulkForm.department_id}
+          onChange={(e) => {
+            setBulkAssignAllPapers(false);
+            setBulkForm({ department_id: e.target.value, course_id: '', academic_session: '', semester: '', paper_id: '', user_ids: [] });
+          }}
+          disabled={isDepartmentAdmin}
+        >
+          <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}</option>
+          {departments?.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 2: Course</label>
         <select
           className="input-field"
           value={bulkForm.course_id}
           onChange={(e) => {
             setBulkAssignAllPapers(false);
-            setBulkForm({ course_id: e.target.value, semester: '', paper_id: '', user_ids: [] });
+            setBulkForm({ ...bulkForm, course_id: e.target.value, academic_session: '', semester: '', paper_id: '', user_ids: [] });
           }}
         >
           <option value="">Select course</option>
-          {visibleCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
+          {visibleCourses.filter(c => !bulkForm.department_id || c.department_id === bulkForm.department_id).map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })} ({c.code})</option>)}
         </select>
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 2: Semester</label>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 3: Session</label>
+        <select
+          className="input-field"
+          value={bulkForm.academic_session}
+          onChange={(e) => {
+            setBulkAssignAllPapers(false);
+            setBulkForm({ ...bulkForm, academic_session: e.target.value, semester: '', paper_id: '', user_ids: [] });
+          }}
+          disabled={!bulkForm.course_id}
+        >
+          <option value="">Select session (optional)</option>
+          {bulkSessions?.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 4: Semester</label>
         <select
           className="input-field"
           value={bulkForm.semester}
@@ -49,7 +85,7 @@ export default function BulkAssignModal({
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 3: Paper</label>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 5: Paper</label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
           <input
             type="checkbox"
@@ -77,7 +113,7 @@ export default function BulkAssignModal({
       </div>
 
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 4: Eligible Students</label>
+        <label style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 6, display: 'block', color: 'var(--text-secondary)' }}>Step 6: Eligible Students</label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
           <input
             type="checkbox"

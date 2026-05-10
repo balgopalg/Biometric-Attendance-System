@@ -65,11 +65,12 @@ export default function RecognizedList({ students = [], isLive = false }) {
 
   return (
     <div className="glass-card" style={{ 
-      padding: isMobile ? 12 : 20, 
-      height: '100%', 
+      padding: isMobile ? 12 : 14, 
+      height: isMobile ? 400 : 480, // Enforce fixed height
       display: 'flex', 
       flexDirection: 'column', 
-      gap: isMobile ? 10 : 14 
+      gap: isMobile ? 8 : 10,
+      overflow: 'hidden' // Ensure no overflow outside card
     }}>
 
       {/* ── Header ── */}
@@ -156,8 +157,16 @@ export default function RecognizedList({ students = [], isLive = false }) {
         </select>
       </div>
 
-      {/* ── List ── */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 420, paddingRight: 2 }}>
+      <div className="custom-scrollbar" style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        gap: 6, 
+        overflowY: 'auto', 
+        flex: 1,
+        minHeight: 0, // Critical for flexbox scrolling
+        paddingRight: 6,
+        marginRight: -2,
+      }}>
         {filtered.length === 0 && (
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center', padding: '24px 0' }}>
             {safeStudents.length === 0
@@ -186,8 +195,10 @@ export default function RecognizedList({ students = [], isLive = false }) {
                   borderRadius: 14,
                   border: '1px solid rgba(16,185,129,0.15)',
                   background: 'rgba(16,185,129,0.04)',
-                  padding: isMobile ? '10px 12px' : '12px 14px',
+                  padding: isMobile ? '8px 10px' : '10px 12px',
                   overflow: 'hidden',
+                  transition: 'background 0.2s ease',
+                  flexShrink: 0 // Prevent cards from being squeezed
                 }}
               >
                 {/* Top row */}
@@ -202,43 +213,31 @@ export default function RecognizedList({ students = [], isLive = false }) {
                     {initials}
                   </div>
 
-                  {/* Name + reg */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 1 }}>
+                    <p style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                       {displayName}
-                      <span style={{ marginLeft: 8, fontSize: '0.7rem', color: confidence >= 80 ? 'var(--accent-emerald)' : 'var(--accent-amber)', opacity: 0.8 }}>({confidence}%)</span>
-                      {s?.isDrowsy && <span title="Drowsiness Detected" style={{ marginLeft: 6 }}>😴</span>}
+                      <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 400, fontFamily: 'monospace' }}>#{subLabel}</span>
+                      <span style={{ fontSize: '0.68rem', color: confidence >= 80 ? 'var(--accent-emerald)' : 'var(--accent-amber)', opacity: 0.8 }}>({confidence}%)</span>
+                      {s?.isDrowsy && <span title="Drowsiness Detected">😴</span>}
                     </p>
-                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{subLabel}</p>
                   </div>
 
-                  {/* Badges */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                     <span style={{
-                      padding: '3px 10px', borderRadius: 99, fontSize: '0.68rem', fontWeight: 700,
+                      padding: '2px 8px', borderRadius: 99, fontSize: '0.62rem', fontWeight: 700,
                       background: 'rgba(16,185,129,0.12)', color: 'var(--accent-emerald)',
                       border: '1px solid rgba(16,185,129,0.2)',
                     }}>
-                      ✓ Present
+                      Present
                     </span>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: 8,
-                      background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)',
-                      display: 'grid', placeItems: 'center',
-                    }}>
-                      <HiOutlineShieldCheck size={14} style={{ color: 'var(--accent-emerald)' }} />
-                    </div>
+                    <HiOutlineShieldCheck size={14} style={{ color: 'var(--accent-emerald)', opacity: 0.8 }} />
                   </div>
                 </div>
 
                 {/* Confidence bar */}
                 {confidence > 0 && (
-                  <div style={{ marginBottom: 6 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                      <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Confidence</span>
-                      <span style={{ fontSize: '0.72rem', fontWeight: 800, color: confidence >= 80 ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>{confidence}%</span>
-                    </div>
-                    <div style={{ height: 5, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                  <div style={{ marginBottom: 4 }}>
+                    <div style={{ height: 3, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{ width: `${confidence}%` }}

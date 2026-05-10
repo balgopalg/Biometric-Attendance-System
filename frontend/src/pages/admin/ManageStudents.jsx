@@ -43,13 +43,13 @@ export default function ManageStudents() {
     showAdd, setShowAdd, showEdit, setShowEdit, showBulk, setShowBulk,
     showCreds, setShowCreds, showFaceEnroll, setShowFaceEnroll,
     showStudentPapers, setShowStudentPapers, showExcelImport, setShowExcelImport,
-    showMobileOps, setShowMobileOps, showMobileFilters,
+    showMobileOps, setShowMobileOps, showMobileFilters, setShowMobileFilters,
     showPromoteModal, setShowPromoteModal,
     createdCreds, setCreatedCreds, editingStudent, setEditingStudent,
     enrollingStudent, setEnrollingStudent, paperStudent, setPaperStudent,
     search, setSearch, filters, setFilters, showInactiveRows, setShowInactiveRows,
     form, setForm, bulkForm, setBulkForm,
-    bulkAssignAllPapers, setBulkAssignAllPapers, bulkSemesters, bulkPapers,
+    bulkAssignAllPapers, setBulkAssignAllPapers, bulkSemesters, bulkSessions, bulkPapers,
     excelForm, setExcelForm, excelSemesters, excelFile, setExcelFile,
     excelImporting, setExcelImporting, excelResults, setExcelResults, excelFileInputRef,
     promoteSemester, setPromoteSemester, promoteSemesterOptions, setPromoteSemesterOptions,
@@ -570,7 +570,17 @@ export default function ManageStudents() {
           </button>
         </div>
 
-      <div className="mobile-admin-action-strip">
+      <div className="mobile-filters-toggle-wrap students-mobile-filters-toggle-wrap">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
         <button
           className="icon-btn mobile-filters-icon-btn"
           type="button"
@@ -659,7 +669,7 @@ export default function ManageStudents() {
 
       <PromoteStudentsModal isOpen={showPromoteModal} onClose={() => { if(!promotingSelected){ setShowPromoteModal(false); setPromoteSemesterOptions([]); } }} promoteSemester={promoteSemester} setPromoteSemester={setPromoteSemester} promoteSemesterOptions={promoteSemesterOptions} loadingPromoteSemesters={loadingPromoteSemesters} promotingSelected={promotingSelected} selectedCount={selectedStudentIds.length} onPromote={handlePromoteSelected} />
       
-      <BulkAssignModal isOpen={showBulk} onClose={() => setShowBulk(false)} bulkForm={bulkForm} setBulkForm={setBulkForm} visibleCourses={visibleCourses} bulkSemesters={bulkSemesters} bulkAssignAllPapers={bulkAssignAllPapers} setBulkAssignAllPapers={setBulkAssignAllPapers} bulkPapers={bulkPapers} eligibleBulkStudents={eligibleBulkStudents} areAllBulkStudentsSelected={areAllBulkStudentsSelected} onAssign={handleBulkAssign} />
+      <BulkAssignModal isOpen={showBulk} onClose={() => setShowBulk(false)} bulkForm={bulkForm} setBulkForm={setBulkForm} departments={departments} visibleCourses={visibleCourses} bulkSessions={bulkSessions} bulkSemesters={bulkSemesters} bulkAssignAllPapers={bulkAssignAllPapers} setBulkAssignAllPapers={setBulkAssignAllPapers} bulkPapers={bulkPapers} eligibleBulkStudents={eligibleBulkStudents} areAllBulkStudentsSelected={areAllBulkStudentsSelected} onAssign={handleBulkAssign} isDepartmentAdmin={isDepartmentAdmin} departmentName={departmentName} />
       
       <AssignStudentPapersModal isOpen={showStudentPapers} onClose={() => { if(!savingStudentPapers){ setShowStudentPapers(false); setPaperStudent(null); setPaperOptions([]); setSelectedPaperIds([]); setBaseAssignedPaperIds([]); } }} paperStudent={paperStudent} loadingStudentPapers={loadingStudentPapers} paperOptions={paperOptions} selectedPaperIds={selectedPaperIds} setSelectedPaperIds={setSelectedPaperIds} savingStudentPapers={savingStudentPapers} onSave={handleSaveStudentPapers} />
       

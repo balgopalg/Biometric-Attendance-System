@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  HiOutlineClipboardList,
   HiOutlineKey,
+  HiOutlineLockClosed,
   HiOutlineTrash,
   HiOutlineCamera,
   HiOutlineSparkles,
   HiOutlinePencil,
+  HiOutlineClipboardList,
   HiX,
+  HiArrowUp,
+  HiArrowDown,
 } from 'react-icons/hi';
 
 /**
@@ -26,6 +29,58 @@ export default function LecturerTable({
   onTrainFace,
 }) {
   const [previewImage, setPreviewImage] = useState(null);
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedLecturers = useMemo(() => {
+    if (!sortKey) return lecturers;
+    return [...lecturers].sort((a, b) => {
+      let aVal = a[sortKey] ?? '';
+      let bVal = b[sortKey] ?? '';
+      if (sortKey === 'paper_count') {
+        aVal = Number(aVal) || 0;
+        bVal = Number(bVal) || 0;
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      if (sortKey === 'has_face') {
+        aVal = aVal ? 1 : 0;
+        bVal = bVal ? 1 : 0;
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      aVal = String(aVal).toLowerCase();
+      bVal = String(bVal).toLowerCase();
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [lecturers, sortKey, sortDir]);
+
+  const SortHeader = ({ label, field, align }) => (
+    <th
+      className="sortable-th"
+      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
+      onClick={() => handleSort(field)}
+      title={`Sort by ${label}`}
+    >
+      <span className="sort-header-inner">
+        {label}
+        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
+          {sortKey === field
+            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
+            : <HiArrowUp size={12} />}
+        </span>
+      </span>
+    </th>
+  );
 
   const handleViewPapers = (lecturer, departmentGroups) => {
     if (onViewPapers) {
@@ -38,15 +93,15 @@ export default function LecturerTable({
       <table className="data-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Email</th>
+            <SortHeader label="Name" field="name" />
+            <SortHeader label="Email" field="email" />
             <th>Department</th>
-            <th>Status</th>
+            <SortHeader label="Status" field="has_face" align="center" />
             <th style={{ textAlign: 'right' }}>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {lecturers.map((l) => {
+          {sortedLecturers.map((l) => {
             const departmentGroups = getLecturerDepartmentGroups(l);
             return (
               <tr key={l._id}>
@@ -134,7 +189,7 @@ export default function LecturerTable({
                       <HiOutlineKey size={15} />
                     </button>
                     <button className="icon-btn" title="Reset Password" onClick={() => onResetPassword(l._id, l.name)}>
-                      <HiOutlineKey size={15} />
+                      <HiOutlineLockClosed size={15} />
                     </button>
                     <button className="icon-btn" title="Edit" onClick={() => onEdit(l)}>
                       <HiOutlinePencil size={15} />
