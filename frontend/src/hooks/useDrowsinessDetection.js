@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import '@mediapipe/face_mesh';
-import '@mediapipe/camera_utils';
 
 const LEFT_EYE = [362, 385, 387, 263, 373, 380];
 const RIGHT_EYE = [33, 160, 158, 133, 153, 144];
@@ -34,7 +33,8 @@ function isValidEar(value) {
 export function useDrowsinessDetection(videoRef, isActive) {
   const [isDrowsy, setIsDrowsy] = useState(false);
   const faceMeshRef = useRef(null);
-  const cameraRef = useRef(null);
+  const detectionTimerRef = useRef(null);
+  const processingFrameRef = useRef(false);
 
   const drowsyFramesCount = useRef(0);
   const recoveryFramesCount = useRef(0);
@@ -63,13 +63,11 @@ export function useDrowsinessDetection(videoRef, isActive) {
 
   useEffect(() => {
     if (!videoRef.current || !isActive) {
-      try {
-        if (cameraRef.current) {
-          cameraRef.current.stop();
-          cameraRef.current = null;
-        }
-      } catch (e) { console.error("Camera stop error:", e); }
-      
+      if (detectionTimerRef.current) {
+        clearInterval(detectionTimerRef.current);
+        detectionTimerRef.current = null;
+      }
+
       try {
         if (faceMeshRef.current) {
           faceMeshRef.current.close();
@@ -82,9 +80,8 @@ export function useDrowsinessDetection(videoRef, isActive) {
 
     // Fix #22: Guard against missing MediaPipe globals
     const FaceMesh = window.FaceMesh;
-    const Camera = window.Camera;
-    if (!FaceMesh || !Camera) {
-      console.warn('MediaPipe FaceMesh or Camera not loaded — drowsiness detection disabled');
+    if (!FaceMesh) {
+      console.warn('MediaPipe FaceMesh not loaded — drowsiness detection disabled');
       return;
     }
 
@@ -164,27 +161,27 @@ export function useDrowsinessDetection(videoRef, isActive) {
       }
     });
 
-    const camera = new Camera(videoRef.current, {
-      onFrame: async () => {
-        if (videoRef.current && faceMesh) {
-            await faceMesh.send({image: videoRef.current});
-        }
-      },
-      width: 640,
-      height: 480
-    });
-
-    camera.start();
-    cameraRef.current = camera;
     faceMeshRef.current = faceMesh;
 
-    return () => {
+    detectionTimerRef.current = window.setInterval(async () => {
+      if (!videoRef.current || videoRef.current.readyState < 2) return;
+      if (processingFrameRef.current) return;
+
+      processingFrameRef.current = true;
       try {
-        if (cameraRef.current) {
-            cameraRef.current.stop();
-            cameraRef.current = null;
-        }
-      } catch (err) { console.error("Cleanup camera error:", err); }
+        await faceMesh.send({ image: videoRef.current });
+      } catch (err) {
+        console.error('Drowsiness frame processing error:', err);
+      } finally {
+        processingFrameRef.current = false;
+      }
+    }, 120);
+
+    return () => {
+      if (detectionTimerRef.current) {
+        clearInterval(detectionTimerRef.current);
+        detectionTimerRef.current = null;
+      }
 
       try {
         if (faceMeshRef.current) {

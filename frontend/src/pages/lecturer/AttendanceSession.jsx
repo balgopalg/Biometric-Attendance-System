@@ -34,7 +34,14 @@ export default function AttendanceSession() {
   const [params] = useSearchParams();
   const paperIdFromQuery = params.get('paper_id');
 
-  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, flipCamera, captureFrame, clearError } = useWebcam();
+  const isMobile = useRef(
+    typeof window !== 'undefined'
+      ? /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768
+      : false
+  ).current;
+  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, flipCamera, captureFrame } = useWebcam({
+    facingMode: isMobile ? 'environment' : 'user'
+  });
   const [papers, setPapers] = useState([]);
   const [loadingPapers, setLoadingPapers] = useState(true);
   const [papersError, setPapersError] = useState('');
@@ -51,6 +58,20 @@ export default function AttendanceSession() {
   const [uploadLoading, setUploadLoading] = useState(false);
 
   useDrowsinessDetection(videoRef, scanning);
+
+  useEffect(() => {
+    const shouldBeActive = scanning && sessionId && !showUploadModal;
+
+    if (shouldBeActive) {
+      // Small buffer to allow hardware release from modal
+      const timer = setTimeout(() => {
+        if (!isActive) startCamera();
+      }, 400);
+      return () => clearTimeout(timer);
+    } else {
+      stopCamera();
+    }
+  }, [scanning, sessionId, showUploadModal, isActive, startCamera, stopCamera]);
 
   const [diag, setDiag] = useState({ faces_detected: 0, candidates_count: 0, best_similarity_seen: null, threshold: null });
   const [scanError, setScanError] = useState('');
@@ -182,24 +203,14 @@ export default function AttendanceSession() {
       setSessionStartedAt(res.data.started_at || new Date().toISOString());
       setRecognized([]);
       setReview(null);
+      setScanError('');
       cameraWarningShownRef.current = false;
 
-      const cameraStarted = await startCamera();
-      if (cameraStarted) {
-        setScanning(true);
-        toast.success('Session started');
-      } else {
-        setScanning(false);
-        toast.success('Session started without camera');
-        if (!cameraWarningShownRef.current) {
-          cameraWarningShownRef.current = true;
-          toast.error('Webcam undetected or blocked. You may upload a picture manually instead.', { duration: 6000 });
-        }
-        clearError();
-      }
+      setScanning(true);
+      toast.success('Session started');
     } catch (err) {
       if (createdSessionId) {
-        await api.post('/lecturer/session/stop', { session_id: createdSessionId }).catch(() => {});
+        await api.post('/lecturer/session/stop', { session_id: createdSessionId }).catch(() => { });
         setSessionId(null);
       }
       toast.error(err.response?.data?.error || 'Failed to start session');
@@ -208,10 +219,12 @@ export default function AttendanceSession() {
 
   const pauseSession = () => {
     setScanning(false);
+    stopCamera();
   };
 
   const resumeSession = () => {
     if (!sessionId) return;
+    setScanError('');
     setScanning(true);
   };
 
@@ -263,7 +276,8 @@ export default function AttendanceSession() {
     lastRecognitionToastAtRef.current = now;
 
     if (safe.length === 1) {
-      toast.success(`Recognized: ${String(safe[0]?.name || 'Unknown')}`);
+      const conf = Math.round((safe[0]?.confidence || safe[0]?.similarity || 0) * 100);
+      toast.success(`Recognized: ${String(safe[0]?.name || 'Unknown')} (${conf}%)`);
       return;
     }
 
@@ -498,7 +512,15 @@ export default function AttendanceSession() {
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
       {/* ── Toolbar ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: isMobile ? 'flex-start' : 'center',
+        flexDirection: isMobile ? 'column' : 'row',
+        marginBottom: 20,
+        gap: 16,
+        flexWrap: 'wrap'
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -508,19 +530,30 @@ export default function AttendanceSession() {
                   display: 'inline-flex', alignItems: 'center', gap: 5,
                   fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em',
                   textTransform: 'uppercase', padding: '3px 10px', borderRadius: 999,
-                  background: scanning ? 'rgba(16,185,129,0.12)' : 'rgba(251,191,36,0.12)',
-                  color: scanning ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                  border: `1px solid ${scanning ? 'rgba(16,185,129,0.25)' : 'rgba(251,191,36,0.25)'}`,
+                  background: error ? 'rgba(244,63,94,0.12)' : (scanning && isActive ? 'rgba(16,185,129,0.12)' : 'rgba(251,191,36,0.12)'),
+                  color: error ? 'var(--accent-rose)' : (scanning && isActive ? 'var(--accent-emerald)' : 'var(--accent-amber)'),
+                  border: `1px solid ${error ? 'rgba(244,63,94,0.25)' : (scanning && isActive ? 'rgba(16,185,129,0.25)' : 'rgba(251,191,36,0.25)')}`,
                 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', animation: scanning ? 'pulse-glow 1.4s ease-in-out infinite' : 'none' }} />
-                  {scanning ? 'Live' : 'Paused'}
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: 'currentColor',
+                    animation: scanning && isActive ? 'pulse-glow 1.4s ease-in-out infinite' : 'none'
+                  }} />
+                  {error ? 'Camera Error' : (scanning && isActive ? 'Live' : (scanning && !isActive ? 'Awaiting Feed' : 'Paused'))}
                 </span>
               )}
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>Select paper, verify recognition, then commit with your PIN.</p>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          width: isMobile ? '100%' : 'auto',
+          justifyContent: isMobile ? 'space-between' : 'flex-end'
+        }}>
           {!sessionId ? (
             <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Course Locked' : 'Start Session'}
@@ -540,10 +573,17 @@ export default function AttendanceSession() {
                 <HiOutlinePhotograph size={16} /> Upload Photo
               </button>
               <button className="btn-secondary" onClick={stopSession} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-rose)', borderColor: 'rgba(244,63,94,0.3)' }}>
-                <HiOutlineStop size={16} /> Stop
+                <HiOutlineStop size={16} /> Stop Session
               </button>
-              <button className="btn-primary" onClick={() => setShowPin(true)} disabled={recognized.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <HiOutlineCheckCircle size={16} /> Commit ({recognized.length})
+              <button className="btn-primary" onClick={() => setShowPin(true)} disabled={recognized.length === 0} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flex: isMobile ? 1 : 'none',
+                justifyContent: 'center',
+                padding: isMobile ? '10px 12px' : '10px 20px'
+              }}>
+                <HiOutlineCheckCircle size={16} /> {isMobile ? 'Commit' : `Commit (${recognized.length})`}
               </button>
             </>
           )}
@@ -573,162 +613,162 @@ export default function AttendanceSession() {
       ) : null}
 
       {!loadingPapers && !papersError && papers.length > 0 ? (
-      <>
-      {/* ── Session config card ── */}
-      <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-          {/* Course selector */}
-          <div>
-            <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Course</label>
-            <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={!!sessionId}>
-              <option value="">— Select Course —</option>
-              {courseOptions.map((c) => (
-                <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
+        <>
+          {/* ── Session config card ── */}
+          <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              {/* Course selector */}
+              <div>
+                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Course</label>
+                <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={!!sessionId}>
+                  <option value="">— Select Course —</option>
+                  {courseOptions.map((c) => (
+                    <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Paper selector */}
+              <div>
+                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Paper / Subject</label>
+                <select aria-label="Select paper" className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={!!sessionId || !selectedCourseId}>
+                  <option value="">{selectedCourseId ? '— Select Paper —' : '— Select Course First —'}</option>
+                  {filteredPapers.map((p) => (
+                    <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' · Locked' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Info pills */}
+              {[{
+                label: 'Academic Year', value: currentAcademicSession,
+              }, {
+                label: 'Session Started', value: sessionStartedAt ? fmt(sessionStartedAt) : '—',
+              }, {
+                label: 'Enrolled Students', value: selectedPaper?.total_enrolled_students ?? '—',
+              }].map(({ label, value }) => (
+                <div key={label} style={{ padding: '10px 14px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+                  <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</p>
+                  <p style={{ fontSize: '0.9rem', fontWeight: 700 }}>{value}</p>
+                </div>
               ))}
-            </select>
+            </div>
+            {selectedPaper?.is_course_inactive && (
+              <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', fontSize: '0.8rem', color: 'var(--accent-amber)' }}>
+                ⚠️ This course is inactive — attendance sessions are locked.
+              </div>
+            )}
           </div>
-          {/* Paper selector */}
-          <div>
-            <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Paper / Subject</label>
-            <select aria-label="Select paper" className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={!!sessionId || !selectedCourseId}>
-              <option value="">{selectedCourseId ? '— Select Paper —' : '— Select Course First —'}</option>
-              {filteredPapers.map((p) => (
-                <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' · Locked' : ''}</option>
+
+          <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+            <WebcamFeed ref={videoRef} isActive={isActive} error={error} isAwaiting={scanning && !isActive} onFlipCamera={flipCamera} />
+            <RecognizedList students={recognized} isLive={scanning && isActive} />
+          </div>
+
+          {sessionId && (
+            <div className="glass-card" style={{ marginTop: 14, padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+              {[{
+                label: 'Faces Detected', value: diag.faces_detected,
+              }, {
+                label: 'Recognized', value: recognized.length, accent: 'var(--accent-emerald)',
+              }, {
+                label: 'Best Match', value: diag.best_similarity_seen !== null ? `${(diag.best_similarity_seen * 100).toFixed(1)}%` : '—',
+              }, {
+                label: 'Threshold', value: diag.threshold !== null ? `${(diag.threshold * 100).toFixed(0)}%` : '—',
+              }].map(({ label, value, accent }) => (
+                <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+                  <span style={{ fontSize: '0.92rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</span>
+                </div>
               ))}
-            </select>
-          </div>
-          {/* Info pills */}
-          {[{
-            label: 'Academic Year', value: currentAcademicSession,
-          }, {
-            label: 'Session Started', value: sessionStartedAt ? fmt(sessionStartedAt) : '—',
-          }, {
-            label: 'Enrolled Students', value: selectedPaper?.total_enrolled_students ?? '—',
-          }].map(({ label, value }) => (
-            <div key={label} style={{ padding: '10px 14px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
-              <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</p>
-              <p style={{ fontSize: '0.9rem', fontWeight: 700 }}>{value}</p>
+              {scanError && (
+                <p role="alert" style={{ width: '100%', marginTop: 2, fontSize: '0.78rem', color: 'var(--accent-rose)', background: 'rgba(244,63,94,0.06)', padding: '6px 10px', borderRadius: 'var(--radius)', border: '1px solid rgba(244,63,94,0.15)' }}>{scanError}</p>
+              )}
             </div>
-          ))}
-        </div>
-        {selectedPaper?.is_course_inactive && (
-          <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', fontSize: '0.8rem', color: 'var(--accent-amber)' }}>
-            ⚠️ This course is inactive — attendance sessions are locked.
-          </div>
-        )}
-      </div>
-
-      <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
-        <WebcamFeed ref={videoRef} isActive={isActive} error={error} onFlipCamera={flipCamera} />
-        <RecognizedList students={recognized} />
-      </div>
-
-      {sessionId && (
-        <div className="glass-card" style={{ marginTop: 14, padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
-          {[{
-            label: 'Faces Detected', value: diag.faces_detected,
-          }, {
-            label: 'Recognized', value: recognized.length, accent: 'var(--accent-emerald)',
-          }, {
-            label: 'Best Match', value: diag.best_similarity_seen !== null ? `${(diag.best_similarity_seen * 100).toFixed(1)}%` : '—',
-          }, {
-            label: 'Threshold', value: diag.threshold !== null ? `${(diag.threshold * 100).toFixed(0)}%` : '—',
-          }].map(({ label, value, accent }) => (
-            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
-              <span style={{ fontSize: '0.92rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</span>
-            </div>
-          ))}
-          {scanError && (
-            <p role="alert" style={{ width: '100%', marginTop: 2, fontSize: '0.78rem', color: 'var(--accent-rose)', background: 'rgba(244,63,94,0.06)', padding: '6px 10px', borderRadius: 'var(--radius)', border: '1px solid rgba(244,63,94,0.15)' }}>{scanError}</p>
           )}
-        </div>
-      )}
 
-      {review && (
-        <div className="glass-card" style={{ marginTop: 16, padding: 18 }}>
-          {/* Review header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-            <div>
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 4 }}>Committed Attendance</h3>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Committed: <b style={{ color: 'var(--text-secondary)' }}>{fmt(review.committed_at)}</b></span>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Rollback window:{' '}
-                  {rollbackCountdown !== null ? (
-                    <b style={{
-                      color: rollbackRemainingMs === 0 ? 'var(--accent-rose)' : rollbackRemainingMs < 300000 ? 'var(--accent-rose)' : 'var(--accent-amber)',
-                      fontVariantNumeric: 'tabular-nums',
-                      letterSpacing: '0.04em',
+          {review && (
+            <div className="glass-card" style={{ marginTop: 16, padding: 18 }}>
+              {/* Review header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 4 }}>Committed Attendance</h3>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Committed: <b style={{ color: 'var(--text-secondary)' }}>{fmt(review.committed_at)}</b></span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Rollback window:{' '}
+                      {rollbackCountdown !== null ? (
+                        <b style={{
+                          color: rollbackRemainingMs === 0 ? 'var(--accent-rose)' : rollbackRemainingMs < 300000 ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                          fontVariantNumeric: 'tabular-nums',
+                          letterSpacing: '0.04em',
+                        }}>
+                          {rollbackCountdown} remaining
+                        </b>
+                      ) : fmt(review.rollback_until)}
+                    </span>
+                  </div>
+                </div>
+                <button className="btn-primary" disabled={!review.editable} onClick={() => setShowAdjustPin(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                  <HiOutlineCheckCircle size={15} /> Re-commit Adjustments
+                </button>
+              </div>
+              {!review.editable && (
+                <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.15)', fontSize: '0.8rem', color: 'var(--accent-rose)' }}>
+                  Rollback window expired — this record is finalized.
+                </div>
+              )}
+              {/* Candidate checklist */}
+              <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {(review.candidates || []).map((s) => {
+                  const checked = adjustIds.includes(s.user_id);
+                  return (
+                    <label key={s.user_id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 12px', borderRadius: 'var(--radius)',
+                      background: checked ? 'rgba(16,185,129,0.06)' : 'var(--bg-glass)',
+                      border: `1px solid ${checked ? 'rgba(16,185,129,0.18)' : 'var(--border-glass)'}`,
+                      cursor: review.editable ? 'pointer' : 'default',
+                      transition: 'background 0.15s, border-color 0.15s',
+                      fontSize: '0.82rem',
                     }}>
-                      {rollbackCountdown} remaining
-                    </b>
-                  ) : fmt(review.rollback_until)}
-                </span>
+                      <input type="checkbox" checked={checked} disabled={!review.editable}
+                        onChange={(e) => setAdjustIds(e.target.checked ? [...adjustIds, s.user_id] : adjustIds.filter(id => id !== s.user_id))}
+                      />
+                      <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>{s.email}</span>
+                      {checked && <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>Present</span>}
+                    </label>
+                  );
+                })}
               </div>
             </div>
-            <button className="btn-primary" disabled={!review.editable} onClick={() => setShowAdjustPin(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
-              <HiOutlineCheckCircle size={15} /> Re-commit Adjustments
-            </button>
-          </div>
-          {!review.editable && (
-            <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.15)', fontSize: '0.8rem', color: 'var(--accent-rose)' }}>
-              Rollback window expired — this record is finalized.
-            </div>
           )}
-          {/* Candidate checklist */}
-          <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {(review.candidates || []).map((s) => {
-              const checked = adjustIds.includes(s.user_id);
-              return (
-                <label key={s.user_id} style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 12px', borderRadius: 'var(--radius)',
-                  background: checked ? 'rgba(16,185,129,0.06)' : 'var(--bg-glass)',
-                  border: `1px solid ${checked ? 'rgba(16,185,129,0.18)' : 'var(--border-glass)'}`,
-                  cursor: review.editable ? 'pointer' : 'default',
-                  transition: 'background 0.15s, border-color 0.15s',
-                  fontSize: '0.82rem',
-                }}>
-                  <input type="checkbox" checked={checked} disabled={!review.editable}
-                    onChange={(e) => setAdjustIds(e.target.checked ? [...adjustIds, s.user_id] : adjustIds.filter(id => id !== s.user_id))}
-                  />
-                  <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>{s.email}</span>
-                  {checked && <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>Present</span>}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      <PinCommitModal
-        isOpen={showPin}
-        onClose={() => setShowPin(false)}
-        onCommit={handleCommit}
-        studentsCount={recognized.length}
-      />
+          <PinCommitModal
+            isOpen={showPin}
+            onClose={() => setShowPin(false)}
+            onCommit={handleCommit}
+            studentsCount={recognized.length}
+          />
 
-      <PinCommitModal
-        isOpen={showAdjustPin}
-        onClose={() => setShowAdjustPin(false)}
-        onCommit={handleAdjustSave}
-        studentsCount={adjustIds.length}
-        title="Re-Commit Attendance Adjustments"
-        subtitle="Enter your 4-digit PIN to re-commit corrected records within the rollback window."
-        confirmLabel="Confirm Re-Commit"
-        loadingLabel="Re-committing..."
-      />
+          <PinCommitModal
+            isOpen={showAdjustPin}
+            onClose={() => setShowAdjustPin(false)}
+            onCommit={handleAdjustSave}
+            studentsCount={adjustIds.length}
+            title="Re-Commit Attendance Adjustments"
+            subtitle="Enter your 4-digit PIN to re-commit corrected records within the rollback window."
+            confirmLabel="Confirm Re-Commit"
+            loadingLabel="Re-committing..."
+          />
 
-      {showUploadModal && (
-        <UploadClassroomImage
-          onUpload={handleUploadImage}
-          onClose={() => setShowUploadModal(false)}
-          isLoading={uploadLoading}
-        />
-      )}
-      </>
+          {showUploadModal && (
+            <UploadClassroomImage
+              onUpload={handleUploadImage}
+              onClose={() => setShowUploadModal(false)}
+              isLoading={uploadLoading}
+            />
+          )}
+        </>
       ) : null}
     </div>
   );

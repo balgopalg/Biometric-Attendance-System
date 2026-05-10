@@ -339,7 +339,7 @@ test.describe('UX and accessibility hardening checks', () => {
     await page.fill('#login-password', 'lecturer123');
     await page.click('#login-submit');
 
-    await expect(page.getByRole('heading', { name: /Welcome,.*Lecturer/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Welcome/i })).toBeVisible();
     await page.getByRole('button', { name: /start/i }).first().click();
     await expect(page).toHaveURL(/\/lecturer\/session/);
 

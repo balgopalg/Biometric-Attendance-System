@@ -35,6 +35,7 @@ export default function ManageLecturers() {
   const [deleteLecturer, setDeleteLecturer] = useState(null);
   const [confirmAction, setConfirmAction] = useState(null);
   const [showFaceSearch, setShowFaceSearch] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
   const { startTraining } = useTraining();
@@ -314,19 +315,43 @@ export default function ManageLecturers() {
 
       {/* ── Mobile filter/action toggles ─────────────────────────── */}
       <div className="mobile-filters-toggle-wrap lecturers-mobile-filters-toggle-wrap">
-        <button className="icon-btn mobile-filters-icon-btn" type="button" title={ctx.showMobileFilters ? 'Hide filters' : 'Show filters'} aria-label={ctx.showMobileFilters ? 'Hide filters' : 'Show filters'} aria-expanded={ctx.showMobileFilters} onClick={() => ctx.setShowMobileFilters((prev) => !prev)}>
-          <HiOutlineFilter size={18} />
-        </button>
         <button className="icon-btn mobile-filters-icon-btn" type="button" title="Quick actions" aria-label="Quick actions" onClick={() => ctx.setShowMobileOperations(true)}>
           <HiOutlineDotsHorizontal size={18} />
         </button>
       </div>
 
       {/* ── Filters ──────────────────────────────────────────────── */}
-      <div className={`lecturers-filter-grid ${ctx.showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div className={`lecturers-filter-grid ${ctx.showMobileFilters ? 'is-mobile-open' : ''}`} style={{ 
+        display: 'grid', 
+        gridTemplateColumns: isSearchFocused ? '2.2fr 0.8fr 0.8fr 0.8fr 0.8fr' : '1.2fr 1fr 1fr 1fr 1fr', 
+        transition: 'grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        gap: 10, 
+        marginBottom: 20 
+      }}>
         <div style={{ position: 'relative' }}>
-          <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="search-input" placeholder="Search by name, email or subject..." value={ctx.search} onChange={(e) => ctx.setSearch(e.target.value)} />
+          <HiOutlineSearch size={18} style={{ 
+            position: 'absolute', 
+            left: 14, 
+            top: '50%', 
+            transform: 'translateY(-50%)', 
+            color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
+            transition: 'color 0.2s ease'
+          }} />
+          <input 
+            className="search-input" 
+            placeholder="Search by name, email or subject..." 
+            value={ctx.search} 
+            onChange={(e) => ctx.setSearch(e.target.value)} 
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            style={{
+              paddingLeft: 40,
+              width: '100%',
+              borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
+              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+              transition: 'all 0.3s ease'
+            }}
+          />
         </div>
         <select className="input-field" value={ctx.filters.department_id} onChange={(e) => ctx.setFilters({ department_id: e.target.value, course_id: '', semester: '', paper_id: '' })} disabled={ctx.isDepartmentAdmin}>
           <option value="">{ctx.isDepartmentAdmin ? (ctx.departmentName || 'Department') : 'All Departments'}</option>

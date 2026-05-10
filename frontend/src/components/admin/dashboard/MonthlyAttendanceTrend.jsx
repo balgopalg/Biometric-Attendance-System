@@ -228,7 +228,7 @@ export default function MonthlyAttendanceTrend({
             <p style={{ fontSize: '0.62rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>
               Bar · {METRICS.find(m => m.key === activeMetric)?.label}
             </p>
-            <svg viewBox={`0 0 ${W} 76`} preserveAspectRatio="none" style={{ width: '100%', height: 76, display: 'block' }} role="img" aria-label="Monthly attendance bar chart">
+            <svg viewBox={`0 0 ${W} 76`} style={{ width: '100%', height: 76, display: 'block' }} role="img" aria-label="Monthly attendance bar chart">
               <defs>
                 <linearGradient id="matBarGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#06b6d4" />
@@ -236,10 +236,10 @@ export default function MonthlyAttendanceTrend({
                 </linearGradient>
               </defs>
               {(() => {
-                const bPad = { top: 4, right: 20, bottom: 22, left: 36 };
+                const bPad = { top: 16, right: 20, bottom: 22, left: 36 }; // Increased top pad for labels
                 const bW = W - bPad.left - bPad.right;
                 const bH = 76 - bPad.top - bPad.bottom;
-                const barW = Math.min(32, Math.max(10, bW / (safePoints.length * 1.8)));
+                const barW = Math.min(32, Math.max(12, bW / (safePoints.length * 2)));
                 return mapped.map((point, i) => {
                   const val = point.value;
                   const barH = Math.max((val / maxValue) * bH, val > 0 ? 3 : 0);
@@ -253,8 +253,18 @@ export default function MonthlyAttendanceTrend({
                       <rect x={x} y={y} width={barW} height={barH} rx={4}
                         fill={isHov ? '#06b6d4' : 'url(#matBarGrad)'} opacity={isHov ? 1 : 0.85}
                       />
-                      {isHov && val > 0 && (
-                        <text x={x + barW / 2} y={y - 4} textAnchor="middle" fontSize="9" fontWeight="700" fill="var(--accent-cyan)">{val}</text>
+                      {val > 0 && (
+                        <text
+                          x={x + barW / 2}
+                          y={y - 6}
+                          textAnchor="middle"
+                          fontSize="10"
+                          fontWeight="800"
+                          fill={isHov ? 'var(--accent-cyan)' : 'var(--text-primary)'}
+                          style={{ transition: 'fill 140ms ease' }}
+                        >
+                          {val}
+                        </text>
                       )}
                       <text x={x + barW / 2} y={76 - 5} textAnchor="middle" fontSize="9"
                         fontWeight={isHov ? '700' : '500'}

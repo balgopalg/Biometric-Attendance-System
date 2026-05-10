@@ -1787,15 +1787,6 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   .papers-filter-grid > :not(:first-child),
   .exam-eligibility-filter-grid > :not(:first-child),
   .timetable-filter-grid > :not(:first-child) {
-    display: none;
-  }
-
-  .lecturers-filter-grid.is-mobile-open > :not(:first-child),
-  .students-filter-grid.is-mobile-open > :not(:first-child),
-  .courses-filter-grid.is-mobile-open > :not(:first-child),
-  .papers-filter-grid.is-mobile-open > :not(:first-child),
-  .exam-eligibility-filter-grid.is-mobile-open > :not(:first-child),
-  .timetable-filter-grid.is-mobile-open > :not(:first-child) {
     display: block;
   }
 
