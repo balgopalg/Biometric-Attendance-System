@@ -6,7 +6,7 @@ Usage:
     send_welcome_email(
         to_email="student@example.com",
         name="John Doe",
-        temp_password="Abc123!@#xyz",
+        temp_password="Abc123!@#xyz",  # gitleaks:allow
         role="student",
     )
 

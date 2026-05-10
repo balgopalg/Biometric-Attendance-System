@@ -386,7 +386,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "_id": admin_id,
                 "name": "Super Admin",
                 "email": "admin@system.com",
-                "password_hash": self._hash_password("admin123"),
+                "password_hash": self._hash_password("admin123"),  # gitleaks:allow
                 "role": "super_admin",
                 "department": "Administration",
                 "department_id": None,
@@ -396,7 +396,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "_id": dept_admin_id,
                 "name": "Dept Admin",
                 "email": "deptadmin@system.com",
-                "password_hash": self._hash_password("deptadmin123"),
+                "password_hash": self._hash_password("deptadmin123"),  # gitleaks:allow
                 "role": "department_admin",
                 "department": "Computing",
                 "department_id": dept_id,
@@ -406,7 +406,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "_id": lecturer_id,
                 "name": "Dr. Lecturer",
                 "email": "lecturer@system.com",
-                "password_hash": self._hash_password("lecturer123"),
+                "password_hash": self._hash_password("lecturer123"),  # gitleaks:allow
                 "role": "lecturer",
                 "department": "Computing",
                 "department_id": dept_id,
@@ -417,7 +417,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
                 "_id": user_id,
                 "name": "Alice Student",
                 "email": "alice@student.com",
-                "password_hash": self._hash_password("student123"),
+                "password_hash": self._hash_password("student123"),  # gitleaks:allow
                 "role": "student",
                 "department": "Computing",
                 "department_id": dept_id,
@@ -575,7 +575,7 @@ class BaseApiFlowTestCase(unittest.TestCase):
 
 class AuthFlowTests(BaseApiFlowTestCase):
     def test_notifications_inbox_and_mark_read(self):
-        self.login("alice@student.com", "student123")
+        self.login("alice@student.com", "student123")  # gitleaks:allow
 
         inbox = self.client.get("/api/notifications")
         self.assertEqual(inbox.status_code, 200, inbox.get_data(as_text=True))
@@ -593,7 +593,7 @@ class AuthFlowTests(BaseApiFlowTestCase):
         self.assertEqual(inbox_after.get_json()["unread_count"], 0)
 
     def test_profile_picture_upload_enforces_size_bounds(self):
-        self.login("admin@system.com", "admin123")
+        self.login("admin@system.com", "admin123")  # gitleaks:allow
 
         noisy_rgb = np.random.randint(0, 256, (1100, 1500, 3), dtype=np.uint8)
         image = Image.fromarray(noisy_rgb, mode="RGB")
@@ -686,7 +686,7 @@ class AuthFlowTests(BaseApiFlowTestCase):
 
 class CalendarFlowTests(BaseApiFlowTestCase):
     def test_calendar_extract_publish_and_current(self):
-        self.login("deptadmin@system.com", "deptadmin123")
+        self.login("deptadmin@system.com", "deptadmin123")  # gitleaks:allow
 
         with patch("app.routes.calendar.extract_calendar_draft") as mocked_extract:
             mocked_extract.return_value = {
@@ -771,7 +771,7 @@ class StudentFlowTests(BaseApiFlowTestCase):
 
 class LecturerFlowTests(BaseApiFlowTestCase):
     def test_lecturer_session_lifecycle_recognition_and_adjustment(self):
-        self.login("lecturer@system.com", "lecturer123")
+        self.login("lecturer@system.com", "lecturer123")  # gitleaks:allow
 
         papers = self.client.get("/api/lecturer/papers")
         self.assertEqual(papers.status_code, 200)

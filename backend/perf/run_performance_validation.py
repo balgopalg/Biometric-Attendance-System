@@ -70,7 +70,7 @@ def _csrf_headers(client):
     return {"X-CSRF-TOKEN": cookie.value}
 
 
-def _login(client, email="admin@system.com", password="admin123"):
+def _login(client, email="admin@system.com", password="admin123"):  # gitleaks:allow
     r = client.post("/api/auth/login", json={"email": email, "password": password})
     if r.status_code != 200:
         raise RuntimeError(f"Login failed: {r.status_code} {_safe_json(r)}")
@@ -117,7 +117,7 @@ def _ensure_perf_lecturer_for_paper(paper_id: str):
     papers = get_collection("academic", "papers")
 
     email = "perf.lecturer@example.com"
-    password = "PerfLecturer123"
+    password = "PerfLecturer123"  # gitleaks:allow
     lecturer = users.find_one({"email": email})
     if not lecturer:
         created = create_user(
