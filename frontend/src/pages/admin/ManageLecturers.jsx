@@ -355,7 +355,6 @@ export default function ManageLecturers() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>{ctx.totalLecturers} lecturers in current filter</p>
           <div className="lecturers-toolbar-actions-mobile">
             <button className="btn-secondary" title="Find lecturer by face" onClick={() => setShowFaceSearch(true)}><HiOutlineCamera size={16} /> Find Face</button>
-            <button className="btn-secondary" title="Import lecturers from Excel" onClick={openLecturerImportModal}><HiOutlineDocumentAdd size={16} /> Import Excel</button>
             <button className="btn-primary" onClick={openAddLecturerModal}><HiOutlinePlus size={16} /> Add Lecturer</button>
           </div>
         </div>
@@ -389,39 +388,40 @@ export default function ManageLecturers() {
         </button>
       </div>
 
+      {/* Search bar — always visible */}
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <HiOutlineSearch size={18} style={{ 
+          position: 'absolute', 
+          left: 14, 
+          top: '50%', 
+          transform: 'translateY(-50%)', 
+          color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
+          transition: 'color 0.2s ease'
+        }} />
+        <input 
+          className="search-input" 
+          placeholder="Search by name, email or subject..." 
+          value={ctx.search} 
+          onChange={(e) => ctx.setSearch(e.target.value)} 
+          onFocus={() => setIsSearchFocused(true)}
+          onBlur={() => setIsSearchFocused(false)}
+          style={{
+            paddingLeft: 40,
+            width: '100%',
+            borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
+            background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+            transition: 'all 0.3s ease'
+          }}
+        />
+      </div>
+
       {/* ── Filters ──────────────────────────────────────────────── */}
       <div className={`lecturers-filter-grid ${ctx.showMobileFilters ? 'is-mobile-open' : ''}`} style={{ 
         display: 'grid', 
-        gridTemplateColumns: isSearchFocused ? '2.2fr 0.8fr 0.8fr 0.8fr 0.8fr' : '1.2fr 1fr 1fr 1fr 1fr', 
-        transition: 'grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        gridTemplateColumns: '1fr 1fr 1fr 1fr', 
         gap: 10, 
         marginBottom: 20 
       }}>
-        <div style={{ position: 'relative' }}>
-          <HiOutlineSearch size={18} style={{ 
-            position: 'absolute', 
-            left: 14, 
-            top: '50%', 
-            transform: 'translateY(-50%)', 
-            color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
-            transition: 'color 0.2s ease'
-          }} />
-          <input 
-            className="search-input" 
-            placeholder="Search by name, email or subject..." 
-            value={ctx.search} 
-            onChange={(e) => ctx.setSearch(e.target.value)} 
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            style={{
-              paddingLeft: 40,
-              width: '100%',
-              borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
-              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
-              transition: 'all 0.3s ease'
-            }}
-          />
-        </div>
         <select className="input-field" value={ctx.filters.department_id} onChange={(e) => ctx.setFilters({ department_id: e.target.value, course_id: '', semester: '', paper_id: '' })} disabled={ctx.isDepartmentAdmin}>
           <option value="">{ctx.isDepartmentAdmin ? (ctx.departmentName || 'Department') : 'All Departments'}</option>
           {ctx.departments.map((d) => <option key={d._id} value={d._id}>{d.name}</option>)}
@@ -480,8 +480,14 @@ export default function ManageLecturers() {
       {/* Mobile Operations */}
       <Modal isOpen={ctx.showMobileOperations} onClose={() => ctx.setShowMobileOperations(false)} title="Quick Actions" width={400}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button className="btn-secondary" style={{ justifyContent: 'flex-start' }} onClick={() => { ctx.setShowMobileOperations(false); openLecturerImportModal(); }}>
+            <HiOutlineDocumentAdd size={16} /> Import Excel
+          </button>
           <button className="btn-secondary" style={{ justifyContent: 'flex-start' }} onClick={() => { ctx.setShowMobileOperations(false); handleExportLecturers(); }} disabled={ctx.exportingLecturers}>
             <HiOutlineDownload size={16} /> {ctx.exportingLecturers ? 'Exporting...' : 'Export Lecturers'}
+          </button>
+          <button className="btn-secondary" style={{ justifyContent: 'flex-start' }} onClick={() => { ctx.setShowMobileOperations(false); handleRebuildAllFaces(); }} disabled={rebuildingAllFaces}>
+            <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
           </button>
         </div>
       </Modal>

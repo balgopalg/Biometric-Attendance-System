@@ -46,7 +46,7 @@ export default function DeadLetterJobs() {
   const [selected, setSelected] = useState([]);
   const [jobsError, setJobsError] = useState('');
   const [filters, setFilters] = useState({ q: '', job_type: '', from: '', to: '', sort_by: 'updated_at', sort_dir: 'desc' });
-  const [showMobileFilters] = useState(false);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   const fetchJobs = async (nextPage = page) => {
@@ -279,6 +279,14 @@ export default function DeadLetterJobs() {
       <div className="mobile-admin-action-strip">
         <button 
           className="icon-btn mobile-filters-icon-btn" 
+          onClick={() => setShowMobileFilters((prev) => !prev)} 
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
+        <button 
+          className="icon-btn mobile-filters-icon-btn" 
           onClick={() => fetchJobs(page)} 
           disabled={loading}
           title="Refresh Jobs"
@@ -287,39 +295,39 @@ export default function DeadLetterJobs() {
         </button>
       </div>
 
+      {/* Search bar — always visible */}
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <HiOutlineSearch size={18} style={{ 
+          position: 'absolute', 
+          left: 14, 
+          top: '50%', 
+          transform: 'translateY(-50%)', 
+          color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
+          transition: 'color 0.2s ease'
+        }} />
+        <input 
+          className="search-input" 
+          placeholder="Search by ID, type, or error..." 
+          value={filters.q} 
+          onChange={(e) => setFilters((p) => ({ ...p, q: e.target.value }))} 
+          onFocus={() => setIsSearchFocused(true)}
+          onBlur={() => setIsSearchFocused(false)}
+          style={{
+            paddingLeft: 40,
+            width: '100%',
+            borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
+            background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+            transition: 'all 0.3s ease'
+          }}
+        />
+      </div>
+
       <div className={`jobs-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{
         display: 'grid',
-        gridTemplateColumns: isSearchFocused ? '2.5fr 0.8fr 0.8fr 0.8fr 1.5fr' : '1.5fr 1.2fr 1fr 1fr 1.5fr',
-        transition: 'grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        gridTemplateColumns: '1fr 1fr 1fr 1.5fr',
         gap: 10,
         marginBottom: 14
       }}>
-        <div style={{ position: 'relative' }}>
-          <HiOutlineSearch size={18} style={{ 
-            position: 'absolute', 
-            left: 14, 
-            top: '50%', 
-            transform: 'translateY(-50%)', 
-            color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
-            transition: 'color 0.2s ease'
-          }} />
-          <input 
-            className="search-input" 
-            placeholder="Search by ID, type, or error..." 
-            value={filters.q} 
-            onChange={(e) => setFilters((p) => ({ ...p, q: e.target.value }))} 
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            style={{
-              paddingLeft: 40,
-              width: '100%',
-              borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
-              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
-              transition: 'all 0.3s ease'
-            }}
-          />
-        </div>
-
         <select 
           className="input-field" 
           value={filters.job_type} 
@@ -648,9 +656,6 @@ export default function DeadLetterJobs() {
         @media (max-width: 1024px) {
           .jobs-filter-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-          .jobs-filter-grid > :first-child {
-            grid-column: 1 / -1;
           }
         }
 
