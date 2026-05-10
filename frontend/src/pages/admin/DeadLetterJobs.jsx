@@ -46,7 +46,8 @@ export default function DeadLetterJobs() {
   const [selected, setSelected] = useState([]);
   const [jobsError, setJobsError] = useState('');
   const [filters, setFilters] = useState({ q: '', job_type: '', from: '', to: '', sort_by: 'updated_at', sort_dir: 'desc' });
-  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [showMobileFilters] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   const fetchJobs = async (nextPage = page) => {
     setLoading(true);
@@ -276,14 +277,6 @@ export default function DeadLetterJobs() {
         </div>
       </div>
       <div className="mobile-admin-action-strip">
-        <button
-          className="icon-btn mobile-filters-icon-btn"
-          type="button"
-          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
-          onClick={() => setShowMobileFilters((prev) => !prev)}
-        >
-          <HiOutlineFilter size={18} />
-        </button>
         <button 
           className="icon-btn mobile-filters-icon-btn" 
           onClick={() => fetchJobs(page)} 
@@ -294,14 +287,36 @@ export default function DeadLetterJobs() {
         </button>
       </div>
 
-      <div className={`jobs-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`}>
+      <div className={`jobs-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{
+        display: 'grid',
+        gridTemplateColumns: isSearchFocused ? '2.5fr 0.8fr 0.8fr 0.8fr 1.5fr' : '1.5fr 1.2fr 1fr 1fr 1.5fr',
+        transition: 'grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        gap: 10,
+        marginBottom: 14
+      }}>
         <div style={{ position: 'relative' }}>
-          <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <HiOutlineSearch size={18} style={{ 
+            position: 'absolute', 
+            left: 14, 
+            top: '50%', 
+            transform: 'translateY(-50%)', 
+            color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
+            transition: 'color 0.2s ease'
+          }} />
           <input 
             className="search-input" 
             placeholder="Search by ID, type, or error..." 
             value={filters.q} 
             onChange={(e) => setFilters((p) => ({ ...p, q: e.target.value }))} 
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            style={{
+              paddingLeft: 40,
+              width: '100%',
+              borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
+              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+              transition: 'all 0.3s ease'
+            }}
           />
         </div>
 
@@ -613,7 +628,6 @@ export default function DeadLetterJobs() {
       <style dangerouslySetInnerHTML={{ __html: `
         .jobs-filter-grid {
           display: grid;
-          grid-template-columns: 1.5fr 1.2fr 1fr 1fr 1.5fr;
           gap: 10px;
           margin-bottom: 14px;
         }

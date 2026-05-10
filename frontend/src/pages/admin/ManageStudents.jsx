@@ -43,7 +43,7 @@ export default function ManageStudents() {
     showAdd, setShowAdd, showEdit, setShowEdit, showBulk, setShowBulk,
     showCreds, setShowCreds, showFaceEnroll, setShowFaceEnroll,
     showStudentPapers, setShowStudentPapers, showExcelImport, setShowExcelImport,
-    showMobileOps, setShowMobileOps, showMobileFilters, setShowMobileFilters,
+    showMobileOps, setShowMobileOps, showMobileFilters,
     showPromoteModal, setShowPromoteModal,
     createdCreds, setCreatedCreds, editingStudent, setEditingStudent,
     enrollingStudent, setEnrollingStudent, paperStudent, setPaperStudent,
@@ -67,6 +67,7 @@ export default function ManageStudents() {
   const [deleteStudent, setDeleteStudent] = useState(null);
   const [showFaceSearch, setShowFaceSearch] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const { startTraining } = useTraining();
 
   // ─── HANDLERS ────────────────────────────────────────────────────────
@@ -573,16 +574,6 @@ export default function ManageStudents() {
         <button
           className="icon-btn mobile-filters-icon-btn"
           type="button"
-          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
-          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
-          aria-expanded={showMobileFilters}
-          onClick={() => setShowMobileFilters((prev) => !prev)}
-        >
-          <HiOutlineFilter size={18} />
-        </button>
-        <button
-          className="icon-btn mobile-filters-icon-btn"
-          type="button"
           title="More actions"
           aria-label="More actions"
           onClick={() => setShowMobileOps(true)}
@@ -591,10 +582,37 @@ export default function ManageStudents() {
         </button>
       </div>
 
-      <div className={`students-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+      <div className={`students-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ 
+        display: 'grid', 
+        gridTemplateColumns: isSearchFocused ? '2.5fr 0.8fr 0.8fr 0.8fr 0.8fr' : '1.5fr 1.2fr 1fr 1fr 1fr', 
+        transition: 'grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        gap: 10, 
+        marginBottom: 14 
+      }}>
         <div style={{ position: 'relative' }}>
-          <HiOutlineSearch size={18} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="search-input" placeholder="Search by name, reg no, email..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <HiOutlineSearch size={18} style={{ 
+            position: 'absolute', 
+            left: 14, 
+            top: '50%', 
+            transform: 'translateY(-50%)', 
+            color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
+            transition: 'color 0.2s ease'
+          }} />
+          <input 
+            className="search-input" 
+            placeholder="Search by name, reg no, email..." 
+            value={search} 
+            onChange={(e) => setSearch(e.target.value)}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            style={{
+              paddingLeft: 40,
+              width: '100%',
+              borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
+              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+              transition: 'all 0.3s ease'
+            }}
+          />
         </div>
 
         <select className="input-field" value={filters.department_id} onChange={(e) => setFilters({ department_id: e.target.value, course_id: '', semester: '', paper_id: '' })} disabled={isDepartmentAdmin}>

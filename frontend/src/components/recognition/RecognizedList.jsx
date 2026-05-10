@@ -1,10 +1,9 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   HiOutlineSearch,
   HiOutlineShieldCheck,
   HiOutlineUsers,
-  HiOutlineFilter,
 } from 'react-icons/hi';
 
 function toDisplayText(value, fallback = 'Unknown') {
@@ -28,16 +27,23 @@ function formatTime(ts) {
 }
 
 const SORTS = [
-  { key: 'latest', label: 'Latest Recognized' },
+  { key: 'latest', label: 'Latest' },
   { key: 'name',   label: 'Name A–Z' },
   { key: 'conf',   label: 'Confidence' },
 ];
 
-export default function RecognizedList({ students = [] }) {
+export default function RecognizedList({ students = [], isLive = false }) {
   const safeStudents = Array.isArray(students) ? students : [];
   const [search, setSearch]   = useState('');
   const [sort, setSort]       = useState('latest');
-  const [onlyPresent, setOnlyPresent] = useState(false);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 640 : false);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const filtered = useMemo(() => {
     let list = [...safeStudents];
@@ -48,14 +54,23 @@ export default function RecognizedList({ students = [] }) {
           || toDisplayText(s?.reg_number, '').toLowerCase().includes(q)
       );
     }
-    if (onlyPresent) list = list.filter(s => s?.status !== 'absent');
     if (sort === 'name') list.sort((a, b) => toDisplayText(a?.name).localeCompare(toDisplayText(b?.name)));
-    else if (sort === 'conf') list.sort((a, b) => (Number(b?.confidence) || 0) - (Number(a?.confidence) || 0));
+    else if (sort === 'conf') list.sort((a, b) => {
+      const ca = Number(a?.confidence) || Number(a?.similarity) || 0;
+      const cb = Number(b?.confidence) || Number(b?.similarity) || 0;
+      return cb - ca;
+    });
     return list;
-  }, [safeStudents, search, sort, onlyPresent]);
+  }, [safeStudents, search, sort]);
 
   return (
-    <div className="glass-card" style={{ padding: 20, height: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="glass-card" style={{ 
+      padding: isMobile ? 12 : 20, 
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      gap: isMobile ? 10 : 14 
+    }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -75,44 +90,70 @@ export default function RecognizedList({ students = [] }) {
               {safeStudents.length} Recognized
             </span>
           )}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-emerald)' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-emerald)', boxShadow: '0 0 6px var(--accent-emerald)', display: 'inline-block' }} />
-            Live
-          </span>
+          {isLive && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 600, color: 'var(--accent-emerald)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-emerald)', boxShadow: '0 0 6px var(--accent-emerald)', display: 'inline-block' }} />
+              Live
+            </span>
+          )}
         </div>
       </div>
 
-      {/* ── Search + Sort + Filter ── */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <HiOutlineSearch size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+      {/* ── Search + Sort ── */}
+      <div style={{ 
+        display: 'flex', 
+        gap: 8, 
+        alignItems: 'center',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+      }}>
+        <div style={{ 
+          position: 'relative', 
+          flex: isSearchFocused ? 1 : 1,
+          width: isSearchFocused ? '100%' : 'auto',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}>
+          <HiOutlineSearch size={14} style={{ 
+            position: 'absolute', 
+            left: 10, 
+            top: '50%', 
+            transform: 'translateY(-50%)', 
+            color: isSearchFocused ? 'var(--accent-emerald)' : 'var(--text-muted)', 
+            pointerEvents: 'none',
+            transition: 'color 0.2s ease'
+          }} />
           <input
             className="input-field"
             placeholder="Search student…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ paddingLeft: 32, fontSize: '0.8rem', height: 34 }}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
+            style={{ 
+              paddingLeft: 32, 
+              fontSize: '0.8rem', 
+              height: 34,
+              borderColor: isSearchFocused ? 'var(--accent-emerald)' : 'var(--border-glass)',
+              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+              transition: 'all 0.3s ease'
+            }}
           />
         </div>
         <select
           className="input-field"
           value={sort}
           onChange={e => setSort(e.target.value)}
-          style={{ fontSize: '0.75rem', height: 34, padding: '0 8px', minWidth: 140 }}
+          style={{ 
+            fontSize: '0.75rem', 
+            height: 34, 
+            padding: '0 12px 0 8px', 
+            width: isSearchFocused ? 110 : 140,
+            flexShrink: 0,
+            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            opacity: isSearchFocused ? 0.9 : 1
+          }}
         >
           {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
         </select>
-        <button
-          title="Toggle: show present only"
-          onClick={() => setOnlyPresent(p => !p)}
-          style={{
-            width: 34, height: 34, borderRadius: 9, border: `1.5px solid ${onlyPresent ? 'var(--accent-emerald)' : 'var(--border-glass)'}`,
-            background: onlyPresent ? 'rgba(16,185,129,0.1)' : 'var(--bg-glass)',
-            display: 'grid', placeItems: 'center', cursor: 'pointer', flexShrink: 0,
-          }}
-        >
-          <HiOutlineFilter size={14} style={{ color: onlyPresent ? 'var(--accent-emerald)' : 'var(--text-muted)' }} />
-        </button>
       </div>
 
       {/* ── List ── */}
@@ -129,7 +170,8 @@ export default function RecognizedList({ students = [] }) {
           {filtered.map((s, i) => {
             const displayName = toDisplayText(s?.name, 'Unknown');
             const subLabel    = toDisplayText(s?.reg_number ?? s?.user_id, 'N/A');
-            const confidence  = Math.round(Number(s?.confidence) * 100 || 0);
+            const rawConf     = Number(s?.confidence) || Number(s?.similarity) || 0;
+            const confidence  = Math.round(rawConf * 100);
             const timeLabel   = formatTime(s?.recognized_at ?? s?.timestamp);
             const initials    = displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
 
@@ -144,7 +186,7 @@ export default function RecognizedList({ students = [] }) {
                   borderRadius: 14,
                   border: '1px solid rgba(16,185,129,0.15)',
                   background: 'rgba(16,185,129,0.04)',
-                  padding: '12px 14px',
+                  padding: isMobile ? '10px 12px' : '12px 14px',
                   overflow: 'hidden',
                 }}
               >
@@ -164,6 +206,7 @@ export default function RecognizedList({ students = [] }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 1 }}>
                       {displayName}
+                      <span style={{ marginLeft: 8, fontSize: '0.7rem', color: confidence >= 80 ? 'var(--accent-emerald)' : 'var(--accent-amber)', opacity: 0.8 }}>({confidence}%)</span>
                       {s?.isDrowsy && <span title="Drowsiness Detected" style={{ marginLeft: 6 }}>😴</span>}
                     </p>
                     <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{subLabel}</p>

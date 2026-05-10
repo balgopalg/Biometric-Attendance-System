@@ -2,7 +2,7 @@ import { forwardRef, useState, useEffect } from 'react';
 
 const getIsMobile = () => (typeof window !== 'undefined' ? window.innerWidth < 640 : false);
 
-const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error, onFlipCamera }, ref) {
+const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error, isAwaiting, onFlipCamera }, ref) {
   const [isMobile, setIsMobile] = useState(getIsMobile);
 
   useEffect(() => {
@@ -38,12 +38,30 @@ const WebcamFeed = forwardRef(function WebcamFeed({ isActive, error, onFlipCamer
             position: 'absolute', inset: 0,
             display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center',
-            color: 'var(--text-muted)', gap: 8,
+            color: 'var(--text-muted)', gap: 12,
+            textAlign: 'center',
+            padding: 20
           }}>
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M15 10l4.553-2.276A1 1 0 0 1 21 8.618v6.764a1 1 0 0 1-1.447.894L15 14M5 18h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z" />
-            </svg>
-            <p style={{ fontSize: '0.85rem' }}>Camera not active</p>
+            {isAwaiting ? (
+              <>
+                <div style={{ 
+                  width: 40, height: 40, 
+                  border: '3px solid rgba(139, 92, 246, 0.1)', 
+                  borderTopColor: 'var(--accent-purple)', 
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite'
+                }} />
+                <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Awaiting camera feed...</p>
+                <p style={{ fontSize: '0.75rem', opacity: 0.7 }}>Please allow camera access if prompted</p>
+              </>
+            ) : (
+              <>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M15 10l4.553-2.276A1 1 0 0 1 21 8.618v6.764a1 1 0 0 1-1.447.894L15 14M5 18h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z" />
+                </svg>
+                <p style={{ fontSize: '0.85rem' }}>Camera not active</p>
+              </>
+            )}
           </div>
         )}
         {isActive && (
