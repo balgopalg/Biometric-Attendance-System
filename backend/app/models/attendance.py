@@ -1,10 +1,11 @@
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
+
+from app.extensions import get_collection
+from app.utils.timezone import to_india_time
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import DuplicateKeyError
-from app.extensions import get_collection
-from app.utils.timezone import to_india_time
 
 
 def log_attendance(
@@ -12,7 +13,7 @@ def log_attendance(
     user_id: str,
     lecturer_id: str,
     session_id: str,
-    method: str = "biometric"
+    method: str = "biometric",
 ) -> dict:
     logs = get_collection("attendance", "attendance_logs")
     doc = {
@@ -29,11 +30,13 @@ def log_attendance(
         return doc
     except DuplicateKeyError:
         # Return existing record if duplicate key error occurs (e.g., from retry)
-        existing = logs.find_one({
-            'session_id': session_id,
-            'paper_id': paper_id,
-            'user_id': user_id
-        })
+        existing = logs.find_one(
+            {
+                "session_id": session_id,
+                "paper_id": paper_id,
+                "user_id": user_id,
+            }
+        )
         if existing:
             existing["_id"] = str(existing["_id"])
             return existing
@@ -41,7 +44,9 @@ def log_attendance(
         raise
 
 
-def get_attendance_for_student(user_id: str, paper_id: Optional[str] = None, limit: int = 5000) -> List[dict]:
+def get_attendance_for_student(
+    user_id: str, paper_id: Optional[str] = None, limit: int = 5000
+) -> List[dict]:
     """Get attendance logs for a student, optionally filtered by paper."""
     query = {"user_id": user_id}
     if paper_id:
@@ -53,7 +58,9 @@ def get_attendance_for_student(user_id: str, paper_id: Optional[str] = None, lim
 def get_attendance_for_paper(paper_id: str, limit: int = 5000) -> List[dict]:
     """Get attendance logs for a paper with a bounded result set."""
     logs = get_collection("attendance", "attendance_logs")
-    return list(logs.find({"paper_id": paper_id}).sort("timestamp", -1).limit(limit))
+    return list(
+        logs.find({"paper_id": paper_id}).sort("timestamp", -1).limit(limit)
+    )
 
 
 def get_attendance_for_session(session_id: str) -> List[dict]:
@@ -64,9 +71,7 @@ def get_attendance_for_session(session_id: str) -> List[dict]:
 def count_attendance(user_id: str, paper_id: str) -> int:
     """Count total attendance records for a student in a paper."""
     logs = get_collection("attendance", "attendance_logs")
-    return logs.count_documents(
-        {"user_id": user_id, "paper_id": paper_id}
-    )
+    return logs.count_documents({"user_id": user_id, "paper_id": paper_id})
 
 
 def delete_attendance_log(log_id: str) -> None:
@@ -85,7 +90,7 @@ def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
     """
     leaves_col = get_collection("academic", "leave_requests")
     result = {}
-    
+
     # We query for ALL approved leaves for this student.
     # We filter papers in the logic to handle Global Leaves (none/empty paper_id).
     query = {"user_id": str(user_id), "status": "approved"}
@@ -95,12 +100,12 @@ def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
     for doc in docs:
         pid = doc.get("paper_id")
         paper_id_text = str(pid) if pid else None
-        
+
         # Determine dates covered by this request
         covered_dates = set()
         start = doc.get("start_date") or doc.get("date")
         end = doc.get("end_date") or start
-        
+
         if start and end:
             try:
                 # Expand range into individual YYYY-MM-DD strings
@@ -111,11 +116,15 @@ def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
                     s_dt, e_dt = e_dt, s_dt
                 delta = (e_dt - s_dt).days
                 for i in range(delta + 1):
-                    covered_dates.add((s_dt + timedelta(days=i)).strftime("%Y-%m-%d"))
+                    covered_dates.add(
+                        (s_dt + timedelta(days=i)).strftime("%Y-%m-%d")
+                    )
             except Exception:
                 # Fallback to single dates if expansion fails
-                if start: covered_dates.add(str(start))
-                if end: covered_dates.add(str(end))
+                if start:
+                    covered_dates.add(str(start))
+                if end:
+                    covered_dates.add(str(end))
 
         # If paper_id is None, it's a Global Leave; apply to all student papers.
         if not paper_id_text:
@@ -123,7 +132,7 @@ def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
                 result.setdefault(p_id, set()).update(covered_dates)
         else:
             result.setdefault(paper_id_text, set()).update(covered_dates)
-            
+
     return result
 
 

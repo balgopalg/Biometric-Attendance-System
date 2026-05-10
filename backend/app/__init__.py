@@ -4,11 +4,13 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
+
 from flask import Flask, g, request
 from pymongo import ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
+
 from .config import Config
-from .extensions import mongo, jwt, cors, get_collection
+from .extensions import cors, get_collection, jwt, mongo
 
 
 def create_app(config_class=Config, seed_default_admin=False):
@@ -21,7 +23,11 @@ def create_app(config_class=Config, seed_default_admin=False):
     )
 
     # Ensure upload folder exists
-    uploads_dir = os.path.abspath(os.path.join(app.root_path, "..", app.config.get("UPLOAD_FOLDER", "uploads")))
+    uploads_dir = os.path.abspath(
+        os.path.join(
+            app.root_path, "..", app.config.get("UPLOAD_FOLDER", "uploads")
+        )
+    )
     app.config["UPLOADS_ABSOLUTE_PATH"] = uploads_dir
     os.makedirs(uploads_dir, exist_ok=True)
 
@@ -51,7 +57,10 @@ def create_app(config_class=Config, seed_default_admin=False):
             return token_session_version != current_session_version
         except Exception as exc:
             from flask import current_app
-            current_app.logger.error("Token revocation check failed: %s", exc, exc_info=True)
+
+            current_app.logger.error(
+                "Token revocation check failed: %s", exc, exc_info=True
+            )
             return True  # Fail-closed: deny access if revocation check fails
 
     cors.init_app(
@@ -59,11 +68,12 @@ def create_app(config_class=Config, seed_default_admin=False):
         resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}},
         supports_credentials=app.config.get("CORS_SUPPORTS_CREDENTIALS", True),
     )
-    
+
     # Initialize rate limiter with storage backend
     if app.config.get("RATELIMIT_ENABLED", True):
         try:
             from .security.rate_limiter import limiter
+
             # RATELIMIT_STORAGE_URI is now the canonical config key
             app.config["RATELIMIT_HEADERS_ENABLED"] = True
             limiter.init_app(app)
@@ -77,10 +87,10 @@ def create_app(config_class=Config, seed_default_admin=False):
 
     # Initialize observability (logging, error tracking, metrics)
     try:
-        from .observability.logging import configure_logging
         from .observability.error_tracking import register_error_handlers
-        from .observability.metrics import register_metrics_middleware
         from .observability.health import health_bp
+        from .observability.logging import configure_logging
+        from .observability.metrics import register_metrics_middleware
 
         configure_logging(
             app,
@@ -97,14 +107,21 @@ def create_app(config_class=Config, seed_default_admin=False):
     def _security_headers(response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=()")
+        response.headers.setdefault(
+            "Referrer-Policy", "strict-origin-when-cross-origin"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy", "camera=(self), microphone=()"
+        )
 
         csp = app.config.get("CONTENT_SECURITY_POLICY")
         if csp:
             response.headers.setdefault("Content-Security-Policy", csp)
 
-        is_secure_request = request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        is_secure_request = (
+            request.is_secure
+            or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+        )
         if app.config.get("HSTS_ENABLED", False) and is_secure_request:
             hsts = f"max-age={int(app.config.get('HSTS_MAX_AGE_SECONDS', 31536000))}"
             if app.config.get("HSTS_INCLUDE_SUBDOMAINS", True):
@@ -125,7 +142,9 @@ def create_app(config_class=Config, seed_default_admin=False):
         if started_at is not None:
             elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
             response.headers["X-Response-Time-Ms"] = str(elapsed_ms)
-            threshold_ms = int(app.config.get("SLOW_REQUEST_THRESHOLD_MS", 500))
+            threshold_ms = int(
+                app.config.get("SLOW_REQUEST_THRESHOLD_MS", 500)
+            )
             if elapsed_ms >= threshold_ms and request.endpoint:
                 app.logger.info(
                     "slow-request method=%s path=%s endpoint=%s status=%s duration_ms=%s",
@@ -138,14 +157,14 @@ def create_app(config_class=Config, seed_default_admin=False):
         return response
 
     # Register blueprints
-    from .routes.auth import auth_bp
     from .routes.admin import admin_bp
-    from .routes.lecturer import lecturer_bp
-    from .routes.student import student_bp
-    from .routes.recognition import recognition_bp
-    from .routes.timetable import timetable_bp
+    from .routes.auth import auth_bp
     from .routes.calendar import calendar_bp
+    from .routes.lecturer import lecturer_bp
     from .routes.notifications import notifications_bp
+    from .routes.recognition import recognition_bp
+    from .routes.student import student_bp
+    from .routes.timetable import timetable_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
@@ -160,7 +179,9 @@ def create_app(config_class=Config, seed_default_admin=False):
         _bootstrap_isolated_databases(mongo, app.config)
         _ensure_indexes(mongo, app.config)
         _run_startup_health_checks(app)
-        if seed_default_admin and app.config.get("ENABLE_DEFAULT_ADMIN_SEED", False):
+        if seed_default_admin and app.config.get(
+            "ENABLE_DEFAULT_ADMIN_SEED", False
+        ):
             _seed_admin(mongo)
 
     return app
@@ -188,7 +209,12 @@ def _validate_security_config(app):
             "or enable STRICT_JWT_SECRET=1 to enforce this everywhere."
         )
 
-    if env not in local_envs and not str(app.config.get("FACE_EMBEDDING_ENCRYPTION_KEY") or "").strip():
+    if (
+        env not in local_envs
+        and not str(
+            app.config.get("FACE_EMBEDDING_ENCRYPTION_KEY") or ""
+        ).strip()
+    ):
         raise RuntimeError(
             "FACE_EMBEDDING_ENCRYPTION_KEY is required for non-local environments to protect biometric templates."
         )
@@ -210,72 +236,211 @@ def _ensure_indexes(mongo, config):
     client = mongo.cx
 
     auth_users = client[config["MONGO_DB_AUTH"]]["users"]
-    _create_index_safe(auth_users, [("email", ASCENDING)], unique=True, name="uq_users_email")
+    _create_index_safe(
+        auth_users, [("email", ASCENDING)], unique=True, name="uq_users_email"
+    )
     _create_index_safe(auth_users, [("role", ASCENDING)], name="ix_users_role")
-    _create_index_safe(auth_users, [("department_id", ASCENDING)], name="ix_users_department")
+    _create_index_safe(
+        auth_users, [("department_id", ASCENDING)], name="ix_users_department"
+    )
 
     courses = client[config["MONGO_DB_ACADEMIC"]]["courses"]
-    _create_index_safe(courses, [("code", ASCENDING)], unique=True, name="uq_courses_code")
-    _create_index_safe(courses, [("department_id", ASCENDING)], name="ix_courses_department")
+    _create_index_safe(
+        courses, [("code", ASCENDING)], unique=True, name="uq_courses_code"
+    )
+    _create_index_safe(
+        courses, [("department_id", ASCENDING)], name="ix_courses_department"
+    )
 
     papers = client[config["MONGO_DB_ACADEMIC"]]["papers"]
-    _create_index_safe(papers, [("code", ASCENDING)], unique=True, name="uq_papers_code")
-    _create_index_safe(papers, [("course_id", ASCENDING)], name="ix_papers_course")
-    _create_index_safe(papers, [("lecturer_id", ASCENDING)], name="ix_papers_lecturers")
+    _create_index_safe(
+        papers, [("code", ASCENDING)], unique=True, name="uq_papers_code"
+    )
+    _create_index_safe(
+        papers, [("course_id", ASCENDING)], name="ix_papers_course"
+    )
+    _create_index_safe(
+        papers, [("lecturer_id", ASCENDING)], name="ix_papers_lecturers"
+    )
 
     timetables = client[config["MONGO_DB_ACADEMIC"]]["timetables"]
-    _create_index_safe(timetables, [("department_id", ASCENDING), ("course_id", ASCENDING), ("semester", ASCENDING)], name="ix_timetables_scope")
-    _create_index_safe(timetables, [("status", ASCENDING), ("updated_at", DESCENDING)], name="ix_timetables_status_updated")
-    _create_index_safe(timetables, [("academic_session", ASCENDING)], name="ix_timetables_session")
+    _create_index_safe(
+        timetables,
+        [
+            ("department_id", ASCENDING),
+            ("course_id", ASCENDING),
+            ("semester", ASCENDING),
+        ],
+        name="ix_timetables_scope",
+    )
+    _create_index_safe(
+        timetables,
+        [("status", ASCENDING), ("updated_at", DESCENDING)],
+        name="ix_timetables_status_updated",
+    )
+    _create_index_safe(
+        timetables,
+        [("academic_session", ASCENDING)],
+        name="ix_timetables_session",
+    )
 
     timetable_slots = client[config["MONGO_DB_ACADEMIC"]]["timetable_slots"]
-    _create_index_safe(timetable_slots, [("timetable_id", ASCENDING), ("day_index", ASCENDING), ("start_minutes", ASCENDING)], name="ix_timetable_slots_grid")
-    _create_index_safe(timetable_slots, [("lecturer_id", ASCENDING), ("day_index", ASCENDING), ("start_minutes", ASCENDING)], name="ix_timetable_slots_lecturer")
-    _create_index_safe(timetable_slots, [("course_id", ASCENDING), ("semester", ASCENDING)], name="ix_timetable_slots_course_sem")
+    _create_index_safe(
+        timetable_slots,
+        [
+            ("timetable_id", ASCENDING),
+            ("day_index", ASCENDING),
+            ("start_minutes", ASCENDING),
+        ],
+        name="ix_timetable_slots_grid",
+    )
+    _create_index_safe(
+        timetable_slots,
+        [
+            ("lecturer_id", ASCENDING),
+            ("day_index", ASCENDING),
+            ("start_minutes", ASCENDING),
+        ],
+        name="ix_timetable_slots_lecturer",
+    )
+    _create_index_safe(
+        timetable_slots,
+        [("course_id", ASCENDING), ("semester", ASCENDING)],
+        name="ix_timetable_slots_course_sem",
+    )
 
     profiles = client[config["MONGO_DB_ACADEMIC"]]["student_profiles"]
-    _create_index_safe(profiles, [("user_id", ASCENDING)], unique=True, name="uq_profiles_user")
-    _create_index_safe(profiles, [("reg_number", ASCENDING)], unique=True, name="uq_profiles_reg")
-    _create_index_safe(profiles, [("course_id", ASCENDING)], name="ix_profiles_course")
-    _create_index_safe(profiles, [("academic_year", ASCENDING)], name="ix_profiles_year")
-    _create_index_safe(profiles, [("department_id", ASCENDING)], name="ix_profiles_department")
+    _create_index_safe(
+        profiles,
+        [("user_id", ASCENDING)],
+        unique=True,
+        name="uq_profiles_user",
+    )
+    _create_index_safe(
+        profiles,
+        [("reg_number", ASCENDING)],
+        unique=True,
+        name="uq_profiles_reg",
+    )
+    _create_index_safe(
+        profiles, [("course_id", ASCENDING)], name="ix_profiles_course"
+    )
+    _create_index_safe(
+        profiles, [("academic_year", ASCENDING)], name="ix_profiles_year"
+    )
+    _create_index_safe(
+        profiles, [("department_id", ASCENDING)], name="ix_profiles_department"
+    )
 
     # Department collection indexes
     departments = client[config["MONGO_DB_ACADEMIC"]]["departments"]
-    _create_index_safe(departments, [("code", ASCENDING)], unique=True, name="uq_departments_code")
-    _create_index_safe(departments, [("name", ASCENDING)], name="ix_departments_name")
+    _create_index_safe(
+        departments,
+        [("code", ASCENDING)],
+        unique=True,
+        name="uq_departments_code",
+    )
+    _create_index_safe(
+        departments, [("name", ASCENDING)], name="ix_departments_name"
+    )
 
     attendance_logs = client[config["MONGO_DB_ATTENDANCE"]]["attendance_logs"]
     _create_index_safe(
         attendance_logs,
-        [("session_id", ASCENDING), ("paper_id", ASCENDING), ("user_id", ASCENDING)],
+        [
+            ("session_id", ASCENDING),
+            ("paper_id", ASCENDING),
+            ("user_id", ASCENDING),
+        ],
         unique=True,
         name="uq_attendance_session_paper_student",
     )
-    _create_index_safe(attendance_logs, [("timestamp", DESCENDING)], name="ix_attendance_timestamp")
-    _create_index_safe(attendance_logs, [("paper_id", ASCENDING), ("user_id", ASCENDING)], name="ix_attendance_paper_student")
+    _create_index_safe(
+        attendance_logs,
+        [("timestamp", DESCENDING)],
+        name="ix_attendance_timestamp",
+    )
+    _create_index_safe(
+        attendance_logs,
+        [("paper_id", ASCENDING), ("user_id", ASCENDING)],
+        name="ix_attendance_paper_student",
+    )
 
     sessions = client[config["MONGO_DB_ATTENDANCE"]]["attendance_sessions"]
-    _create_index_safe(sessions, [("session_id", ASCENDING)], unique=True, name="uq_sessions_id")
-    _create_index_safe(sessions, [("lecturer_id", ASCENDING), ("created_at", DESCENDING)], name="ix_sessions_lecturer_created")
-    _create_index_safe(sessions, [("rollback_until", ASCENDING)], name="ix_sessions_rollback_until")
+    _create_index_safe(
+        sessions,
+        [("session_id", ASCENDING)],
+        unique=True,
+        name="uq_sessions_id",
+    )
+    _create_index_safe(
+        sessions,
+        [("lecturer_id", ASCENDING), ("created_at", DESCENDING)],
+        name="ix_sessions_lecturer_created",
+    )
+    _create_index_safe(
+        sessions,
+        [("rollback_until", ASCENDING)],
+        name="ix_sessions_rollback_until",
+    )
 
     active_sessions = client[config["MONGO_DB_ATTENDANCE"]]["active_sessions"]
-    _create_index_safe(active_sessions, [("session_id", ASCENDING)], unique=True, name="uq_active_sessions_id")
-    _create_index_safe(active_sessions, [("lecturer_id", ASCENDING), ("updated_at", DESCENDING)], name="ix_active_sessions_lecturer_updated")
-    _create_index_safe(active_sessions, [("expires_at", ASCENDING)], name="ix_active_sessions_expires_at")
+    _create_index_safe(
+        active_sessions,
+        [("session_id", ASCENDING)],
+        unique=True,
+        name="uq_active_sessions_id",
+    )
+    _create_index_safe(
+        active_sessions,
+        [("lecturer_id", ASCENDING), ("updated_at", DESCENDING)],
+        name="ix_active_sessions_lecturer_updated",
+    )
+    _create_index_safe(
+        active_sessions,
+        [("expires_at", ASCENDING)],
+        name="ix_active_sessions_expires_at",
+    )
 
     background_jobs = client[config["MONGO_DB_ATTENDANCE"]]["background_jobs"]
-    _create_index_safe(background_jobs, [("job_id", ASCENDING)], unique=True, name="uq_jobs_id")
-    _create_index_safe(background_jobs, [("status", ASCENDING), ("created_at", DESCENDING)], name="ix_jobs_status_created")
-    _create_index_safe(background_jobs, [("status", ASCENDING), ("next_attempt_at", ASCENDING)], name="ix_jobs_status_next_attempt")
-    _create_index_safe(background_jobs, [("updated_at", DESCENDING)], name="ix_jobs_updated")
+    _create_index_safe(
+        background_jobs,
+        [("job_id", ASCENDING)],
+        unique=True,
+        name="uq_jobs_id",
+    )
+    _create_index_safe(
+        background_jobs,
+        [("status", ASCENDING), ("created_at", DESCENDING)],
+        name="ix_jobs_status_created",
+    )
+    _create_index_safe(
+        background_jobs,
+        [("status", ASCENDING), ("next_attempt_at", ASCENDING)],
+        name="ix_jobs_status_next_attempt",
+    )
+    _create_index_safe(
+        background_jobs, [("updated_at", DESCENDING)], name="ix_jobs_updated"
+    )
 
-    schema_migrations = client[config["MONGO_DB_ATTENDANCE"]]["schema_migrations"]
-    _create_index_safe(schema_migrations, [("migration_id", ASCENDING)], unique=True, name="uq_schema_migrations_id")
-    _create_index_safe(schema_migrations, [("applied_at", DESCENDING)], name="ix_schema_migrations_applied_at")
+    schema_migrations = client[config["MONGO_DB_ATTENDANCE"]][
+        "schema_migrations"
+    ]
+    _create_index_safe(
+        schema_migrations,
+        [("migration_id", ASCENDING)],
+        unique=True,
+        name="uq_schema_migrations_id",
+    )
+    _create_index_safe(
+        schema_migrations,
+        [("applied_at", DESCENDING)],
+        name="ix_schema_migrations_applied_at",
+    )
 
-    overrides = client[config["MONGO_DB_ATTENDANCE"]]["exam_eligibility_overrides"]
+    overrides = client[config["MONGO_DB_ATTENDANCE"]][
+        "exam_eligibility_overrides"
+    ]
     _create_index_safe(
         overrides,
         [("user_id", ASCENDING), ("paper_id", ASCENDING)],
@@ -284,7 +449,9 @@ def _ensure_indexes(mongo, config):
     )
 
     audits = client[config["MONGO_DB_AUDIT"]]["audit_logs"]
-    _create_index_safe(audits, [("timestamp", DESCENDING)], name="ix_audit_timestamp")
+    _create_index_safe(
+        audits, [("timestamp", DESCENDING)], name="ix_audit_timestamp"
+    )
     _create_index_safe(audits, [("action", ASCENDING)], name="ix_audit_action")
     _create_index_safe(
         audits,
@@ -296,42 +463,107 @@ def _ensure_indexes(mongo, config):
         ],
         unique=True,
         name="uq_audit_dedupe_bucket",
-        partialFilterExpression={"dedupe_key": {"$exists": True}, "dedupe_bucket": {"$exists": True}},
+        partialFilterExpression={
+            "dedupe_key": {"$exists": True},
+            "dedupe_bucket": {"$exists": True},
+        },
     )
-    _create_index_safe(audits, [("department_id", ASCENDING), ("timestamp", DESCENDING)], name="ix_audit_department_timestamp")
+    _create_index_safe(
+        audits,
+        [("department_id", ASCENDING), ("timestamp", DESCENDING)],
+        name="ix_audit_department_timestamp",
+    )
 
-    failed_login_attempts = client[config["MONGO_DB_AUTH"]]["failed_login_attempts"]
-    _create_index_safe(failed_login_attempts, [("ttl", ASCENDING)], name="ix_failed_logins_ttl", expireAfterSeconds=0)
+    failed_login_attempts = client[config["MONGO_DB_AUTH"]][
+        "failed_login_attempts"
+    ]
+    _create_index_safe(
+        failed_login_attempts,
+        [("ttl", ASCENDING)],
+        name="ix_failed_logins_ttl",
+        expireAfterSeconds=0,
+    )
 
     ip_rate_limits = client[config["MONGO_DB_AUTH"]]["ip_rate_limits"]
-    _create_index_safe(ip_rate_limits, [("ttl", ASCENDING)], name="ix_ip_rate_limits_ttl", expireAfterSeconds=0)
+    _create_index_safe(
+        ip_rate_limits,
+        [("ttl", ASCENDING)],
+        name="ix_ip_rate_limits_ttl",
+        expireAfterSeconds=0,
+    )
 
     notifications = client[config["MONGO_DB_AUTH"]]["notifications"]
-    _create_index_safe(notifications, [("user_id", ASCENDING), ("is_read", ASCENDING), ("created_at", DESCENDING)], name="ix_notifications_user_read_created")
+    _create_index_safe(
+        notifications,
+        [
+            ("user_id", ASCENDING),
+            ("is_read", ASCENDING),
+            ("created_at", DESCENDING),
+        ],
+        name="ix_notifications_user_read_created",
+    )
 
     calendars = client[config["MONGO_DB_ACADEMIC"]]["calendars"]
-    _create_index_safe(calendars, [("department_id", ASCENDING), ("year", ASCENDING), ("status", ASCENDING)], name="ix_calendars_department_year_status")
-    _create_index_safe(calendars, [("published_at", DESCENDING)], name="ix_calendars_published_at")
+    _create_index_safe(
+        calendars,
+        [
+            ("department_id", ASCENDING),
+            ("year", ASCENDING),
+            ("status", ASCENDING),
+        ],
+        name="ix_calendars_department_year_status",
+    )
+    _create_index_safe(
+        calendars,
+        [("published_at", DESCENDING)],
+        name="ix_calendars_published_at",
+    )
 
     pin_failures = client[config["MONGO_DB_ATTENDANCE"]]["pin_failures"]
-    _create_index_safe(pin_failures, [("ttl", ASCENDING)], name="ix_pin_failures_ttl", expireAfterSeconds=0)
+    _create_index_safe(
+        pin_failures,
+        [("ttl", ASCENDING)],
+        name="ix_pin_failures_ttl",
+        expireAfterSeconds=0,
+    )
 
     revoked_jwts = client[config["MONGO_DB_AUTH"]]["revoked_jwts"]
-    _create_index_safe(revoked_jwts, [("expires_at", ASCENDING)], name="ix_revoked_jwts_expires_at", expireAfterSeconds=0)
+    _create_index_safe(
+        revoked_jwts,
+        [("expires_at", ASCENDING)],
+        name="ix_revoked_jwts_expires_at",
+        expireAfterSeconds=0,
+    )
 
-    password_reset_otps = client[config["MONGO_DB_AUTH"]]["password_reset_otps"]
-    _create_index_safe(password_reset_otps, [("expires_at", ASCENDING)], name="ix_password_reset_otps_expires_at", expireAfterSeconds=0)
+    password_reset_otps = client[config["MONGO_DB_AUTH"]][
+        "password_reset_otps"
+    ]
+    _create_index_safe(
+        password_reset_otps,
+        [("expires_at", ASCENDING)],
+        name="ix_password_reset_otps_expires_at",
+        expireAfterSeconds=0,
+    )
 
     # Leave requests: compound index for get_approved_leave_dates query pattern
     leave_requests = client[config["MONGO_DB_ACADEMIC"]]["leave_requests"]
-    _create_index_safe(leave_requests, [("user_id", ASCENDING), ("status", ASCENDING)], name="ix_leave_requests_user_status")
-    _create_index_safe(leave_requests, [("created_at", DESCENDING)], name="ix_leave_requests_created")
+    _create_index_safe(
+        leave_requests,
+        [("user_id", ASCENDING), ("status", ASCENDING)],
+        name="ix_leave_requests_user_status",
+    )
+    _create_index_safe(
+        leave_requests,
+        [("created_at", DESCENDING)],
+        name="ix_leave_requests_created",
+    )
 
 
 def _seed_admin(mongo):
     """Create a default super admin account only when explicit seed credentials are provided."""
-    import bcrypt
     import logging
+
+    import bcrypt
 
     admin_email = os.getenv("DEFAULT_ADMIN_EMAIL", "").strip().lower()
     admin_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "")
@@ -372,20 +604,62 @@ def _run_startup_health_checks(app):
         return
 
     required_indexes = {
-        (app.config["MONGO_DB_AUTH"], "users"): {"uq_users_email", "ix_users_role", "ix_users_department"},
-        (app.config["MONGO_DB_ACADEMIC"], "papers"): {"uq_papers_code", "ix_papers_course", "ix_papers_lecturers"},
-        (app.config["MONGO_DB_ACADEMIC"], "student_profiles"): {"uq_profiles_user", "uq_profiles_reg", "ix_profiles_course", "ix_profiles_year", "ix_profiles_department"},
-        (app.config["MONGO_DB_ACADEMIC"], "departments"): {"uq_departments_code"},
-        (app.config["MONGO_DB_ACADEMIC"], "courses"): {"uq_courses_code", "ix_courses_department"},
-        (app.config["MONGO_DB_ATTENDANCE"], "attendance_logs"): {"uq_attendance_session_paper_student", "ix_attendance_timestamp", "ix_attendance_paper_student"},
-        (app.config["MONGO_DB_ATTENDANCE"], "attendance_sessions"): {"uq_sessions_id", "ix_sessions_lecturer_created", "ix_sessions_rollback_until"},
-        (app.config["MONGO_DB_ATTENDANCE"], "exam_eligibility_overrides"): {"uq_overrides_student_paper"},
-        (app.config["MONGO_DB_AUTH"], "failed_login_attempts"): {"ix_failed_logins_ttl"},
-        (app.config["MONGO_DB_AUTH"], "ip_rate_limits"): {"ix_ip_rate_limits_ttl"},
-        (app.config["MONGO_DB_AUTH"], "notifications"): {"ix_notifications_user_read_created"},
-        (app.config["MONGO_DB_ACADEMIC"], "calendars"): {"ix_calendars_department_year_status", "ix_calendars_published_at"},
-        (app.config["MONGO_DB_ATTENDANCE"], "pin_failures"): {"ix_pin_failures_ttl"},
-        (app.config["MONGO_DB_AUTH"], "revoked_jwts"): {"ix_revoked_jwts_expires_at"},
+        (app.config["MONGO_DB_AUTH"], "users"): {
+            "uq_users_email",
+            "ix_users_role",
+            "ix_users_department",
+        },
+        (app.config["MONGO_DB_ACADEMIC"], "papers"): {
+            "uq_papers_code",
+            "ix_papers_course",
+            "ix_papers_lecturers",
+        },
+        (app.config["MONGO_DB_ACADEMIC"], "student_profiles"): {
+            "uq_profiles_user",
+            "uq_profiles_reg",
+            "ix_profiles_course",
+            "ix_profiles_year",
+            "ix_profiles_department",
+        },
+        (app.config["MONGO_DB_ACADEMIC"], "departments"): {
+            "uq_departments_code"
+        },
+        (app.config["MONGO_DB_ACADEMIC"], "courses"): {
+            "uq_courses_code",
+            "ix_courses_department",
+        },
+        (app.config["MONGO_DB_ATTENDANCE"], "attendance_logs"): {
+            "uq_attendance_session_paper_student",
+            "ix_attendance_timestamp",
+            "ix_attendance_paper_student",
+        },
+        (app.config["MONGO_DB_ATTENDANCE"], "attendance_sessions"): {
+            "uq_sessions_id",
+            "ix_sessions_lecturer_created",
+            "ix_sessions_rollback_until",
+        },
+        (app.config["MONGO_DB_ATTENDANCE"], "exam_eligibility_overrides"): {
+            "uq_overrides_student_paper"
+        },
+        (app.config["MONGO_DB_AUTH"], "failed_login_attempts"): {
+            "ix_failed_logins_ttl"
+        },
+        (app.config["MONGO_DB_AUTH"], "ip_rate_limits"): {
+            "ix_ip_rate_limits_ttl"
+        },
+        (app.config["MONGO_DB_AUTH"], "notifications"): {
+            "ix_notifications_user_read_created"
+        },
+        (app.config["MONGO_DB_ACADEMIC"], "calendars"): {
+            "ix_calendars_department_year_status",
+            "ix_calendars_published_at",
+        },
+        (app.config["MONGO_DB_ATTENDANCE"], "pin_failures"): {
+            "ix_pin_failures_ttl"
+        },
+        (app.config["MONGO_DB_AUTH"], "revoked_jwts"): {
+            "ix_revoked_jwts_expires_at"
+        },
     }
 
     missing = []
@@ -397,7 +671,11 @@ def _run_startup_health_checks(app):
                 missing.append(f"{db_name}.{collection_name}:{idx_name}")
 
     if missing:
-        app.logger.warning("startup-health indexes=missing count=%s details=%s", len(missing), ",".join(missing))
+        app.logger.warning(
+            "startup-health indexes=missing count=%s details=%s",
+            len(missing),
+            ",".join(missing),
+        )
     else:
         app.logger.info("startup-health indexes=ok")
 
@@ -432,7 +710,10 @@ def _bootstrap_isolated_databases(mongo, config):
     domain_map = {
         config["MONGO_DB_AUTH"]: ["users"],
         config["MONGO_DB_ACADEMIC"]: ["courses", "papers", "student_profiles"],
-        config["MONGO_DB_ATTENDANCE"]: ["attendance_logs", "attendance_sessions"],
+        config["MONGO_DB_ATTENDANCE"]: [
+            "attendance_logs",
+            "attendance_sessions",
+        ],
         config["MONGO_DB_AUDIT"]: ["audit_logs"],
     }
 

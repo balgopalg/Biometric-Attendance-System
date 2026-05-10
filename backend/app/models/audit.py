@@ -3,14 +3,12 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Tuple
 
+from app.extensions import get_collection
 from bson import ObjectId
 from flask import g, has_request_context
 from pymongo import ReturnDocument
-from app.extensions import get_collection
-
 
 ROLLBACK_WINDOW_HOURS = 24
-
 
 
 def log_action(
@@ -28,8 +26,15 @@ def log_action(
 
     # Backward-compatible mapping for newer keyword call style used by some routes.
     action = action or kwargs.get("action")
-    performed_by = performed_by or kwargs.get("performed_by") or kwargs.get("user_id") or "system"
-    target_user = target_user if target_user is not None else kwargs.get("target_user")
+    performed_by = (
+        performed_by
+        or kwargs.get("performed_by")
+        or kwargs.get("user_id")
+        or "system"
+    )
+    target_user = (
+        target_user if target_user is not None else kwargs.get("target_user")
+    )
     details = details or kwargs.get("details") or kwargs.get("description", "")
 
     # Auto-resolve department_id from current request context if not provided
@@ -65,7 +70,9 @@ def log_action(
         doc["dedupe_bucket"] = dedupe_bucket
     if rollback:
         doc["rollback"] = rollback
-        doc["rollback_until"] = rollback_until or (ts + timedelta(hours=ROLLBACK_WINDOW_HOURS))
+        doc["rollback_until"] = rollback_until or (
+            ts + timedelta(hours=ROLLBACK_WINDOW_HOURS)
+        )
         doc["rolled_back"] = False
 
     if dedupe_bucket is not None:
@@ -105,14 +112,15 @@ def get_audit_logs(
     query = dict(filters or {})
     if department_id is not None:
         try:
-            query["department_id"] = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+            query["department_id"] = (
+                ObjectId(str(department_id))
+                if not isinstance(department_id, ObjectId)
+                else department_id
+            )
         except Exception:
             pass
     logs = list(
-        logs_col.find(query)
-        .sort("timestamp", -1)
-        .skip(skip)
-        .limit(per_page)
+        logs_col.find(query).sort("timestamp", -1).skip(skip).limit(per_page)
     )
     total = logs_col.count_documents(query)
     return logs, total

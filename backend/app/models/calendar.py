@@ -5,11 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.extensions import get_collection
 from bson import ObjectId
 from bson.errors import InvalidId
-
-from app.extensions import get_collection
-
 
 VALID_CALENDAR_STATUSES = {"draft", "published", "archived"}
 
@@ -49,7 +47,9 @@ def create_calendar(doc: Dict[str, Any]) -> dict:
     return payload
 
 
-def update_calendar(calendar_id: str, fields: Dict[str, Any]) -> Optional[dict]:
+def update_calendar(
+    calendar_id: str, fields: Dict[str, Any]
+) -> Optional[dict]:
     oid = _to_object_id(calendar_id)
     if not oid:
         return None
@@ -72,7 +72,9 @@ def get_calendar_by_id(calendar_id: str) -> Optional[dict]:
     return calendars.find_one({"_id": oid})
 
 
-def list_calendars(*, department_id: Any = None, year: Any = None, status: Any = None) -> List[dict]:
+def list_calendars(
+    *, department_id: Any = None, year: Any = None, status: Any = None
+) -> List[dict]:
     calendars = get_collection("academic", "calendars")
     query: Dict[str, Any] = {}
 
@@ -91,10 +93,14 @@ def list_calendars(*, department_id: Any = None, year: Any = None, status: Any =
     if status_text in VALID_CALENDAR_STATUSES:
         query["status"] = status_text
 
-    return list(calendars.find(query).sort([("updated_at", -1), ("created_at", -1)]))
+    return list(
+        calendars.find(query).sort([("updated_at", -1), ("created_at", -1)])
+    )
 
 
-def get_current_calendar(*, department_id: Any, year: Any = None) -> Optional[dict]:
+def get_current_calendar(
+    *, department_id: Any, year: Any = None
+) -> Optional[dict]:
     calendars = get_collection("academic", "calendars")
     query: Dict[str, Any] = {"status": "published"}
 
@@ -109,7 +115,10 @@ def get_current_calendar(*, department_id: Any, year: Any = None) -> Optional[di
         except Exception:
             query["year"] = year_text
 
-    return calendars.find_one(query, sort=[("published_at", -1), ("updated_at", -1), ("created_at", -1)])
+    return calendars.find_one(
+        query,
+        sort=[("published_at", -1), ("updated_at", -1), ("created_at", -1)],
+    )
 
 
 def archive_existing_calendars(*, department_id: Any, year: Any = None) -> int:
@@ -127,7 +136,15 @@ def archive_existing_calendars(*, department_id: Any, year: Any = None) -> int:
         except Exception:
             query["year"] = year_text
 
-    result = calendars.update_many(query, {"$set": {"status": "archived", "updated_at": datetime.now(timezone.utc)}})
+    result = calendars.update_many(
+        query,
+        {
+            "$set": {
+                "status": "archived",
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+    )
     return int(result.modified_count or 0)
 
 

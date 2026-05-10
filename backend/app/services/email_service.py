@@ -16,11 +16,13 @@ fails.
 """
 
 import atexit
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
-from html import escape as html_escape
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from html import escape as html_escape
+
+from app.config import _env_bool
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,6 @@ _EMAIL_PENDING_COUNT = 0
 _EMAIL_THREAD_LOCAL = threading.local()
 
 
-from app.config import _env_bool
-
 try:
     import yagmail
 
@@ -44,7 +44,9 @@ try:
     if _YAGMAIL_USER and _YAGMAIL_PASSWORD:
         _YAGMAIL_READY = True
     else:
-        logger.info("YAGMAIL_USER or YAGMAIL_PASSWORD not set — email delivery disabled.")
+        logger.info(
+            "YAGMAIL_USER or YAGMAIL_PASSWORD not set — email delivery disabled."
+        )
 except ImportError:
     logger.warning("yagmail package not installed — email delivery disabled.")
 
@@ -74,7 +76,9 @@ def _get_email_executor() -> ThreadPoolExecutor:
 
     with _EMAIL_EXECUTOR_LOCK:
         if _EMAIL_EXECUTOR is None:
-            max_workers = max(1, int(os.getenv("EMAIL_WORKER_MAX_THREADS", "4") or 4))
+            max_workers = max(
+                1, int(os.getenv("EMAIL_WORKER_MAX_THREADS", "4") or 4)
+            )
             _EMAIL_EXECUTOR = ThreadPoolExecutor(
                 max_workers=max_workers,
                 thread_name_prefix="email-delivery",
@@ -92,7 +96,9 @@ def _get_email_executor() -> ThreadPoolExecutor:
 def _acquire_email_slot() -> bool:
     """Apply backpressure so bulk imports do not enqueue unbounded email tasks."""
     global _EMAIL_PENDING_COUNT
-    max_pending = max(1, int(os.getenv("EMAIL_MAX_PENDING_TASKS", "1000") or 1000))
+    max_pending = max(
+        1, int(os.getenv("EMAIL_MAX_PENDING_TASKS", "1000") or 1000)
+    )
     with _EMAIL_PENDING_LOCK:
         if _EMAIL_PENDING_COUNT >= max_pending:
             return False
@@ -116,10 +122,14 @@ def _get_thread_mailer():
     return mailer
 
 
-def _submit_email_job(send_fn, *, to_email: str, success_message: str, failure_message: str) -> bool:
+def _submit_email_job(
+    send_fn, *, to_email: str, success_message: str, failure_message: str
+) -> bool:
     """Submit non-blocking email work to the shared pool."""
     if not _acquire_email_slot():
-        logger.warning("Email queue is full; skipping email send to %s", to_email)
+        logger.warning(
+            "Email queue is full; skipping email send to %s", to_email
+        )
         return False
 
     def _run():
@@ -143,7 +153,10 @@ def _submit_email_job(send_fn, *, to_email: str, success_message: str, failure_m
 
 def _get_login_url() -> str:
     """Return dashboard login URL for email CTAs."""
-    return os.getenv("APP_LOGIN_URL", "http://localhost:5173/login").strip() or "http://localhost:5173/login"
+    return (
+        os.getenv("APP_LOGIN_URL", "http://localhost:5173/login").strip()
+        or "http://localhost:5173/login"
+    )
 
 
 def is_email_delivery_enabled() -> bool:
@@ -152,6 +165,7 @@ def is_email_delivery_enabled() -> bool:
 
 
 # ─── HTML templates ──────────────────────────────────────────────────────────
+
 
 def _welcome_html(name: str, email: str, temp_password: str, role: str) -> str:
     safe_name = html_escape(name)
@@ -247,7 +261,9 @@ def _welcome_html(name: str, email: str, temp_password: str, role: str) -> str:
 </html>"""
 
 
-def _password_reset_html(name: str, email: str, temp_password: str, role: str) -> str:
+def _password_reset_html(
+    name: str, email: str, temp_password: str, role: str
+) -> str:
     safe_name = html_escape(name)
     safe_email = html_escape(email)
     safe_pw = html_escape(temp_password)
@@ -341,7 +357,9 @@ def _password_reset_html(name: str, email: str, temp_password: str, role: str) -
 </html>"""
 
 
-def _password_recovery_otp_html(name: str, otp: str, expires_in_minutes: int) -> str:
+def _password_recovery_otp_html(
+    name: str, otp: str, expires_in_minutes: int
+) -> str:
     safe_name = html_escape(name)
     safe_otp = html_escape(otp)
     login_url = _get_login_url()
@@ -387,7 +405,9 @@ def _password_recovery_otp_html(name: str, otp: str, expires_in_minutes: int) ->
 </html>"""
 
 
-def _shortage_alert_html(name: str, paper_name: str, percentage: float, classes_needed: int) -> str:
+def _shortage_alert_html(
+    name: str, paper_name: str, percentage: float, classes_needed: int
+) -> str:
     safe_name = html_escape(name)
     safe_paper = html_escape(paper_name)
     login_url = _get_login_url()
@@ -471,8 +491,8 @@ def _shortage_alert_html(name: str, paper_name: str, percentage: float, classes_
 </html>"""
 
 
-
 # ─── Public API ───────────────────────────────────────────────────────────────
+
 
 def send_welcome_email(
     to_email: str,
@@ -486,18 +506,20 @@ def send_welcome_email(
     the calling route returns immediately.  Failures are logged, never raised.
     """
     if not _YAGMAIL_READY:
-        logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
+        logger.info(
+            "Email delivery skipped (Yagmail not configured). to=%s", to_email
+        )
         return False
 
     return _submit_email_job(
-      lambda mailer: mailer.send(
-        to=to_email,
-        subject=f"Your {role.capitalize()} Account — Biometric Attendance System",
-        contents=_welcome_html(name, to_email, temp_password, role),
-      ),
-      to_email=to_email,
-      success_message="Welcome email sent to %s",
-      failure_message="Failed to send welcome email to %s",
+        lambda mailer: mailer.send(
+            to=to_email,
+            subject=f"Your {role.capitalize()} Account — Biometric Attendance System",
+            contents=_welcome_html(name, to_email, temp_password, role),
+        ),
+        to_email=to_email,
+        success_message="Welcome email sent to %s",
+        failure_message="Failed to send welcome email to %s",
     )
 
 
@@ -512,18 +534,20 @@ def send_password_reset_email(
     Non-blocking, fire-and-forget — same pattern as send_welcome_email.
     """
     if not _YAGMAIL_READY:
-        logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
+        logger.info(
+            "Email delivery skipped (Yagmail not configured). to=%s", to_email
+        )
         return False
 
     return _submit_email_job(
-      lambda mailer: mailer.send(
-        to=to_email,
-        subject="Password Reset — Biometric Attendance System",
-        contents=_password_reset_html(name, to_email, temp_password, role),
-      ),
-      to_email=to_email,
-      success_message="Password reset email sent to %s",
-      failure_message="Failed to send password reset email to %s",
+        lambda mailer: mailer.send(
+            to=to_email,
+            subject="Password Reset — Biometric Attendance System",
+            contents=_password_reset_html(name, to_email, temp_password, role),
+        ),
+        to_email=to_email,
+        success_message="Password reset email sent to %s",
+        failure_message="Failed to send password reset email to %s",
     )
 
 
@@ -535,18 +559,22 @@ def send_password_recovery_otp_email(
 ):
     """Send forgot-password OTP email. Non-blocking and fire-and-forget."""
     if not _YAGMAIL_READY:
-        logger.info("Email delivery skipped (Yagmail not configured). to=%s", to_email)
+        logger.info(
+            "Email delivery skipped (Yagmail not configured). to=%s", to_email
+        )
         return False
 
     return _submit_email_job(
-      lambda mailer: mailer.send(
-        to=to_email,
-        subject="Password Recovery OTP — Biometric Attendance System",
-        contents=_password_recovery_otp_html(name, otp, expires_in_minutes),
-      ),
-      to_email=to_email,
-      success_message="Password recovery OTP email sent to %s",
-      failure_message="Failed to send password recovery OTP email to %s",
+        lambda mailer: mailer.send(
+            to=to_email,
+            subject="Password Recovery OTP — Biometric Attendance System",
+            contents=_password_recovery_otp_html(
+                name, otp, expires_in_minutes
+            ),
+        ),
+        to_email=to_email,
+        success_message="Password recovery OTP email sent to %s",
+        failure_message="Failed to send password recovery OTP email to %s",
     )
 
 
@@ -562,12 +590,14 @@ def send_shortage_alert_email(
         return False
 
     return _submit_email_job(
-      lambda mailer: mailer.send(
-        to=to_email,
-        subject=f"URGENT: Attendance Shortage in {paper_name}",
-        contents=_shortage_alert_html(name, paper_name, percentage, classes_needed),
-      ),
-      to_email=to_email,
-      success_message=f"Shortage alert sent to %s for {paper_name}",
-      failure_message="Failed to send shortage alert to %s",
+        lambda mailer: mailer.send(
+            to=to_email,
+            subject=f"URGENT: Attendance Shortage in {paper_name}",
+            contents=_shortage_alert_html(
+                name, paper_name, percentage, classes_needed
+            ),
+        ),
+        to_email=to_email,
+        success_message=f"Shortage alert sent to %s for {paper_name}",
+        failure_message="Failed to send shortage alert to %s",
     )

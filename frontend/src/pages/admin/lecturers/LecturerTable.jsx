@@ -1,101 +1,36 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  HiOutlineChevronDown,
-  HiOutlineChevronUp,
   HiOutlineClipboardList,
   HiOutlineKey,
   HiOutlineTrash,
   HiOutlineCamera,
   HiOutlineSparkles,
+  HiOutlinePencil,
   HiX,
 } from 'react-icons/hi';
 
 /**
- * Table body rendering lecturers with department-popover and row actions.
+ * Table body rendering lecturers with row actions. Clicking department badges opens modal with assigned papers.
  */
 export default function LecturerTable({
   lecturers,
   getLecturerDepartmentGroups,
-  openDepartmentPopover,
-  openDepartmentWithDefaultCourse,
-  activePopoverCourses,
-  setActivePopoverCourses,
-  getDefaultCourseName,
+  onViewPapers,
   onAssign,
   onResetPin,
   onResetPassword,
+  onEdit,
   onDelete,
   onEnrollFace,
   onTrainFace,
 }) {
   const [previewImage, setPreviewImage] = useState(null);
-  const [activePopoverAnchor, setActivePopoverAnchor] = useState(null);
 
-  useEffect(() => {
-    if (!openDepartmentPopover.lecturerId || !openDepartmentPopover.department) {
-      setActivePopoverAnchor(null);
+  const handleViewPapers = (lecturer, departmentGroups) => {
+    if (onViewPapers) {
+      onViewPapers(lecturer, departmentGroups);
     }
-  }, [openDepartmentPopover]);
-
-  const handleDepartmentButtonClick = (event, lecturerId, group) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const popoverKey = `${lecturerId}::${group.department}`;
-    const isAlreadyOpen = openDepartmentPopover.lecturerId === lecturerId && openDepartmentPopover.department === group.department;
-
-    if (isAlreadyOpen) {
-      setActivePopoverAnchor(null);
-      openDepartmentWithDefaultCourse(lecturerId, group);
-      return;
-    }
-
-    setActivePopoverAnchor({ popoverKey, rect });
-    openDepartmentWithDefaultCourse(lecturerId, group);
-  };
-
-  const getPopoverStyle = (popoverKey, isOpen) => {
-    const baseStyle = {
-      minWidth: 260,
-      maxWidth: 340,
-      maxHeight: 220,
-      overflowY: 'auto',
-      zIndex: 9999,
-      padding: 10,
-      borderRadius: 10,
-      border: '1px solid var(--border-glass)',
-      background: 'var(--bg-card)',
-      boxShadow: '0 10px 24px rgba(15, 23, 42, 0.22)',
-    };
-
-    if (!isOpen || !activePopoverAnchor || activePopoverAnchor.popoverKey !== popoverKey) {
-      return {
-        position: 'absolute',
-        top: 'calc(100% + 8px)',
-        left: 0,
-        ...baseStyle,
-        zIndex: 8,
-      };
-    }
-
-    const { top, bottom, left } = activePopoverAnchor.rect;
-    const viewportWidth = window.innerWidth || 0;
-    const maxWidth = 340;
-    let fixedLeft = left;
-    if (fixedLeft + maxWidth > viewportWidth - 12) {
-      fixedLeft = Math.max(12, viewportWidth - maxWidth - 12);
-    }
-
-    const availableBelow = window.innerHeight - bottom - 8;
-    const availableAbove = top - 8;
-    const openAbove = availableBelow < 240 && availableAbove > 240;
-    const fixedTop = openAbove ? Math.max(12, top - 8 - 240) : bottom + 8;
-
-    return {
-      position: 'fixed',
-      top: fixedTop,
-      left: fixedLeft,
-      ...baseStyle,
-    };
   };
 
   return (
@@ -156,12 +91,8 @@ export default function LecturerTable({
                   ) : (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                       {departmentGroups.map((group, groupIndex) => {
-                        const isOpen = openDepartmentPopover.lecturerId === l._id && openDepartmentPopover.department === group.department;
-                        const popoverKey = `${l._id}::${group.department}`;
-                        const activeCourseName = activePopoverCourses[popoverKey] || getDefaultCourseName(group.courses);
-                        const activeCourse = (group.courses || []).find((course) => course.courseCode === activeCourseName) || group.courses?.[0] || { subjects: [] };
                         return (
-                          <div key={`${l._id}-dept-${group.department}-${groupIndex}`} style={{ position: 'relative' }} className="lecturer-dept-popover-surface">
+                          <div key={`${l._id}-dept-${group.department}-${groupIndex}`}>
                             <button
                               type="button"
                               className="badge badge-info"
@@ -172,73 +103,11 @@ export default function LecturerTable({
                                 gap: 4,
                                 cursor: 'pointer',
                               }}
-                              onClick={(e) => handleDepartmentButtonClick(e, l._id, group)}
-                              title={isOpen ? 'Hide assigned subjects' : 'Show assigned subjects'}
+                              onClick={() => handleViewPapers(l, departmentGroups)}
+                              title="View assigned subjects"
                             >
                               {group.department}
-                              {isOpen ? <HiOutlineChevronUp size={12} /> : <HiOutlineChevronDown size={12} />}
                             </button>
-
-                            {isOpen ? (
-                              <div
-                                style={getPopoverStyle(popoverKey, isOpen)}
-                              >
-                                <p style={{ fontSize: '0.72rem', fontWeight: 700, marginBottom: 8 }}>{group.department} - Assigned Subjects</p>
-                                {(group.courses || []).length > 0 ? (
-                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, rowGap: 8, marginBottom: 10 }}>
-                                    {group.courses.map((course, courseIndex) => {
-                                      const selected = course.courseCode === activeCourseName;
-                                      return (
-                                        <button
-                                          key={`${popoverKey}-course-${courseIndex}`}
-                                          type="button"
-                                          onClick={() => {
-                                            setActivePopoverCourses((prev) => ({
-                                              ...prev,
-                                              [popoverKey]: course.courseCode,
-                                            }));
-                                          }}
-                                          style={{
-                                            padding: '5px 12px',
-                                            borderRadius: 999,
-                                            border: selected ? '1px solid var(--accent-cyan)' : '1px solid var(--border-glass)',
-                                            background: selected ? 'rgba(34, 211, 238, 0.12)' : 'var(--bg-glass)',
-                                            fontSize: '0.74rem',
-                                            fontWeight: 700,
-                                            cursor: 'pointer',
-                                            color: 'var(--text-primary)',
-                                            whiteSpace: 'nowrap',
-                                          }}
-                                        >
-                                          {course.courseCode}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                ) : null}
-
-                                {(activeCourse.subjects || []).length === 0 ? (
-                                  <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>No assigned subjects</p>
-                                ) : (
-                                  <div style={{ display: 'grid', gap: 6 }}>
-                                    {activeCourse.subjects.map((subject, subjectIndex) => (
-                                      <div
-                                        key={`${l._id}-dept-subject-${group.department}-${subjectIndex}`}
-                                        style={{
-                                          fontSize: '0.76rem',
-                                          padding: '6px 8px',
-                                          borderRadius: 8,
-                                          border: '1px solid var(--border-glass)',
-                                          background: 'var(--bg-glass)',
-                                        }}
-                                      >
-                                        {subject}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ) : null}
                           </div>
                         );
                       })}
@@ -266,6 +135,9 @@ export default function LecturerTable({
                     </button>
                     <button className="icon-btn" title="Reset Password" onClick={() => onResetPassword(l._id, l.name)}>
                       <HiOutlineKey size={15} />
+                    </button>
+                    <button className="icon-btn" title="Edit" onClick={() => onEdit(l)}>
+                      <HiOutlinePencil size={15} />
                     </button>
                     <button className="icon-btn danger" title="Delete" onClick={() => onDelete(l)}>
                       <HiOutlineTrash size={15} />

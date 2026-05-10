@@ -3,9 +3,8 @@
 import threading
 
 import cv2
-import numpy as np
 import mediapipe as mp
-
+import numpy as np
 
 # Minimum face bounding-box dimension (in pixels) to accept.
 # Faces smaller than this produce noisy embeddings and hurt recognition accuracy.
@@ -16,7 +15,9 @@ class FaceDetector:
     """Detect and crop faces from an image using MediaPipe Face Detection."""
 
     @staticmethod
-    def _resize_with_letterbox(image: np.ndarray, size: int = 160) -> np.ndarray | None:
+    def _resize_with_letterbox(
+        image: np.ndarray, size: int = 160
+    ) -> np.ndarray | None:
         if image is None or not hasattr(image, "shape"):
             return None
         h, w = image.shape[:2]
@@ -54,7 +55,15 @@ class FaceDetector:
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         )
 
-    def _build_face_record(self, image_rgb: np.ndarray, x: int, y: int, bw: int, bh: int, confidence: float):
+    def _build_face_record(
+        self,
+        image_rgb: np.ndarray,
+        x: int,
+        y: int,
+        bw: int,
+        bh: int,
+        confidence: float,
+    ):
         h, w, _ = image_rgb.shape
 
         # Skip faces too small to produce reliable embeddings.
@@ -122,7 +131,9 @@ class FaceDetector:
             if bw <= 0 or bh <= 0:
                 continue
 
-            face = self._build_face_record(image_rgb, x, y, bw, bh, detection.score[0])
+            face = self._build_face_record(
+                image_rgb, x, y, bw, bh, detection.score[0]
+            )
             if face is not None:
                 faces.append(face)
 
@@ -132,7 +143,11 @@ class FaceDetector:
         if self.haar.empty():
             return []
 
-        if image_rgb is None or not hasattr(image_rgb, "shape") or image_rgb.size == 0:
+        if (
+            image_rgb is None
+            or not hasattr(image_rgb, "shape")
+            or image_rgb.size == 0
+        ):
             return []
 
         h, w, _ = image_rgb.shape
@@ -153,7 +168,7 @@ class FaceDetector:
             return []
 
         faces = []
-        for (x, y, bw, bh) in raw_faces:
+        for x, y, bw, bh in raw_faces:
             # Keep roughly face-like aspect ratios and skip tiny/noisy detections.
             ratio = bw / float(max(bh, 1))
             if ratio < 0.72 or ratio > 1.35:
@@ -164,7 +179,9 @@ class FaceDetector:
             if center_y > (0.72 * h):
                 continue
 
-            face = self._build_face_record(image_rgb, int(x), int(y), int(bw), int(bh), 0.45)
+            face = self._build_face_record(
+                image_rgb, int(x), int(y), int(bw), int(bh), 0.45
+            )
             if face is not None:
                 faces.append(face)
 

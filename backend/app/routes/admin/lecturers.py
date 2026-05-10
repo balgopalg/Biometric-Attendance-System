@@ -1,14 +1,31 @@
-from . import admin_bp
-from ._helpers import *
 import os
 import shutil
+
 from flask import send_from_directory
+
+from . import admin_bp
+from ._helpers import *
+
 
 @admin_bp.route("/lecturers/<lid>/papers", methods=["GET"])
 @role_required("department_admin")
 def get_lecturer_papers(user, lid):
-    papers = get_all_papers(["name", "code", "course_id", "lecturer_id", "semester", "total_classes", "created_at"])
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
+    papers = get_all_papers(
+        [
+            "name",
+            "code",
+            "course_id",
+            "lecturer_id",
+            "semester",
+            "total_classes",
+            "created_at",
+        ]
+    )
+    courses = sanitise_many(
+        get_all_courses(
+            ["name", "code", "status", "department", "course_duration", "year"]
+        )
+    )
     lecturers = sanitise_many(get_users_by_role("lecturer"))
     course_map = {c["_id"]: c for c in courses}
     lecturer_map = {l["_id"]: l for l in lecturers}
@@ -56,12 +73,15 @@ def set_lecturer_papers(user, lid):
 
 # ─── Lecturers ──────────────────────────────────────────────────────────────
 
+
 @admin_bp.route("/lecturers", methods=["GET"])
 @role_required("super_admin", "department_admin")
 def list_lecturers(user):
     dept_id = None
     if is_super_admin(user):
-        dept_id = _as_text(request.args.get("department_id", "")).strip() or None
+        dept_id = (
+            _as_text(request.args.get("department_id", "")).strip() or None
+        )
     else:
         dept_id = _user_dept_id(user)
 
@@ -77,7 +97,9 @@ def list_lecturers(user):
         except Exception:
             selected_dept = None
         if selected_dept:
-            selected_dept_name = _as_text(selected_dept.get("name", "")).strip().lower()
+            selected_dept_name = (
+                _as_text(selected_dept.get("name", "")).strip().lower()
+            )
 
         lecturers = []
         for lec in all_lecturers:
@@ -86,13 +108,35 @@ def list_lecturers(user):
             if lec_dept_id and lec_dept_id == selected_dept_id:
                 lecturers.append(lec)
                 continue
-            if selected_dept_name and lec_dept_name and lec_dept_name == selected_dept_name:
+            if (
+                selected_dept_name
+                and lec_dept_name
+                and lec_dept_name == selected_dept_name
+            ):
                 lecturers.append(lec)
     else:
-        lecturers = sanitise_many(get_users_by_role("lecturer", department_id=dept_id))
+        lecturers = sanitise_many(
+            get_users_by_role("lecturer", department_id=dept_id)
+        )
 
-    papers = sanitise_many(get_all_papers(["name", "code", "lecturer_id", "course_id", "semester", "total_classes", "created_at"]))
-    courses = sanitise_many(get_all_courses(["name", "code", "status", "department", "course_duration", "year"]))
+    papers = sanitise_many(
+        get_all_papers(
+            [
+                "name",
+                "code",
+                "lecturer_id",
+                "course_id",
+                "semester",
+                "total_classes",
+                "created_at",
+            ]
+        )
+    )
+    courses = sanitise_many(
+        get_all_courses(
+            ["name", "code", "status", "department", "course_duration", "year"]
+        )
+    )
     course_map = {c["_id"]: c for c in courses}
 
     department_filter = _as_text(request.args.get("department", ""))
@@ -104,8 +148,10 @@ def list_lecturers(user):
     # Filter by department name on courses assigned to the lecturer
     if department_filter:
         dept_course_ids = {
-            c["_id"] for c in courses
-            if _as_text(c.get("department") or "").lower() == department_filter.lower()
+            c["_id"]
+            for c in courses
+            if _as_text(c.get("department") or "").lower()
+            == department_filter.lower()
         }
         papers = [p for p in papers if p.get("course_id") in dept_course_ids]
     academic_year = _normalise_year(request.args.get("academic_year", ""))
@@ -114,15 +160,27 @@ def list_lecturers(user):
     for lec in lecturers:
         assigned = [p for p in papers if p.get("lecturer_id") == lec["_id"]]
         assigned_paper_ids = [p["_id"] for p in assigned]
-        assigned_course_ids = list({p.get("course_id") for p in assigned if p.get("course_id")})
-        assigned_papers = [f"{p.get('name', '')} ({p.get('code', '')})" for p in assigned]
-        assigned_semesters = list({str(_to_int(p.get("semester"), 0)) for p in assigned if _to_int(p.get("semester"), 0) > 0})
+        assigned_course_ids = list(
+            {p.get("course_id") for p in assigned if p.get("course_id")}
+        )
+        assigned_papers = [
+            f"{p.get('name', '')} ({p.get('code', '')})" for p in assigned
+        ]
+        assigned_semesters = list(
+            {
+                str(_to_int(p.get("semester"), 0))
+                for p in assigned
+                if _to_int(p.get("semester"), 0) > 0
+            }
+        )
 
         years = []
         for p in assigned:
             p_year = _normalise_year(p.get("academic_year", ""))
             if not p_year:
-                p_year = _normalise_year((course_map.get(p.get("course_id")) or {}).get("year", ""))
+                p_year = _normalise_year(
+                    (course_map.get(p.get("course_id")) or {}).get("year", "")
+                )
             if p_year:
                 years.append(p_year)
 
@@ -145,7 +203,9 @@ def list_lecturers(user):
         lec["assigned_paper_ids"] = assigned_paper_ids
         lec["assigned_course_ids"] = assigned_course_ids
         lec["assigned_papers"] = assigned_papers
-        lec["assigned_semesters"] = sorted(assigned_semesters, key=lambda v: int(v))
+        lec["assigned_semesters"] = sorted(
+            assigned_semesters, key=lambda v: int(v)
+        )
         lec["academic_years"] = sorted(list(set(years)))
         lec["has_face"] = bool(lec.get("face_embeddings"))
         lec.pop("face_embeddings", None)
@@ -160,16 +220,28 @@ def add_lecturer(user):
     d = request.get_json(silent=True) or {}
     initial_password = str(d.get("initial_password", "")).strip()
     if not initial_password:
-        return jsonify({"error": "initial_password is required and must be delivered out-of-band."}), 400
+        return (
+            jsonify(
+                {
+                    "error": "initial_password is required and must be delivered out-of-band."
+                }
+            ),
+            400,
+        )
 
     is_strong, msg = validate_password_strength(initial_password)
     if not is_strong:
         return jsonify({"error": msg}), 400
 
-    lec = create_user(d["name"], d["email"], initial_password,
-                      "lecturer", d.get("department", ""),
-                      must_change_password=True,
-                      department_id=_user_dept_id(user))
+    lec = create_user(
+        d["name"],
+        d["email"],
+        initial_password,
+        "lecturer",
+        d.get("department", ""),
+        must_change_password=True,
+        department_id=_user_dept_id(user),
+    )
     log_action(
         "CREATE_LECTURER",
         str(user["_id"]),
@@ -216,7 +288,11 @@ def edit_lecturer(user, lid):
         "UPDATE_LECTURER",
         str(user["_id"]),
         target_user=lid,
-        rollback=_rb_replace("auth", "users", {"_id": lid}, previous) if previous else None,
+        rollback=(
+            _rb_replace("auth", "users", {"_id": lid}, previous)
+            if previous
+            else None
+        ),
     )
     _clear_query_cache()
     return jsonify(sanitise_mongo_doc(updated))
@@ -247,18 +323,22 @@ def remove_lecturer_face(user, lid):
 
     users_col = get_collection("auth", "users")
     users_col.update_one(
-        {"_id": ObjectId(lid)},
-        {"$set": {"face_embeddings": []}}
+        {"_id": ObjectId(lid)}, {"$set": {"face_embeddings": []}}
     )
-            
-    log_action("DELETE_LECTURER_FACE", str(user["_id"]), target_user=lid, details="Deleted face embeddings")
+
+    log_action(
+        "DELETE_LECTURER_FACE",
+        str(user["_id"]),
+        target_user=lid,
+        details="Deleted face embeddings",
+    )
     _clear_query_cache()
-    
+
     # Delete dataset if exists
     dataset_dir = _resolve_dataset_dir_for_user(lid)
     if os.path.isdir(dataset_dir):
         shutil.rmtree(dataset_dir, ignore_errors=True)
-        
+
     return jsonify({"message": "Face profile deleted successfully"}), 200
 
 
@@ -266,9 +346,15 @@ def remove_lecturer_face(user, lid):
 @role_required("department_admin")
 def reset_lecturer_password(user, lid):
     d = request.get_json(silent=True) or {}
-    temp_password = reset_user_password(lid, temp_password=str(d.get("temp_password", "")).strip() or None)
-    log_action("RESET_PASSWORD", str(user["_id"]), target_user=lid,
-               details="Lecturer password reset")
+    temp_password = reset_user_password(
+        lid, temp_password=str(d.get("temp_password", "")).strip() or None
+    )
+    log_action(
+        "RESET_PASSWORD",
+        str(user["_id"]),
+        target_user=lid,
+        details="Lecturer password reset",
+    )
 
     email_delivery_enabled = is_email_delivery_enabled()
     temp_pass_display_enabled = _temp_pass_display_enabled()
@@ -304,8 +390,12 @@ def reset_lecturer_password(user, lid):
 def reset_lecturer_pin(user, lid):
     new_pin = f"{secrets.randbelow(10000):04d}"
     set_user_pin(lid, new_pin)
-    log_action("RESET_LECTURER_PIN", str(user["_id"]), target_user=lid,
-               details="Admin reset lecturer PIN")
+    log_action(
+        "RESET_LECTURER_PIN",
+        str(user["_id"]),
+        target_user=lid,
+        details="Admin reset lecturer PIN",
+    )
     return jsonify({"pin": new_pin, "message": "Lecturer PIN reset"})
 
 
@@ -313,10 +403,18 @@ def reset_lecturer_pin(user, lid):
 @role_required("department_admin")
 @validate_ids("lid")
 def update_lecturer_pin(user, lid):
-    return jsonify({"error": "Admins cannot set lecturer PIN. Lecturer must manage PIN from dashboard."}), 403
+    return (
+        jsonify(
+            {
+                "error": "Admins cannot set lecturer PIN. Lecturer must manage PIN from dashboard."
+            }
+        ),
+        403,
+    )
 
 
 # ─── Students ───────────────────────────────────────────────────────────────
+
 
 @admin_bp.route("/lecturers/import-excel", methods=["POST"])
 @role_required("department_admin")
@@ -336,24 +434,60 @@ def import_lecturers_excel(user):
         return jsonify({"error": "Only .xlsx files are supported"}), 400
 
     try:
-        wb = openpyxl.load_workbook(BytesIO(uploaded.read()), read_only=True, data_only=True)
+        wb = openpyxl.load_workbook(
+            BytesIO(uploaded.read()), read_only=True, data_only=True
+        )
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
     except Exception as exc:
-        return jsonify({"error": f"Could not parse Excel file: {str(exc)}"}), 400
+        return (
+            jsonify({"error": f"Could not parse Excel file: {str(exc)}"}),
+            400,
+        )
 
     if not rows:
         return jsonify({"error": "Excel file is empty"}), 400
 
-    header_raw = [str(h).strip().lower() if h is not None else "" for h in rows[0]]
-    department_idx = next((i for i, h in enumerate(header_raw) if h in ["department", "dept"]), None)
-    name_idx = next((i for i, h in enumerate(header_raw) if h in ["name", "full name", "fullname"]), None)
-    email_idx = next((i for i, h in enumerate(header_raw) if h in ["email", "email address", "e-mail"]), None)
-    courses_idx = next((i for i, h in enumerate(header_raw) if h in ["courses", "course"]), None)
-    papers_idx = next((i for i, h in enumerate(header_raw) if h in ["papers", "paper"]), None)
+    header_raw = [
+        str(h).strip().lower() if h is not None else "" for h in rows[0]
+    ]
+    department_idx = next(
+        (i for i, h in enumerate(header_raw) if h in ["department", "dept"]),
+        None,
+    )
+    name_idx = next(
+        (
+            i
+            for i, h in enumerate(header_raw)
+            if h in ["name", "full name", "fullname"]
+        ),
+        None,
+    )
+    email_idx = next(
+        (
+            i
+            for i, h in enumerate(header_raw)
+            if h in ["email", "email address", "e-mail"]
+        ),
+        None,
+    )
+    courses_idx = next(
+        (i for i, h in enumerate(header_raw) if h in ["courses", "course"]),
+        None,
+    )
+    papers_idx = next(
+        (i for i, h in enumerate(header_raw) if h in ["papers", "paper"]), None
+    )
 
     if department_idx is None or name_idx is None or email_idx is None:
-        return jsonify({"error": f"Missing required columns: Department, Name and/or Email. Found headers: {header_raw}"}), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Missing required columns: Department, Name and/or Email. Found headers: {header_raw}"
+                }
+            ),
+            400,
+        )
 
     results = []
     created_count = 0
@@ -369,18 +503,24 @@ def import_lecturers_excel(user):
     def _parse_csv_list(raw_value):
         if not raw_value:
             return []
-        return [item.strip() for item in str(raw_value).split(",") if item and str(item).strip()]
+        return [
+            item.strip()
+            for item in str(raw_value).split(",")
+            if item and str(item).strip()
+        ]
 
     def _find_department(raw_department):
         if not raw_department:
             return None
         escaped = re.escape(raw_department.strip())
-        return departments_col.find_one({
-            "$or": [
-                {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
-                {"code": {"$regex": f"^{escaped}$", "$options": "i"}},
-            ]
-        })
+        return departments_col.find_one(
+            {
+                "$or": [
+                    {"name": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"code": {"$regex": f"^{escaped}$", "$options": "i"}},
+                ]
+            }
+        )
 
     def _resolve_courses(raw_courses):
         resolved = []
@@ -419,18 +559,36 @@ def import_lecturers_excel(user):
 
         if not department or not name or not email:
             skipped_count += 1
-            results.append({"row": row_num, "status": "skipped", "reason": "Missing Department, Name, or Email"})
+            results.append(
+                {
+                    "row": row_num,
+                    "status": "skipped",
+                    "reason": "Missing Department, Name, or Email",
+                }
+            )
             continue
 
         if find_user_by_email(email):
             skipped_count += 1
-            results.append({"row": row_num, "name": name, "email": email, "status": "skipped", "reason": "Email already exists"})
+            results.append(
+                {
+                    "row": row_num,
+                    "name": name,
+                    "email": email,
+                    "status": "skipped",
+                    "reason": "Email already exists",
+                }
+            )
             continue
 
         try:
             department_doc = _find_department(department)
-            department_value = department_doc.get("name") if department_doc else department
-            department_id_value = department_doc.get("_id") if department_doc else None
+            department_value = (
+                department_doc.get("name") if department_doc else department
+            )
+            department_id_value = (
+                department_doc.get("_id") if department_doc else None
+            )
             matched_courses = _resolve_courses(raw_courses)
             matched_papers = _resolve_papers(raw_papers)
 
@@ -453,10 +611,14 @@ def import_lecturers_excel(user):
 
             assigned_course_ids = []
             assigned_paper_ids = []
-            scoped_papers = get_all_papers(["_id", "course_id"], department_id=department_id_value)
+            scoped_papers = get_all_papers(
+                ["_id", "course_id"], department_id=department_id_value
+            )
             scoped_paper_map = {}
             for paper in scoped_papers:
-                scoped_paper_map.setdefault(str(paper.get("course_id") or ""), []).append(str(paper.get("_id")))
+                scoped_paper_map.setdefault(
+                    str(paper.get("course_id") or ""), []
+                ).append(str(paper.get("_id")))
 
             for course in matched_courses:
                 course_id = str(course.get("_id"))
@@ -466,7 +628,9 @@ def import_lecturers_excel(user):
                     assigned_course_ids.append(course_id)
                     assigned_paper_ids.extend(course_paper_ids)
 
-            direct_paper_ids = [str(paper.get("_id")) for paper in matched_papers]
+            direct_paper_ids = [
+                str(paper.get("_id")) for paper in matched_papers
+            ]
             if direct_paper_ids:
                 bulk_assign_lecturer(direct_paper_ids, lec["_id"])
                 assigned_paper_ids.extend(direct_paper_ids)
@@ -481,13 +645,19 @@ def import_lecturers_excel(user):
                 "email": email,
                 "status": "created",
                 "department": department_value,
-                "matched_courses": [course.get("code") for course in matched_courses],
-                "matched_papers": [paper.get("code") for paper in matched_papers],
+                "matched_courses": [
+                    course.get("code") for course in matched_courses
+                ],
+                "matched_papers": [
+                    paper.get("code") for paper in matched_papers
+                ],
                 "assigned_course_count": len(assigned_course_ids),
                 "assigned_paper_count": len(assigned_paper_ids),
             }
             if not department_doc:
-                row_result["department_warning"] = "Department not found; stored raw department value"
+                row_result["department_warning"] = (
+                    "Department not found; stored raw department value"
+                )
             if temp_pass_display_enabled:
                 row_result["temp_password"] = initial_password
             results.append(row_result)
@@ -500,26 +670,45 @@ def import_lecturers_excel(user):
             )
         except DuplicateKeyError:
             skipped_count += 1
-            results.append({"row": row_num, "name": name, "email": email, "status": "skipped", "reason": "Duplicate email"})
+            results.append(
+                {
+                    "row": row_num,
+                    "name": name,
+                    "email": email,
+                    "status": "skipped",
+                    "reason": "Duplicate email",
+                }
+            )
         except Exception as exc:
             error_count += 1
-            results.append({"row": row_num, "name": name, "email": email, "status": "error", "reason": str(exc)})
+            results.append(
+                {
+                    "row": row_num,
+                    "name": name,
+                    "email": email,
+                    "status": "error",
+                    "reason": str(exc),
+                }
+            )
 
     _clear_query_cache()
-    return jsonify({
-        "message": f"Import complete: {created_count} created, {skipped_count} skipped, {error_count} errors",
-        "created": created_count,
-        "skipped": skipped_count,
-        "errors": error_count,
-        "email_delivery_enabled": is_email_delivery_enabled(),
-        "temp_pass_display_enabled": temp_pass_display_enabled,
-        "results": results,
-    }), 207 if (skipped_count + error_count) > 0 else 201
+    return jsonify(
+        {
+            "message": f"Import complete: {created_count} created, {skipped_count} skipped, {error_count} errors",
+            "created": created_count,
+            "skipped": skipped_count,
+            "errors": error_count,
+            "email_delivery_enabled": is_email_delivery_enabled(),
+            "temp_pass_display_enabled": temp_pass_display_enabled,
+            "results": results,
+        }
+    ), (207 if (skipped_count + error_count) > 0 else 201)
 
 
 def _generate_import_temp_password(length=14):
     """Generate a cryptographically random temporary password for bulk imports."""
     import string
+
     upper = string.ascii_uppercase.replace("I", "").replace("O", "")
     lower = string.ascii_lowercase.replace("l", "").replace("o", "")
     digits = "23456789"
@@ -541,7 +730,7 @@ def _generate_import_temp_password(length=14):
 @role_required("super_admin", "department_admin")
 def get_lecturer_profile_picture(user, file_name):
     """Serve lecturer profile pictures for administrators.
-    
+
     Enforces department-level tenant isolation:
     - super_admin can access any lecturer's profile picture
     - department_admin can only access lecturers in their department
@@ -551,9 +740,10 @@ def get_lecturer_profile_picture(user, file_name):
         return jsonify({"error": "Profile picture not found"}), 404
 
     # Resolve folder from auth module's internal helper logic
-    from ..auth import _safe_profile_upload_folder
     from app.security.rbac import get_user_department_id, is_super_admin
-    
+
+    from ..auth import _safe_profile_upload_folder
+
     profile_dir = _safe_profile_upload_folder()
     file_path = os.path.join(profile_dir, safe_name)
 
@@ -563,19 +753,22 @@ def get_lecturer_profile_picture(user, file_name):
     # Department isolation: verify the file belongs to a lecturer in the requester's department
     if not is_super_admin(user):
         requester_dept = get_user_department_id(user)
-        
+
         # Find which lecturer owns this profile picture
         users_col = get_collection("auth", "users")
         owner = users_col.find_one({"profile_picture_file": safe_name})
-        
+
         if not owner:
             return jsonify({"error": "Profile picture not found"}), 404
-        
+
         # For department_admin, enforce same-department access
-        owner_dept = get_user_department_id(owner) if isinstance(owner, dict) else None
+        owner_dept = (
+            get_user_department_id(owner) if isinstance(owner, dict) else None
+        )
         if requester_dept != owner_dept:
-            return jsonify({"error": "Unauthorized to access this resource"}), 403
+            return (
+                jsonify({"error": "Unauthorized to access this resource"}),
+                403,
+            )
 
     return send_from_directory(profile_dir, safe_name)
-
-

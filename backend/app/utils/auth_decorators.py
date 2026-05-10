@@ -15,21 +15,17 @@ from __future__ import annotations
 
 from functools import wraps
 
+from app.extensions import get_collection
+from app.security.rbac import (effective_allowed_roles, get_user_department_id,
+                               is_super_admin)
+from app.utils.validation import validate_object_id
 from flask import g, jsonify
 from flask_jwt_extended import get_jwt, get_jwt_identity, verify_jwt_in_request
-
-from app.extensions import get_collection
-from app.security.rbac import (
-    effective_allowed_roles,
-    get_user_department_id,
-    is_super_admin,
-)
-from app.utils.validation import validate_object_id
-
 
 # ---------------------------------------------------------------------------
 # Primary role-based decorator
 # ---------------------------------------------------------------------------
+
 
 def role_required(*allowed_roles):
     """Decorator: only allow users whose role is in *allowed_roles*.
@@ -58,8 +54,15 @@ def role_required(*allowed_roles):
             # C-4 fix: Verify session_version to reject stale JWTs after password reset
             claims = get_jwt() or {}
             token_sv = claims.get("sv")
-            if token_sv is not None and int(user.get("session_version", 1)) != int(token_sv):
-                return jsonify({"error": "Session expired. Please log in again."}), 401
+            if token_sv is not None and int(
+                user.get("session_version", 1)
+            ) != int(token_sv):
+                return (
+                    jsonify(
+                        {"error": "Session expired. Please log in again."}
+                    ),
+                    401,
+                )
 
             # Normalize legacy "admin" role → "super_admin"
             user_role = user.get("role", "")
@@ -84,6 +87,7 @@ def role_required(*allowed_roles):
 # Convenience shortcuts
 # ---------------------------------------------------------------------------
 
+
 def super_admin_required(fn):
     """Decorator: restrict access to ``super_admin`` only."""
 
@@ -95,7 +99,10 @@ def super_admin_required(fn):
         user = users.find_one({"email": user_email})
 
         if not user or not is_super_admin(user):
-            return jsonify({"error": "Access denied: super admin required"}), 403
+            return (
+                jsonify({"error": "Access denied: super admin required"}),
+                403,
+            )
 
         g.current_user = user
         g.department_id = None  # super_admin has no department scope
@@ -109,6 +116,7 @@ def super_admin_required(fn):
 # ID validation decorator (unchanged)
 # ---------------------------------------------------------------------------
 
+
 def validate_ids(*param_names):
     """Decorator: ensure specified route parameters are valid MongoDB ObjectIds."""
 
@@ -118,7 +126,10 @@ def validate_ids(*param_names):
             for name in param_names:
                 val = kwargs.get(name)
                 if val and not validate_object_id(str(val)):
-                    return jsonify({"error": f"Invalid ID format for '{name}'"}), 400
+                    return (
+                        jsonify({"error": f"Invalid ID format for '{name}'"}),
+                        400,
+                    )
             return fn(*args, **kwargs)
 
         return wrapper

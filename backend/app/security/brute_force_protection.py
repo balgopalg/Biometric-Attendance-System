@@ -1,8 +1,9 @@
 """Brute-force protection and account lockout mechanisms."""
 
 from datetime import datetime, timedelta, timezone
-from flask import current_app
+
 from app.extensions import get_collection
+from flask import current_app
 
 
 class BruteForceProtector:
@@ -16,7 +17,9 @@ class BruteForceProtector:
 
     @classmethod
     def _login_lockout_duration_minutes(cls):
-        return int(current_app.config.get("LOGIN_LOCKOUT_DURATION_MINUTES", 15))
+        return int(
+            current_app.config.get("LOGIN_LOCKOUT_DURATION_MINUTES", 15)
+        )
 
     @classmethod
     def _login_attempt_window_minutes(cls):
@@ -30,7 +33,6 @@ class BruteForceProtector:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
-
     @classmethod
     def record_failed_attempt_atomic(cls, email, ip_address):
         """Atomically record a failed login attempt and check if account is now locked."""
@@ -40,10 +42,9 @@ class BruteForceProtector:
         threshold = cls._login_lockout_threshold()
 
         # Remove old attempts outside the window
-        collection.delete_many({
-            "email": email.lower(),
-            "attempted_at": {"$lt": cutoff}
-        })
+        collection.delete_many(
+            {"email": email.lower(), "attempted_at": {"$lt": cutoff}}
+        )
 
         # Atomically insert and count attempts in the window
         doc = {
@@ -54,24 +55,27 @@ class BruteForceProtector:
         }
         collection.insert_one(doc)
 
-        failed_count = collection.count_documents({
-            "email": email.lower(),
-            "attempted_at": {"$gte": cutoff}
-        })
+        failed_count = collection.count_documents(
+            {"email": email.lower(), "attempted_at": {"$gte": cutoff}}
+        )
 
         is_locked = False
         lockout_expiry = None
         if failed_count >= threshold:
             oldest_recent_attempt = collection.find_one(
-                {
-                    "email": email.lower(),
-                    "attempted_at": {"$gte": cutoff}
-                },
-                sort=[("attempted_at", 1)]
+                {"email": email.lower(), "attempted_at": {"$gte": cutoff}},
+                sort=[("attempted_at", 1)],
             )
             if oldest_recent_attempt:
-                oldest_attempt_at = cls._as_utc_datetime(oldest_recent_attempt.get("attempted_at"))
-                lockout_expiry = oldest_attempt_at + timedelta(minutes=cls._login_lockout_duration_minutes()) if oldest_attempt_at else None
+                oldest_attempt_at = cls._as_utc_datetime(
+                    oldest_recent_attempt.get("attempted_at")
+                )
+                lockout_expiry = (
+                    oldest_attempt_at
+                    + timedelta(minutes=cls._login_lockout_duration_minutes())
+                    if oldest_attempt_at
+                    else None
+                )
                 if now < lockout_expiry:
                     is_locked = True
         return failed_count, is_locked, lockout_expiry
@@ -82,38 +86,45 @@ class BruteForceProtector:
         collection = get_collection("auth", cls.FAILED_ATTEMPTS_COLLECTION)
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=cls._login_attempt_window_minutes())
-        
-        return collection.count_documents({
-            "email": email.lower(),
-            "attempted_at": {"$gte": cutoff}
-        })
+
+        return collection.count_documents(
+            {"email": email.lower(), "attempted_at": {"$gte": cutoff}}
+        )
 
     @classmethod
     def is_account_locked(cls, email):
         """Check if account is locked due to failed attempts."""
         collection = get_collection("auth", cls.FAILED_ATTEMPTS_COLLECTION)
         now = datetime.now(timezone.utc)
-        
+
         # Get recent failed attempts
-        recent_cutoff = now - timedelta(minutes=cls._login_attempt_window_minutes())
+        recent_cutoff = now - timedelta(
+            minutes=cls._login_attempt_window_minutes()
+        )
         recent_query = {
             "email": email.lower(),
-            "attempted_at": {"$gte": recent_cutoff}
+            "attempted_at": {"$gte": recent_cutoff},
         }
         failed_count = collection.count_documents(recent_query)
-        
+
         if failed_count >= cls._login_lockout_threshold():
             # Base the lockout window on the active failure window, not stale records.
             oldest_recent_attempt = collection.find_one(
-                recent_query,
-                sort=[("attempted_at", 1)]
+                recent_query, sort=[("attempted_at", 1)]
             )
             if oldest_recent_attempt:
-                oldest_attempt_at = cls._as_utc_datetime(oldest_recent_attempt.get("attempted_at"))
-                lockout_expiry = oldest_attempt_at + timedelta(minutes=cls._login_lockout_duration_minutes()) if oldest_attempt_at else None
+                oldest_attempt_at = cls._as_utc_datetime(
+                    oldest_recent_attempt.get("attempted_at")
+                )
+                lockout_expiry = (
+                    oldest_attempt_at
+                    + timedelta(minutes=cls._login_lockout_duration_minutes())
+                    if oldest_attempt_at
+                    else None
+                )
                 if lockout_expiry and now < lockout_expiry:
                     return True, lockout_expiry
-        
+
         return False, None
 
     @classmethod
@@ -127,21 +138,22 @@ class BruteForceProtector:
         """Record a failed PIN entry attempt for a session."""
         collection = get_collection("attendance", "pin_failures")
         now = datetime.now(timezone.utc)
-        
-        collection.insert_one({
-            "session_id": session_id,
-            "lecturer_id": lecturer_id,
-            "ip_address": ip_address,
-            "failed_at": now,
-            "ttl": now + timedelta(hours=24),
-        })
-        
+
+        collection.insert_one(
+            {
+                "session_id": session_id,
+                "lecturer_id": lecturer_id,
+                "ip_address": ip_address,
+                "failed_at": now,
+                "ttl": now + timedelta(hours=24),
+            }
+        )
+
         # Count attempts in last 5 minutes
         cutoff = now - timedelta(minutes=5)
-        return collection.count_documents({
-            "session_id": session_id,
-            "failed_at": {"$gte": cutoff}
-        })
+        return collection.count_documents(
+            {"session_id": session_id, "failed_at": {"$gte": cutoff}}
+        )
 
     @classmethod
     def is_session_pin_blocked(cls, session_id, max_attempts=3):
@@ -149,12 +161,11 @@ class BruteForceProtector:
         collection = get_collection("attendance", "pin_failures")
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=5)
-        
-        attempt_count = collection.count_documents({
-            "session_id": session_id,
-            "failed_at": {"$gte": cutoff}
-        })
-        
+
+        attempt_count = collection.count_documents(
+            {"session_id": session_id, "failed_at": {"$gte": cutoff}}
+        )
+
         return attempt_count >= max_attempts, attempt_count
 
     @classmethod
@@ -174,14 +185,16 @@ class IPRateLimiter:
         """Record a request from an IP to an endpoint."""
         collection = get_collection("auth", cls.COLLECTION_NAME)
         now = datetime.now(timezone.utc)
-        
-        collection.insert_one({
-            "ip_address": ip_address,
-            "endpoint": endpoint,
-            "requested_at": now,
-            "weight": weight,
-            "ttl": now + timedelta(hours=1),
-        })
+
+        collection.insert_one(
+            {
+                "ip_address": ip_address,
+                "endpoint": endpoint,
+                "requested_at": now,
+                "weight": weight,
+                "ttl": now + timedelta(hours=1),
+            }
+        )
 
     @classmethod
     def get_request_count(cls, ip_address, endpoint, window_minutes=10):
@@ -192,21 +205,23 @@ class IPRateLimiter:
 
         # Primary path for MongoDB collections.
         if hasattr(collection, "aggregate"):
-            result = collection.aggregate([
-                {
-                    "$match": {
-                        "ip_address": ip_address,
-                        "endpoint": endpoint,
-                        "requested_at": {"$gte": cutoff}
-                    }
-                },
-                {
-                    "$group": {
-                        "_id": None,
-                        "total_weight": {"$sum": "$weight"}
-                    }
-                }
-            ])
+            result = collection.aggregate(
+                [
+                    {
+                        "$match": {
+                            "ip_address": ip_address,
+                            "endpoint": endpoint,
+                            "requested_at": {"$gte": cutoff},
+                        }
+                    },
+                    {
+                        "$group": {
+                            "_id": None,
+                            "total_weight": {"$sum": "$weight"},
+                        }
+                    },
+                ]
+            )
 
             results = list(result)
             return results[0]["total_weight"] if results else 0
@@ -215,7 +230,10 @@ class IPRateLimiter:
         docs = getattr(collection, "docs", [])
         total = 0
         for doc in docs:
-            if doc.get("ip_address") != ip_address or doc.get("endpoint") != endpoint:
+            if (
+                doc.get("ip_address") != ip_address
+                or doc.get("endpoint") != endpoint
+            ):
                 continue
             requested_at = doc.get("requested_at")
             if requested_at and requested_at >= cutoff:
@@ -223,7 +241,9 @@ class IPRateLimiter:
         return total
 
     @classmethod
-    def is_ip_blocked(cls, ip_address, endpoint, threshold=50, window_minutes=10):
+    def is_ip_blocked(
+        cls, ip_address, endpoint, threshold=50, window_minutes=10
+    ):
         """Check if IP is blocked for excessive requests."""
         count = cls.get_request_count(ip_address, endpoint, window_minutes)
         return count >= threshold

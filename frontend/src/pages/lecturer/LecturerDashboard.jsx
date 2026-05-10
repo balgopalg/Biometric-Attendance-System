@@ -150,16 +150,25 @@ export default function LecturerDashboard() {
 
   return (
     <div className="lecturer-page">
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 800 }}>Welcome back, <span className="gradient-text">{user?.name?.split(' ')[0] || 'Lecturer'}</span> 👋</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 4 }}>Set your 4-digit PIN, then select a paper to start attendance.</p>
-      </div>
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        style={{ marginBottom: 32 }}
+      >
+        <h1 style={{ fontSize: '1.6rem', fontWeight: 800, letterSpacing: '-0.02em' }}>Welcome back, <span className="gradient-text">{user?.name?.split(' ')[0] || 'Lecturer'}</span> 👋</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: 6 }}>Set your 4-digit PIN, then select a paper to start attendance.</p>
+      </motion.div>
 
       <div className="lecturer-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 28 }}>
         <StatsCard icon={HiOutlineBookOpen} label="Assigned Papers" value={papers.length} color="var(--accent-cyan)" />
 
         {/* PIN Card */}
-        <div className="glass-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10 }}>
+        <motion.div 
+          whileHover={{ y: -4, boxShadow: 'var(--shadow-glow)' }}
+          transition={{ duration: 0.2 }}
+          className="glass-card" 
+          style={{ padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 12, background: 'linear-gradient(145deg, var(--bg-card), rgba(139, 92, 246, 0.05))' }}
+        >
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div>
               <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Commit PIN</p>
@@ -175,10 +184,15 @@ export default function LecturerDashboard() {
           <button className="btn-primary" style={{ justifyContent: 'center', width: '100%' }} onClick={() => setShowPinModal(true)}>
             <HiOutlineKey size={15} /> {pinStatus.has_pin ? 'Change PIN' : 'Set PIN'}
           </button>
-        </div>
+        </motion.div>
 
         {/* Face Enrollment Card */}
-        <div className="glass-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 10 }}>
+        <motion.div 
+          whileHover={{ y: -4, boxShadow: '0 8px 30px rgba(6, 182, 212, 0.15)' }}
+          transition={{ duration: 0.2 }}
+          className="glass-card" 
+          style={{ padding: 20, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 12, background: 'linear-gradient(145deg, var(--bg-card), rgba(6, 182, 212, 0.05))' }}
+        >
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div>
               <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Face Enrollment</p>
@@ -196,7 +210,7 @@ export default function LecturerDashboard() {
               <HiOutlineCamera size={15} /> Enroll Face
             </button>
           )}
-        </div>
+        </motion.div>
       </div>
 
       <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Your Papers</h3>
@@ -204,9 +218,11 @@ export default function LecturerDashboard() {
         {papers.map((p) => (
           <motion.div
             key={p._id}
-            whileHover={{ y: -4 }}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            whileHover={{ y: -6, scale: 1.01, boxShadow: '0 12px 30px rgba(0,0,0,0.1)' }}
             className="glass-card"
-            style={{ padding: 20, cursor: p.is_course_inactive ? 'not-allowed' : 'pointer', display: 'flex', flexDirection: 'column', gap: 12 }}
+            style={{ padding: 22, cursor: p.is_course_inactive ? 'not-allowed' : 'pointer', display: 'flex', flexDirection: 'column', gap: 14, background: 'linear-gradient(to bottom right, var(--bg-card), var(--bg-glass))' }}
             onClick={() => { if (p.is_course_inactive) return; navigate(`/lecturer/session?paper_id=${p._id}`); }}
           >
             <SoftLockWrapper locked={p.is_course_inactive} title="Locked: course inactive">

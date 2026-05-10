@@ -7,28 +7,28 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from flask import Blueprint, request, jsonify, current_app, send_from_directory
-from flask_jwt_extended import (
-    create_access_token,
-    create_refresh_token,  # Added for proper refresh logic
-    jwt_required,
-    get_jwt_identity,
-    get_jwt,
-    set_access_cookies,
-    set_refresh_cookies,   # Added to set refresh cookie
-    unset_jwt_cookies,
-)
-from werkzeug.utils import secure_filename
-
-from app.models.user import find_user_by_email, verify_password, change_user_password, normalize_email
-from app.extensions import mongo, get_collection
-from app.security.rate_limiter import limiter
-from app.security.brute_force_protection import BruteForceProtector, IPRateLimiter
-from app.utils.validation import validate_email, validate_password_strength
+from app.extensions import get_collection, mongo
 from app.models.audit import log_action
-from app.services.email_service import send_password_recovery_otp_email, is_email_delivery_enabled
-from app.services.notification_service import create_notification, ensure_welcome_notification
+from app.models.user import (change_user_password, find_user_by_email,
+                             normalize_email, verify_password)
+from app.security.brute_force_protection import (BruteForceProtector,
+                                                 IPRateLimiter)
+from app.security.rate_limiter import limiter
+from app.services.email_service import (is_email_delivery_enabled,
+                                        send_password_recovery_otp_email)
+from app.services.notification_service import (create_notification,
+                                               ensure_welcome_notification)
 from app.utils.helpers import decode_image_bytes, save_jpeg_with_size_bounds
+from app.utils.validation import validate_email, validate_password_strength
+from flask import Blueprint, current_app, jsonify, request, send_from_directory
+from flask_jwt_extended import \
+    create_refresh_token  # Added for proper refresh logic
+from flask_jwt_extended import \
+    set_refresh_cookies  # Added to set refresh cookie
+from flask_jwt_extended import (create_access_token, get_jwt, get_jwt_identity,
+                                jwt_required, set_access_cookies,
+                                unset_jwt_cookies)
+from werkzeug.utils import secure_filename
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -42,8 +42,14 @@ def _utc_now():
 
 
 def _safe_profile_upload_folder():
-    root_uploads = current_app.config.get("UPLOADS_ABSOLUTE_PATH") or os.path.abspath(
-        os.path.join(current_app.root_path, "..", current_app.config.get("UPLOAD_FOLDER", "uploads"))
+    root_uploads = current_app.config.get(
+        "UPLOADS_ABSOLUTE_PATH"
+    ) or os.path.abspath(
+        os.path.join(
+            current_app.root_path,
+            "..",
+            current_app.config.get("UPLOAD_FOLDER", "uploads"),
+        )
     )
     profile_dir = os.path.join(root_uploads, "profile_pictures")
     os.makedirs(profile_dir, exist_ok=True)
@@ -73,13 +79,15 @@ def _resolve_department_name(user):
             if dept_doc:
                 dept_name = dept_doc.get("name", dept_name)
         except Exception as e:
-            current_app.logger.warning(f"Failed to resolve department name: {e}")
+            current_app.logger.warning(
+                f"Failed to resolve department name: {e}"
+            )
     return dept_name
 
 
 def _serialize_auth_user(user):
     effective_role = _normalize_role(user["role"])
-    
+
     # Resolve face enrollment status based on role
     has_face = False
     if effective_role == "lecturer":
@@ -87,6 +95,7 @@ def _serialize_auth_user(user):
     elif effective_role == "student":
         try:
             from app.models.enrollment import get_profile_by_user
+
             profile = get_profile_by_user(str(user["_id"]))
             has_face = bool(profile and profile.get("face_embeddings"))
         except Exception:
@@ -107,20 +116,24 @@ def _serialize_auth_user(user):
 
 
 def _otp_hash(email, otp):
-    secret = str(current_app.config.get("JWT_SECRET_KEY") or "dev-only-otp-secret")  # gitleaks:allow
+    secret = str(
+        current_app.config.get("JWT_SECRET_KEY") or "dev-only-otp-secret"
+    )  # gitleaks:allow
     payload = f"{normalize_email(email)}:{otp}:{secret}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
 def _clean_expired_password_otps(email):
     otps = get_collection("auth", "password_reset_otps")
-    otps.delete_many({
-        "email": normalize_email(email),
-        "$or": [
-            {"expires_at": {"$lte": _utc_now()}},
-            {"used_at": {"$exists": True}},
-        ],
-    })
+    otps.delete_many(
+        {
+            "email": normalize_email(email),
+            "$or": [
+                {"expires_at": {"$lte": _utc_now()}},
+                {"used_at": {"$exists": True}},
+            ],
+        }
+    )
 
 
 def _to_utc_iso8601(value):
@@ -145,7 +158,9 @@ def _revoke_current_token():
                 {
                     "$setOnInsert": {
                         "jti": jti,
-                        "expires_at": datetime.fromtimestamp(int(expires_at), timezone.utc),
+                        "expires_at": datetime.fromtimestamp(
+                            int(expires_at), timezone.utc
+                        ),
                         "revoked_at": datetime.now(timezone.utc),
                     }
                 },
@@ -170,11 +185,31 @@ def health():
 
     cfg = current_app.config
     required_indexes = {
-        (cfg.get("MONGO_DB_AUTH", "auth"), "users"): ["uq_users_email", "ix_users_role"],
-        (cfg.get("MONGO_DB_ACADEMIC", "academic"), "papers"): ["uq_papers_code", "ix_papers_course", "ix_papers_lecturers"],
-        (cfg.get("MONGO_DB_ACADEMIC", "academic"), "student_profiles"): ["uq_profiles_user", "uq_profiles_reg", "ix_profiles_course"],
-        (cfg.get("MONGO_DB_ATTENDANCE", "attendance"), "attendance_logs"): ["uq_attendance_session_paper_student", "ix_attendance_timestamp"],
-        (cfg.get("MONGO_DB_ATTENDANCE", "attendance"), "attendance_sessions"): ["uq_sessions_id", "ix_sessions_lecturer_created"],
+        (cfg.get("MONGO_DB_AUTH", "auth"), "users"): [
+            "uq_users_email",
+            "ix_users_role",
+        ],
+        (cfg.get("MONGO_DB_ACADEMIC", "academic"), "papers"): [
+            "uq_papers_code",
+            "ix_papers_course",
+            "ix_papers_lecturers",
+        ],
+        (cfg.get("MONGO_DB_ACADEMIC", "academic"), "student_profiles"): [
+            "uq_profiles_user",
+            "uq_profiles_reg",
+            "ix_profiles_course",
+        ],
+        (cfg.get("MONGO_DB_ATTENDANCE", "attendance"), "attendance_logs"): [
+            "uq_attendance_session_paper_student",
+            "ix_attendance_timestamp",
+        ],
+        (
+            cfg.get("MONGO_DB_ATTENDANCE", "attendance"),
+            "attendance_sessions",
+        ): [
+            "uq_sessions_id",
+            "ix_sessions_lecturer_created",
+        ],
     }
 
     missing = []
@@ -186,7 +221,7 @@ def health():
                 if name not in present:
                     missing.append(f"{db_name}.{collection_name}:{name}")
         except Exception:
-            missing.extend(names) # Collection might not exist yet
+            missing.extend(names)  # Collection might not exist yet
 
     if missing and status == "ok":
         status = "degraded"
@@ -210,21 +245,23 @@ def _normalize_role(role):
 def login():
     """Authenticate user and set Access & Refresh JWTs in secure HttpOnly cookies."""
     ip_address = request.remote_addr
-    
+
     data = request.get_json(silent=True) or {}
     email = normalize_email(data.get("email", ""))
     password = data.get("password", "")
 
     if not email or not password:
         return jsonify({"error": "Email and password are required"}), 400
-    
+
     if not validate_email(email):
         return jsonify({"error": "Invalid email format"}), 400
-    
+
     user = find_user_by_email(email)
 
     if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
+        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(
+            email
+        )
         if is_locked:
             lockout_until = _to_utc_iso8601(lockout_expiry)
             log_action(
@@ -235,16 +272,23 @@ def login():
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
-            return jsonify({
-                "error": f"Account temporarily locked. Try again after {lockout_until}",
-                "lockout_until": lockout_until
-            }), 429
+            return (
+                jsonify(
+                    {
+                        "error": f"Account temporarily locked. Try again after {lockout_until}",
+                        "lockout_until": lockout_until,
+                    }
+                ),
+                429,
+            )
 
         is_ip_blocked = IPRateLimiter.is_ip_blocked(
             ip_address,
             "auth.login",
             threshold=current_app.config.get("IP_RATELIMIT_THRESHOLD", 100),
-            window_minutes=current_app.config.get("IP_RATELIMIT_WINDOW_MINUTES", 10),
+            window_minutes=current_app.config.get(
+                "IP_RATELIMIT_WINDOW_MINUTES", 10
+            ),
         )
         if is_ip_blocked:
             log_action(
@@ -255,9 +299,18 @@ def login():
                 ip_address=ip_address,
                 user_agent=request.headers.get("User-Agent", ""),
             )
-            return jsonify({"error": "Too many login attempts from your IP. Try again later."}), 429
+            return (
+                jsonify(
+                    {
+                        "error": "Too many login attempts from your IP. Try again later."
+                    }
+                ),
+                429,
+            )
 
-    password_ok = bool(user and verify_password(user["password_hash"], password))
+    password_ok = bool(
+        user and verify_password(user["password_hash"], password)
+    )
     if password_ok:
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
             BruteForceProtector.clear_failed_attempts(email)
@@ -282,21 +335,31 @@ def login():
             "role": effective_role,
             "dept": str(user.get("department_id") or ""),
         }
-        
-        # Issue both access and refresh tokens
-        access_token = create_access_token(identity=user["email"], additional_claims=sv_claim)
-        refresh_token = create_refresh_token(identity=user["email"], additional_claims=sv_claim)
 
-        response = jsonify({
-            "user": _serialize_auth_user(user),
-        })
-        
+        # Issue both access and refresh tokens
+        access_token = create_access_token(
+            identity=user["email"], additional_claims=sv_claim
+        )
+        refresh_token = create_refresh_token(
+            identity=user["email"], additional_claims=sv_claim
+        )
+
+        response = jsonify(
+            {
+                "user": _serialize_auth_user(user),
+            }
+        )
+
         set_access_cookies(response, access_token)
         set_refresh_cookies(response, refresh_token)
         return response
     else:
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            failed_count, is_locked, lockout_expiry = BruteForceProtector.record_failed_attempt_atomic(email, ip_address)
+            failed_count, is_locked, lockout_expiry = (
+                BruteForceProtector.record_failed_attempt_atomic(
+                    email, ip_address
+                )
+            )
 
             log_action(
                 "login_failed",
@@ -308,12 +371,16 @@ def login():
             )
 
             if is_locked:
-                lockout_until = _to_utc_iso8601(lockout_expiry) if lockout_expiry else None
-                payload = {"error": "Account locked after too many failed attempts"}
+                lockout_until = (
+                    _to_utc_iso8601(lockout_expiry) if lockout_expiry else None
+                )
+                payload = {
+                    "error": "Account locked after too many failed attempts"
+                }
                 if lockout_until:
                     payload["lockout_until"] = lockout_until
                 return jsonify(payload), 429
-                
+
         return jsonify({"error": "Invalid email or password"}), 401
 
 
@@ -335,7 +402,7 @@ def me():
     email = get_jwt_identity()
     user = find_user_by_email(email)
     claims = get_jwt()
-    
+
     # Security Fix: Ensure the user exists AND their session hasn't been forcefully invalidated
     if not user or int(user.get("session_version", 1)) != claims.get("sv"):
         return jsonify({"error": "Session expired or invalidated"}), 401
@@ -344,17 +411,25 @@ def me():
 
 
 @auth_bp.route("/refresh", methods=["POST"])
-@jwt_required(refresh=True)  # Security Fix: Only allow Refresh tokens here, not Access tokens
+# Security Fix: Only allow Refresh tokens here, not Access tokens
+@jwt_required(refresh=True)
 @limiter.limit("60 per minute")
 def refresh_token():
     """Issue a new access token using a valid refresh token."""
     email = get_jwt_identity()
     user = find_user_by_email(email)
     claims = get_jwt()
-    
+
     # Security Fix: Ensure the session version matches (prevents refreshing banned/logged-out accounts)
     if not user or int(user.get("session_version", 1)) != claims.get("sv"):
-        return jsonify({"error": "Session expired or invalidated. Please log in again."}), 401
+        return (
+            jsonify(
+                {
+                    "error": "Session expired or invalidated. Please log in again."
+                }
+            ),
+            401,
+        )
 
     # Normalize legacy role
     effective_role = _normalize_role(user["role"])
@@ -368,10 +443,12 @@ def refresh_token():
         },
     )
 
-    response = jsonify({
-        "message": "Token refreshed",
-        "user": _serialize_auth_user(user),
-    })
+    response = jsonify(
+        {
+            "message": "Token refreshed",
+            "user": _serialize_auth_user(user),
+        }
+    )
     set_access_cookies(response, access_token)
     return response
 
@@ -384,7 +461,7 @@ def change_password():
     email = get_jwt_identity()
     user = find_user_by_email(email)
     claims = get_jwt()
-    
+
     if not user or int(user.get("session_version", 1)) != claims.get("sv"):
         return jsonify({"error": "Session expired or invalidated"}), 401
 
@@ -395,26 +472,44 @@ def change_password():
 
     if not old_pw or not new_pw or not confirm_pw:
         return jsonify({"error": "All fields are required"}), 400
-    
+
     if new_pw != confirm_pw:
         return jsonify({"error": "New passwords do not match"}), 400
-    
+
     # Validate password strength
     is_strong, msg = validate_password_strength(new_pw)
     if not is_strong:
-        return jsonify({"error": f"Password does not meet security requirements: {msg}"}), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Password does not meet security requirements: {msg}"
+                }
+            ),
+            400,
+        )
 
     # Security Fix: Check brute-force limits BEFORE processing password change
     if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(email)
+        is_locked, lockout_expiry = BruteForceProtector.is_account_locked(
+            email
+        )
         if is_locked:
-            return jsonify({"error": "Account temporarily locked due to too many failed attempts."}), 429
+            return (
+                jsonify(
+                    {
+                        "error": "Account temporarily locked due to too many failed attempts."
+                    }
+                ),
+                429,
+            )
 
     # Security Fix: Explicitly check current password to trigger BruteForce logic if they are guessing
     if not verify_password(user["password_hash"], old_pw):
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            BruteForceProtector.record_failed_attempt_atomic(email, request.remote_addr)
-        
+            BruteForceProtector.record_failed_attempt_atomic(
+                email, request.remote_addr
+            )
+
         log_action(
             "change_password_failed",
             str(user["_id"]),
@@ -424,18 +519,25 @@ def change_password():
             user_agent=request.headers.get("User-Agent", ""),
         )
         return jsonify({"error": "Incorrect current password"}), 401
-        
+
     if old_pw == new_pw:
-        return jsonify({"error": "New password must be different from current password"}), 400
+        return (
+            jsonify(
+                {
+                    "error": "New password must be different from current password"
+                }
+            ),
+            400,
+        )
 
     success, error = change_user_password(str(user["_id"]), old_pw, new_pw)
     if not success:
         return jsonify({"error": error}), 400
-    
+
     # If successful, clear any accumulated failed attempts
     if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
         BruteForceProtector.clear_failed_attempts(email)
-    
+
     log_action(
         "change_password_success",
         str(user["_id"]),
@@ -457,8 +559,12 @@ def change_password():
     }
 
     # Re-issue both tokens so they don't get logged out immediately
-    new_access_token = create_access_token(identity=email, additional_claims=sv_claim)
-    new_refresh_token = create_refresh_token(identity=email, additional_claims=sv_claim)
+    new_access_token = create_access_token(
+        identity=email, additional_claims=sv_claim
+    )
+    new_refresh_token = create_refresh_token(
+        identity=email, additional_claims=sv_claim
+    )
 
     create_notification(
         user_id=str(user["_id"]),
@@ -470,7 +576,7 @@ def change_password():
         template_key="password_changed",
         metadata={"role": refreshed_user.get("role")},
     )
-    
+
     response = jsonify({"message": "Password changed successfully"})
     set_access_cookies(response, new_access_token)
     set_refresh_cookies(response, new_refresh_token)
@@ -513,7 +619,10 @@ def upload_profile_picture():
     _, ext = os.path.splitext(original_name)
     ext = ext.lower()
     if ext not in ALLOWED_PROFILE_IMAGE_EXTENSIONS:
-        return jsonify({"error": "Invalid image format. Use JPG, PNG, or WEBP."}), 400
+        return (
+            jsonify({"error": "Invalid image format. Use JPG, PNG, or WEBP."}),
+            400,
+        )
 
     profile_dir = _safe_profile_upload_folder()
     unique_name = f"{str(user['_id'])}_{secrets.token_hex(8)}.jpg"
@@ -535,7 +644,10 @@ def upload_profile_picture():
             max_kb=max_kb,
         )
     except ValueError:
-        return jsonify({"error": "Invalid image format. Use JPG, PNG, or WEBP."}), 400
+        return (
+            jsonify({"error": "Invalid image format. Use JPG, PNG, or WEBP."}),
+            400,
+        )
     except Exception:
         return jsonify({"error": "Failed to process profile picture"}), 500
 
@@ -544,7 +656,12 @@ def upload_profile_picture():
     now = _utc_now()
     users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"profile_picture_file": unique_name, "profile_picture_updated_at": now}},
+        {
+            "$set": {
+                "profile_picture_file": unique_name,
+                "profile_picture_updated_at": now,
+            }
+        },
     )
 
     create_notification(
@@ -567,10 +684,12 @@ def upload_profile_picture():
                 pass
 
     refreshed_user = find_user_by_email(email)
-    return jsonify({
-        "message": "Profile picture updated successfully",
-        "user": _serialize_auth_user(refreshed_user),
-    })
+    return jsonify(
+        {
+            "message": "Profile picture updated successfully",
+            "user": _serialize_auth_user(refreshed_user),
+        }
+    )
 
 
 @auth_bp.route("/profile-picture", methods=["DELETE"])
@@ -592,11 +711,16 @@ def remove_profile_picture():
 
         profile_dir = _safe_profile_upload_folder()
         old_file = os.path.join(profile_dir, os.path.basename(previous_name))
-        
+
         users = get_collection("auth", "users")
         users.update_one(
             {"_id": user["_id"]},
-            {"$unset": {"profile_picture_file": "", "profile_picture_updated_at": ""}},
+            {
+                "$unset": {
+                    "profile_picture_file": "",
+                    "profile_picture_updated_at": "",
+                }
+            },
         )
 
         if os.path.isfile(old_file):
@@ -617,13 +741,19 @@ def remove_profile_picture():
         )
 
         refreshed_user = find_user_by_email(email)
-        return jsonify({
-            "message": "Profile picture removed successfully",
-            "user": _serialize_auth_user(refreshed_user),
-        })
+        return jsonify(
+            {
+                "message": "Profile picture removed successfully",
+                "user": _serialize_auth_user(refreshed_user),
+            }
+        )
     except Exception as e:
         import traceback
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+        return (
+            jsonify({"error": str(e), "traceback": traceback.format_exc()}),
+            500,
+        )
 
 
 @auth_bp.route("/forgot-password/request-otp", methods=["POST"])
@@ -646,10 +776,15 @@ def request_password_reset_otp():
     # First-time users must complete initial login password change using
     # the temporary password provided by admin; forgot-password is disabled.
     if bool(user.get("must_change_password", False)):
-        return jsonify({
-            "error": "First-time users must sign in with the temporary password and complete initial password change before using forgot password.",
-            "code": "INITIAL_PASSWORD_CHANGE_REQUIRED",
-        }), 403
+        return (
+            jsonify(
+                {
+                    "error": "First-time users must sign in with the temporary password and complete initial password change before using forgot password.",
+                    "code": "INITIAL_PASSWORD_CHANGE_REQUIRED",
+                }
+            ),
+            403,
+        )
 
     _clean_expired_password_otps(email)
     otps = get_collection("auth", "password_reset_otps")
@@ -662,10 +797,17 @@ def request_password_reset_otp():
         }
     )
     if existing_count >= 5:
-        return jsonify({"error": "Too many OTP requests. Try again in a few minutes."}), 429
+        return (
+            jsonify(
+                {"error": "Too many OTP requests. Try again in a few minutes."}
+            ),
+            429,
+        )
 
     otp = "".join(secrets.choice("0123456789") for _ in range(OTP_LENGTH))
-    ttl_minutes = int(current_app.config.get("PASSWORD_RESET_OTP_TTL_MINUTES", 10))
+    ttl_minutes = int(
+        current_app.config.get("PASSWORD_RESET_OTP_TTL_MINUTES", 10)
+    )
     expires_at = now + timedelta(minutes=ttl_minutes)
     otps.insert_one(
         {
@@ -674,7 +816,9 @@ def request_password_reset_otp():
             "created_at": now,
             "expires_at": expires_at,
             "attempts": 0,
-            "max_attempts": int(current_app.config.get("PASSWORD_RESET_OTP_MAX_ATTEMPTS", 5)),
+            "max_attempts": int(
+                current_app.config.get("PASSWORD_RESET_OTP_MAX_ATTEMPTS", 5)
+            ),
         }
     )
 
@@ -703,23 +847,38 @@ def reset_password_with_otp():
     if not otp:
         return jsonify({"error": "Recovery OTP is required"}), 400
     if not new_pw or not confirm_pw:
-        return jsonify({"error": "New password and confirmation are required"}), 400
+        return (
+            jsonify({"error": "New password and confirmation are required"}),
+            400,
+        )
     if new_pw != confirm_pw:
         return jsonify({"error": "New passwords do not match"}), 400
 
     is_strong, msg = validate_password_strength(new_pw)
     if not is_strong:
-        return jsonify({"error": f"Password does not meet security requirements: {msg}"}), 400
+        return (
+            jsonify(
+                {
+                    "error": f"Password does not meet security requirements: {msg}"
+                }
+            ),
+            400,
+        )
 
     user = find_user_by_email(email)
     if not user:
         return jsonify({"error": "Invalid OTP or email"}), 400
 
     if bool(user.get("must_change_password", False)):
-        return jsonify({
-            "error": "First-time users must sign in with the temporary password and complete initial password change before using forgot password.",
-            "code": "INITIAL_PASSWORD_CHANGE_REQUIRED",
-        }), 403
+        return (
+            jsonify(
+                {
+                    "error": "First-time users must sign in with the temporary password and complete initial password change before using forgot password.",
+                    "code": "INITIAL_PASSWORD_CHANGE_REQUIRED",
+                }
+            ),
+            403,
+        )
 
     _clean_expired_password_otps(email)
     otps = get_collection("auth", "password_reset_otps")
@@ -732,22 +891,53 @@ def reset_password_with_otp():
         sort=[("created_at", -1)],
     )
     if not otp_doc:
-        return jsonify({"error": "OTP expired or invalid. Please request a new OTP."}), 400
+        return (
+            jsonify(
+                {"error": "OTP expired or invalid. Please request a new OTP."}
+            ),
+            400,
+        )
 
     attempts = int(otp_doc.get("attempts", 0))
-    max_attempts = int(otp_doc.get("max_attempts", current_app.config.get("PASSWORD_RESET_OTP_MAX_ATTEMPTS", 5)))
-    otp_matches = hmac.compare_digest(str(otp_doc.get("otp_hash") or ""), _otp_hash(email, otp))
+    max_attempts = int(
+        otp_doc.get(
+            "max_attempts",
+            current_app.config.get("PASSWORD_RESET_OTP_MAX_ATTEMPTS", 5),
+        )
+    )
+    otp_matches = hmac.compare_digest(
+        str(otp_doc.get("otp_hash") or ""), _otp_hash(email, otp)
+    )
     if not otp_matches:
         attempts += 1
         if attempts >= max_attempts:
-            otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"used_at": _utc_now(), "attempts": attempts}})
-            return jsonify({"error": "OTP verification failed too many times. Request a new OTP."}), 400
+            otps.update_one(
+                {"_id": otp_doc["_id"]},
+                {"$set": {"used_at": _utc_now(), "attempts": attempts}},
+            )
+            return (
+                jsonify(
+                    {
+                        "error": "OTP verification failed too many times. Request a new OTP."
+                    }
+                ),
+                400,
+            )
 
-        otps.update_one({"_id": otp_doc["_id"]}, {"$set": {"attempts": attempts}})
+        otps.update_one(
+            {"_id": otp_doc["_id"]}, {"$set": {"attempts": attempts}}
+        )
         return jsonify({"error": "Invalid OTP"}), 400
 
     if verify_password(user["password_hash"], new_pw):
-        return jsonify({"error": "New password must be different from current password"}), 400
+        return (
+            jsonify(
+                {
+                    "error": "New password must be different from current password"
+                }
+            ),
+            400,
+        )
 
     users = get_collection("auth", "users")
     pw_hash = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
@@ -771,4 +961,8 @@ def reset_password_with_otp():
         user_agent=request.headers.get("User-Agent", ""),
     )
 
-    return jsonify({"message": "Password reset successful. You can now log in with the new password."})
+    return jsonify(
+        {
+            "message": "Password reset successful. You can now log in with the new password."
+        }
+    )

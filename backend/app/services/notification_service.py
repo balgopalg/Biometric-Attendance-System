@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from bson import ObjectId
-
 from app.extensions import get_collection
+from bson import ObjectId
 
 
 def _utc_now():
@@ -20,13 +19,19 @@ def _notifications_collection():
 def _serialize_notification(notification):
     created_at = notification.get("created_at")
     if isinstance(created_at, datetime):
-        created_at = created_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        created_at = (
+            created_at.astimezone(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
     else:
         created_at = ""
 
     read_at = notification.get("read_at")
     if isinstance(read_at, datetime):
-        read_at = read_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        read_at = (
+            read_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
     else:
         read_at = ""
 
@@ -73,7 +78,18 @@ def _welcome_payload(role: str):
     return templates.get(role_key, templates["student"])
 
 
-def create_notification(*, user_id, title, body, category="system", priority="normal", action_url="", template_key="", metadata=None, is_read=False):
+def create_notification(
+    *,
+    user_id,
+    title,
+    body,
+    category="system",
+    priority="normal",
+    action_url="",
+    template_key="",
+    metadata=None,
+    is_read=False,
+):
     doc = {
         "_id": ObjectId(),
         "user_id": str(user_id),
@@ -97,7 +113,7 @@ def ensure_welcome_notification(user):
 
     user_id = str(user.get("_id"))
     notifications = _notifications_collection()
-    
+
     title, body, action_url = _welcome_payload(user.get("role"))
     doc = {
         "user_id": user_id,
@@ -111,14 +127,14 @@ def ensure_welcome_notification(user):
         "created_at": datetime.now(timezone.utc),
         "metadata": {"role": user.get("role", "student")},
     }
-    
+
     # Use atomic upsert to prevent duplicate welcome notifications
     result = notifications.update_one(
         {"user_id": user_id, "template_key": "welcome"},
         {"$setOnInsert": doc},
         upsert=True,
     )
-    
+
     # Return the document if it was inserted
     if result.upserted_id:
         return doc
@@ -132,8 +148,14 @@ def list_notifications(user_id, limit=20):
     except (TypeError, ValueError):
         parsed_limit = 20
     safe_limit = max(1, min(parsed_limit, 100))
-    items = list(notifications.find({"user_id": str(user_id)}).sort("created_at", -1).limit(safe_limit))
-    unread_count = notifications.count_documents({"user_id": str(user_id), "is_read": False})
+    items = list(
+        notifications.find({"user_id": str(user_id)})
+        .sort("created_at", -1)
+        .limit(safe_limit)
+    )
+    unread_count = notifications.count_documents(
+        {"user_id": str(user_id), "is_read": False}
+    )
     return {
         "items": [_serialize_notification(item) for item in items],
         "unread_count": unread_count,

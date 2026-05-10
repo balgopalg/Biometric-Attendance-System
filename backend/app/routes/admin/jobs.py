@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
+
 from . import admin_bp
 from ._helpers import *
+
 
 @admin_bp.route("/jobs/<job_id>", methods=["GET"])
 @role_required("department_admin")
@@ -9,6 +11,7 @@ def get_job_status(user, job_id):
     if not job:
         return jsonify({"error": "Job not found"}), 404
     return jsonify(sanitise_mongo_doc(job))
+
 
 @admin_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
 @role_required("department_admin")
@@ -19,7 +22,10 @@ def cancel_background_job(user, job_id):
 
     status = _as_text(job.get("status")).lower()
     if status in {"completed", "dead_letter", "cancelled"}:
-        return jsonify({"error": f"Cannot cancel job in '{status}' state"}), 400
+        return (
+            jsonify({"error": f"Cannot cancel job in '{status}' state"}),
+            400,
+        )
 
     now = _utcnow()
     if status == "queued":
@@ -47,12 +53,19 @@ def cancel_background_job(user, job_id):
     )
 
     updated = _get_background_job(job_id)
-    return jsonify(
-        {
-            "message": "Cancellation requested",
-            "job": sanitise_mongo_doc(updated) if updated else {"job_id": job_id},
-        }
-    ), 202
+    return (
+        jsonify(
+            {
+                "message": "Cancellation requested",
+                "job": (
+                    sanitise_mongo_doc(updated)
+                    if updated
+                    else {"job_id": job_id}
+                ),
+            }
+        ),
+        202,
+    )
 
 
 @admin_bp.route("/jobs/<job_id>/replay", methods=["POST"])
@@ -68,7 +81,10 @@ def replay_dead_letter_job(user, job_id):
         return jsonify({"error": "Only dead-letter jobs can be replayed"}), 400
 
     if not _requeue_dead_letter_job_by_id(job_id):
-        return jsonify({"error": "Job replay failed due to concurrent update"}), 409
+        return (
+            jsonify({"error": "Job replay failed due to concurrent update"}),
+            409,
+        )
 
     log_action(
         "REPLAY_DEAD_LETTER_JOB",
@@ -76,14 +92,16 @@ def replay_dead_letter_job(user, job_id):
         details=f"job_id={job_id}, job_type={_as_text(job.get('job_type'))}",
     )
 
-    return jsonify(
-        {
-            "message": "Job replay queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-        }
-    ), 202
-
+    return (
+        jsonify(
+            {
+                "message": "Job replay queued",
+                "job_id": job_id,
+                "status_url": f"/api/admin/jobs/{job_id}",
+            }
+        ),
+        202,
+    )
 
 
 def _parse_iso_date(value):
@@ -135,7 +153,9 @@ def _requeue_dead_letter_job_by_id(job_id):
     try:
         enqueued = _enqueue_background_job(job_id)
     except Exception:
-        current_app.logger.exception("Replay enqueue failed for job %s", job_id)
+        current_app.logger.exception(
+            "Replay enqueue failed for job %s", job_id
+        )
         enqueued = False
 
     if not enqueued:
@@ -166,7 +186,12 @@ def _enrich_dead_letter_rows(rows):
     user_map = {
         str(u["_id"]): u.get("name")
         for u in users_col.find(
-            {"_id": {"$in": [_to_oid(uid) for uid in user_ids if _to_oid(uid)]}}, {"name": 1}
+            {
+                "_id": {
+                    "$in": [_to_oid(uid) for uid in user_ids if _to_oid(uid)]
+                }
+            },
+            {"name": 1},
         )
     }
 
@@ -222,10 +247,14 @@ def _fetch_dead_letter_rows(filters=None, include_pagination=True):
         raise ValueError("Invalid to date format")
 
     if from_local:
-        ts_filter["$gte"] = _local_midnight_to_utc(from_local, tz_offset_minutes)
+        ts_filter["$gte"] = _local_midnight_to_utc(
+            from_local, tz_offset_minutes
+        )
     if to_local:
         to_local_exclusive = to_local + timedelta(days=1)
-        ts_filter["$lt"] = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
+        ts_filter["$lt"] = _local_midnight_to_utc(
+            to_local_exclusive, tz_offset_minutes
+        )
     if ts_filter:
         query["updated_at"] = ts_filter
 
@@ -332,14 +361,17 @@ def replay_dead_letter_jobs_bulk(user):
         details=f"requested={len(job_ids)}, replayed={replayed}, skipped={skipped}",
     )
 
-    return jsonify(
-        {
-            "message": "Bulk dead-letter replay processed",
-            "requested": len(job_ids),
-            "replayed": replayed,
-            "skipped": skipped,
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "message": "Bulk dead-letter replay processed",
+                "requested": len(job_ids),
+                "replayed": replayed,
+                "skipped": skipped,
+            }
+        ),
+        200,
+    )
 
 
 @admin_bp.route("/jobs/dead-letter/replay-filtered", methods=["POST"])
@@ -358,7 +390,9 @@ def replay_dead_letter_jobs_filtered(user):
     limit = max(1, min(_to_int(d.get("limit", 500), 500), 1000))
 
     try:
-        rows, total_matched = _fetch_dead_letter_rows(filters, include_pagination=False)
+        rows, total_matched = _fetch_dead_letter_rows(
+            filters, include_pagination=False
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -384,16 +418,19 @@ def replay_dead_letter_jobs_filtered(user):
         ),
     )
 
-    return jsonify(
-        {
-            "message": "Filtered dead-letter replay processed",
-            "matched": total_matched,
-            "limit": limit,
-            "requested": len(requested_rows),
-            "replayed": replayed,
-            "skipped": skipped,
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "message": "Filtered dead-letter replay processed",
+                "matched": total_matched,
+                "limit": limit,
+                "requested": len(requested_rows),
+                "replayed": replayed,
+                "skipped": skipped,
+            }
+        ),
+        200,
+    )
 
 
 @admin_bp.route("/jobs/metrics", methods=["GET"])
@@ -407,9 +444,11 @@ def get_job_metrics(user):
         "dead_letter": 0,
     }
 
-    for row in jobs.aggregate([
-        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
-    ]):
+    for row in jobs.aggregate(
+        [
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+        ]
+    ):
         status = _as_text(row.get("_id")).lower()
         if status in summary:
             summary[status] = int(row.get("count", 0) or 0)
@@ -423,21 +462,33 @@ def get_job_metrics(user):
             queue_name, delayed_queue_name = _get_queue_names()
             queue_depth = int(client.llen(queue_name) or 0)
             delayed_queue_depth = int(client.zcard(delayed_queue_name) or 0)
-            due_delayed_count = int(client.zcount(delayed_queue_name, 0, int(time.time())) or 0)
+            due_delayed_count = int(
+                client.zcount(delayed_queue_name, 0, int(time.time())) or 0
+            )
         except Exception:
             current_app.logger.exception("Unable to read queue metrics")
 
-    running_timeout_seconds = max(30, _to_int(current_app.config.get("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900), 900))
+    running_timeout_seconds = max(
+        30,
+        _to_int(
+            current_app.config.get("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900),
+            900,
+        ),
+    )
     stale_cutoff = _utcnow() - timedelta(seconds=running_timeout_seconds)
     stale_running_count = int(
-        jobs.count_documents({"status": "running", "updated_at": {"$lte": stale_cutoff}})
+        jobs.count_documents(
+            {"status": "running", "updated_at": {"$lte": stale_cutoff}}
+        )
     )
     queued_retry_count = int(
-        jobs.count_documents({
-            "status": "queued",
-            "retry_count": {"$gt": 0},
-            "next_attempt_at": {"$ne": None},
-        })
+        jobs.count_documents(
+            {
+                "status": "queued",
+                "retry_count": {"$gt": 0},
+                "next_attempt_at": {"$ne": None},
+            }
+        )
     )
     next_retry_candidates = list(
         jobs.find(
@@ -456,10 +507,19 @@ def get_job_metrics(user):
             },
         )
     )
-    next_retry_candidates.sort(key=lambda row: row.get("next_attempt_at") or datetime.max)
-    next_retry_job = next_retry_candidates[0] if next_retry_candidates else None
+    next_retry_candidates.sort(
+        key=lambda row: row.get("next_attempt_at") or datetime.max
+    )
+    next_retry_job = (
+        next_retry_candidates[0] if next_retry_candidates else None
+    )
     dead_letter_last_24h = int(
-        jobs.count_documents({"status": "dead_letter", "updated_at": {"$gte": _utcnow() - timedelta(hours=24)}})
+        jobs.count_documents(
+            {
+                "status": "dead_letter",
+                "updated_at": {"$gte": _utcnow() - timedelta(hours=24)},
+            }
+        )
     )
     recent_dead_letter_jobs = sanitise_many(
         list(
@@ -489,12 +549,18 @@ def get_job_metrics(user):
                 **summary,
                 "stale_running": stale_running_count,
                 "queued_retries": queued_retry_count,
-                "next_retry_job": sanitise_mongo_doc(next_retry_job) if next_retry_job else None,
+                "next_retry_job": (
+                    sanitise_mongo_doc(next_retry_job)
+                    if next_retry_job
+                    else None
+                ),
                 "dead_letter_last_24h": dead_letter_last_24h,
                 "recent_dead_letter_jobs": recent_dead_letter_jobs,
             },
             "queue": {
-                "enabled": bool(current_app.config.get("TASK_QUEUE_ENABLED", False)),
+                "enabled": bool(
+                    current_app.config.get("TASK_QUEUE_ENABLED", False)
+                ),
                 "depth": queue_depth,
                 "delayed_depth": delayed_queue_depth,
                 "due_delayed": due_delayed_count,
@@ -502,7 +568,6 @@ def get_job_metrics(user):
             },
         }
     )
-
 
 
 @admin_bp.route("/jobs/<job_id>", methods=["DELETE"])
@@ -539,7 +604,9 @@ def delete_dead_letter_jobs_bulk(user):
         return jsonify({"error": "job_ids is required"}), 400
 
     jobs = get_collection("attendance", "background_jobs")
-    res = jobs.delete_many({"job_id": {"$in": job_ids}, "status": "dead_letter"})
+    res = jobs.delete_many(
+        {"job_id": {"$in": job_ids}, "status": "dead_letter"}
+    )
 
     log_action(
         "DELETE_DEAD_LETTER_JOB_BULK",
@@ -547,13 +614,16 @@ def delete_dead_letter_jobs_bulk(user):
         details=f"requested={len(job_ids)}, deleted={res.deleted_count}",
     )
 
-    return jsonify(
-        {
-            "message": "Bulk dead-letter deletion processed",
-            "requested": len(job_ids),
-            "deleted": res.deleted_count,
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "message": "Bulk dead-letter deletion processed",
+                "requested": len(job_ids),
+                "deleted": res.deleted_count,
+            }
+        ),
+        200,
+    )
 
 
 @admin_bp.route("/jobs/dead-letter/delete-filtered", methods=["POST"])
@@ -571,7 +641,9 @@ def delete_dead_letter_jobs_filtered(user):
     }
 
     try:
-        rows, total_matched = _fetch_dead_letter_rows(filters, include_pagination=False)
+        rows, total_matched = _fetch_dead_letter_rows(
+            filters, include_pagination=False
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -580,7 +652,9 @@ def delete_dead_letter_jobs_filtered(user):
 
     job_ids = [row["job_id"] for row in rows if "job_id" in row]
     jobs = get_collection("attendance", "background_jobs")
-    res = jobs.delete_many({"job_id": {"$in": job_ids}, "status": "dead_letter"})
+    res = jobs.delete_many(
+        {"job_id": {"$in": job_ids}, "status": "dead_letter"}
+    )
 
     log_action(
         "DELETE_DEAD_LETTER_JOB_FILTERED",
@@ -588,10 +662,13 @@ def delete_dead_letter_jobs_filtered(user):
         details=f"matched={total_matched}, deleted={res.deleted_count}",
     )
 
-    return jsonify(
-        {
-            "message": "Filtered dead-letter deletion processed",
-            "matched": total_matched,
-            "deleted": res.deleted_count,
-        }
-    ), 200
+    return (
+        jsonify(
+            {
+                "message": "Filtered dead-letter deletion processed",
+                "matched": total_matched,
+                "deleted": res.deleted_count,
+            }
+        ),
+        200,
+    )

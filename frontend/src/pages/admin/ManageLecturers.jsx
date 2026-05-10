@@ -20,9 +20,11 @@ import {
 import useLecturerData from './lecturers/useLecturerData';
 import LecturerTable from './lecturers/LecturerTable';
 import AddLecturerModal from './lecturers/AddLecturerModal';
+import EditLecturerModal from './lecturers/EditLecturerModal';
 import AssignPapersModal from './lecturers/AssignPapersModal';
 import CredentialsModal from './lecturers/CredentialsModal';
 import ExcelImportModal from './lecturers/ExcelImportModal';
+import ViewAssignedPapersModal from './lecturers/ViewAssignedPapersModal';
 import LecturerFaceEnrollmentModal from '../../components/admin/LecturerFaceEnrollmentModal';
 import LecturerFaceSearchModal from '../../components/admin/LecturerFaceSearchModal';
 import { useTraining } from '../../context/TrainingContext';
@@ -36,6 +38,9 @@ export default function ManageLecturers() {
   const [confirmAction, setConfirmAction] = useState(null);
   const [showFaceSearch, setShowFaceSearch] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [showViewPapers, setShowViewPapers] = useState(false);
+  const [viewingLecturer, setViewingLecturer] = useState(null);
+  const [viewingDepartmentGroups, setViewingDepartmentGroups] = useState([]);
 
   const [rebuildingAllFaces, setRebuildingAllFaces] = useState(false);
   const { startTraining } = useTraining();
@@ -65,6 +70,40 @@ export default function ManageLecturers() {
       ctx.fetchLecturers(ctx.page);
     } catch (err) {
       toast.error(err.response?.data?.error || 'Failed');
+    }
+  };
+
+  const handleEditClick = (lecturer) => {
+    ctx.setEditForm({
+      _id: lecturer._id,
+      name: lecturer.name || '',
+      email: lecturer.email || '',
+      department: lecturer.department || '',
+    });
+    ctx.setShowEdit(true);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!ctx.editForm.name?.trim() || !ctx.editForm.email?.trim()) {
+      toast.error('Name and Email are required');
+      return;
+    }
+    if (!ctx.editForm.department?.trim()) {
+      toast.error('Primary Department is required');
+      return;
+    }
+    try {
+      const payload = {
+        name: ctx.editForm.name,
+        email: ctx.editForm.email,
+        department: ctx.editForm.department,
+      };
+      await api.put(`/admin/lecturers/${ctx.editForm._id}`, payload);
+      toast.success('Lecturer updated');
+      ctx.setShowEdit(false);
+      ctx.fetchLecturers(ctx.page);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to update lecturer');
     }
   };
 
@@ -186,6 +225,12 @@ export default function ManageLecturers() {
         }
       },
     });
+  };
+
+  const openViewPapersModal = (lecturer, departmentGroups) => {
+    setViewingLecturer(lecturer);
+    setViewingDepartmentGroups(departmentGroups);
+    setShowViewPapers(true);
   };
 
   const openAssignModal = async (lecturer) => {
@@ -385,9 +430,11 @@ export default function ManageLecturers() {
             activePopoverCourses={ctx.activePopoverCourses}
             setActivePopoverCourses={ctx.setActivePopoverCourses}
             getDefaultCourseName={ctx.getDefaultCourseName}
+            onViewPapers={openViewPapersModal}
             onAssign={openAssignModal}
             onResetPin={handleResetPin}
             onResetPassword={handleResetPassword}
+            onEdit={handleEditClick}
             onDelete={handleDeleteClick}
             onEnrollFace={handleEnrollFace}
             onTrainFace={handleTrainFace}
@@ -399,6 +446,8 @@ export default function ManageLecturers() {
 
       {/* ── Modals ───────────────────────────────────────────────── */}
       <AddLecturerModal isOpen={ctx.showAdd} onClose={() => ctx.setShowAdd(false)} form={ctx.form} setForm={ctx.setForm} onSubmit={handleAdd} departments={ctx.departments} isSuperAdmin={ctx.isSuperAdmin} isDepartmentAdmin={ctx.isDepartmentAdmin} departmentName={ctx.departmentName} />
+
+      <EditLecturerModal isOpen={ctx.showEdit} onClose={() => ctx.setShowEdit(false)} form={ctx.editForm} setForm={ctx.setEditForm} onSubmit={handleEditSubmit} departments={ctx.departments} isSuperAdmin={ctx.isSuperAdmin} isDepartmentAdmin={ctx.isDepartmentAdmin} departmentName={ctx.departmentName} />
 
       <AssignPapersModal isOpen={ctx.showAssign} onClose={() => ctx.setShowAssign(false)} selectedLecturer={ctx.selectedLecturer} departments={ctx.departments} assignmentFilters={ctx.assignmentFilters} setAssignmentFilters={ctx.setAssignmentFilters} assignmentFilterCourses={ctx.assignmentFilterCourses} assignmentFilterSemesters={ctx.assignmentFilterSemesters} assignmentFilteredPapers={ctx.assignmentFilteredPapers} assignedPaperIds={ctx.assignedPaperIds} setAssignedPaperIds={ctx.setAssignedPaperIds} onSave={handleSaveAssignments} />
 
@@ -416,6 +465,14 @@ export default function ManageLecturers() {
       <ExcelImportModal isOpen={ctx.showExcelImport} onClose={() => ctx.setShowExcelImport(false)} excelFile={ctx.excelFile} setExcelFile={ctx.setExcelFile} excelFileInputRef={ctx.excelFileInputRef} excelImporting={ctx.excelImporting} excelResults={ctx.excelResults} setExcelResults={ctx.setExcelResults} onImport={handleLecturerExcelImport} />
 
       {showFaceEnroll && enrollingLecturer && <LecturerFaceEnrollmentModal lecturer={enrollingLecturer} onClose={() => setShowFaceEnroll(false)} onSuccess={handleFaceEnrollSuccess} />}
+      
+      <ViewAssignedPapersModal
+        isOpen={showViewPapers}
+        onClose={() => setShowViewPapers(false)}
+        lecturer={viewingLecturer}
+        departmentGroups={viewingDepartmentGroups}
+        getDefaultCourseName={ctx.getDefaultCourseName}
+      />
       
       <Modal isOpen={!!deleteLecturer} onClose={() => setDeleteLecturer(null)} title="Delete Options" width={400}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -2,12 +2,11 @@
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Optional, List
-
-from bson import ObjectId
-from bson.errors import InvalidId
+from typing import Any, List, Optional
 
 from app.extensions import get_collection
+from bson import ObjectId
+from bson.errors import InvalidId
 
 
 def create_paper(
@@ -55,7 +54,9 @@ def create_paper(
     return doc
 
 
-def get_all_papers(fields: Optional[List[str]] = None, department_id: Any = None) -> List[dict]:
+def get_all_papers(
+    fields: Optional[List[str]] = None, department_id: Any = None
+) -> List[dict]:
     """Return all papers, optionally filtered by department_id."""
     papers = get_collection("academic", "papers")
     projection = None
@@ -65,10 +66,16 @@ def get_all_papers(fields: Optional[List[str]] = None, department_id: Any = None
     query: dict = {}
     if department_id is not None:
         try:
-            query["department_id"] = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+            query["department_id"] = (
+                ObjectId(str(department_id))
+                if not isinstance(department_id, ObjectId)
+                else department_id
+            )
         except (InvalidId, Exception):
             pass
-    cursor = papers.find(query, projection) if projection else papers.find(query)
+    cursor = (
+        papers.find(query, projection) if projection else papers.find(query)
+    )
     return list(cursor)
 
 
@@ -84,7 +91,9 @@ def get_paper_by_id(paper_id: str) -> Optional[dict]:
 def get_paper_by_code(code: str) -> Optional[dict]:
     papers = get_collection("academic", "papers")
     escaped = re.escape(code.strip())
-    return papers.find_one({"code": {"$regex": f"^{escaped}$", "$options": "i"}})
+    return papers.find_one(
+        {"code": {"$regex": f"^{escaped}$", "$options": "i"}}
+    )
 
 
 def get_papers_by_course(course_id: str) -> List[dict]:
@@ -96,7 +105,11 @@ def get_papers_by_lecturer(lecturer_id: str) -> List[dict]:
     papers = get_collection("academic", "papers")
     try:
         oid = ObjectId(lecturer_id)
-        return list(papers.find({"$or": [{"lecturer_id": oid}, {"lecturer_id": lecturer_id}]}))
+        return list(
+            papers.find(
+                {"$or": [{"lecturer_id": oid}, {"lecturer_id": lecturer_id}]}
+            )
+        )
     except:
         return list(papers.find({"lecturer_id": lecturer_id}))
 
@@ -146,4 +159,6 @@ def bulk_assign_course(paper_ids: List[str], course_id: str) -> None:
 def increment_total_classes(paper_id: str, count: int = 1) -> None:
     """Increment total_classes after a session is committed."""
     papers = get_collection("academic", "papers")
-    papers.update_one({"_id": ObjectId(paper_id)}, {"$inc": {"total_classes": count}})
+    papers.update_one(
+        {"_id": ObjectId(paper_id)}, {"$inc": {"total_classes": count}}
+    )
