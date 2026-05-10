@@ -1,19 +1,19 @@
 """Student dashboard routes — attendance summary, predictions, exam eligibility."""
 
-from datetime import datetime, timezone, timedelta
-
-from flask import Blueprint, jsonify, request, current_app
-from bson import ObjectId
+from datetime import datetime, timedelta, timezone
 
 from app.extensions import get_collection
-from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_mongo_doc, sanitise_many, _to_int, _as_text, _to_bool, _id_variants
-from app.utils.validation import sanitize_string
-from app.repositories import find_many_by_ids
+from app.models.attendance import get_approved_leave_dates, session_date_str
+from app.models.course import get_course_by_id
 from app.models.enrollment import get_profile_by_user
 from app.models.paper import get_paper_by_id
-from app.models.course import get_course_by_id
-from app.models.attendance import get_approved_leave_dates, session_date_str
+from app.repositories import find_many_by_ids
+from app.utils.auth_decorators import role_required
+from app.utils.helpers import (_as_text, _id_variants, _to_bool, _to_int,
+                               sanitise_many, sanitise_mongo_doc)
+from app.utils.validation import sanitize_string
+from bson import ObjectId
+from flask import Blueprint, current_app, jsonify, request
 
 student_bp = Blueprint("student", __name__)
 
@@ -38,10 +38,11 @@ def _format_datetime_india(value, with_time=True):
         dt = dt.replace(tzinfo=timezone.utc)
 
     local_dt = dt.astimezone(_INDIA_TZ)
-    return local_dt.strftime("%d/%m/%Y, %H:%M:%S") if with_time else local_dt.strftime("%d/%m/%Y")
-
-
-
+    return (
+        local_dt.strftime("%d/%m/%Y, %H:%M:%S")
+        if with_time
+        else local_dt.strftime("%d/%m/%Y")
+    )
 
 
 def _paper_id_variants(paper_id_text):
@@ -61,12 +62,19 @@ def _compute_paper_attendance(uid, paper_id_text, sessions_col, leave_dates):
     committed_sessions = list(
         sessions_col.find(
             {"paper_id": {"$in": paper_id_variants}},
-            {"session_id": 1, "user_ids": 1, "committed_at": 1,
-             "last_updated_at": 1, "finalized": 1},
+            {
+                "session_id": 1,
+                "user_ids": 1,
+                "committed_at": 1,
+                "last_updated_at": 1,
+                "finalized": 1,
+            },
         )
     )
     committed_sessions.sort(
-        key=lambda d: d.get("committed_at") or d.get("last_updated_at") or datetime.min,
+        key=lambda d: d.get("committed_at")
+        or d.get("last_updated_at")
+        or datetime.min,
         reverse=True,
     )
 
@@ -88,6 +96,7 @@ def _compute_paper_attendance(uid, paper_id_text, sessions_col, leave_dates):
 
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
+
 
 @student_bp.route("/profile", methods=["GET"])
 @role_required("student")
@@ -136,15 +145,23 @@ def my_profile(user):
                 "department": user.get("department", ""),
             },
             "profile": {
-                "reg_number": profile.get("reg_number") or profile.get("roll_number", ""),
-                "academic_year": profile.get("academic_year") or profile.get("year", ""),
+                "reg_number": profile.get("reg_number")
+                or profile.get("roll_number", ""),
+                "academic_year": profile.get("academic_year")
+                or profile.get("year", ""),
                 "current_semester": current_semester,
                 "course_id": profile.get("course_id", ""),
                 "has_face": bool(profile.get("face_embeddings")),
             },
             "course": sanitise_mongo_doc(course) if course else None,
-            "course_status": _as_text((course or {}).get("status") or "active").lower() or "active",
-            "is_course_inactive": _as_text((course or {}).get("status") or "active").lower() != "active",
+            "course_status": _as_text(
+                (course or {}).get("status") or "active"
+            ).lower()
+            or "active",
+            "is_course_inactive": _as_text(
+                (course or {}).get("status") or "active"
+            ).lower()
+            != "active",
             "subjects": subjects,
             "papers": subjects,
         }
@@ -163,12 +180,14 @@ def attendance_summary(user):
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404
 
-    uid          = str(user["_id"])
+    uid = str(user["_id"])
     sessions_col = get_collection("attendance", "attendance_sessions")
-    enrolled     = profile.get("enrolled_papers", [])
+    enrolled = profile.get("enrolled_papers", [])
 
     # Feature flag: Should approved leaves be excluded from attendance denominator?
-    leave_adjusted = current_app.config.get("LEAVE_ADJUSTED_ATTENDANCE_ENABLED", False)
+    leave_adjusted = current_app.config.get(
+        "LEAVE_ADJUSTED_ATTENDANCE_ENABLED", False
+    )
     if leave_adjusted:
         leave_map = get_approved_leave_dates(uid, enrolled)
     else:
@@ -185,15 +204,22 @@ def attendance_summary(user):
             continue
 
         paper_leave_dates = leave_map.get(paper_id_text, set())
-        attended, effective_total, leave_sessions, committed_sessions = _compute_paper_attendance(
-            uid, paper_id_text, sessions_col, paper_leave_dates if leave_adjusted else None
+        attended, effective_total, leave_sessions, committed_sessions = (
+            _compute_paper_attendance(
+                uid,
+                paper_id_text,
+                sessions_col,
+                paper_leave_dates if leave_adjusted else None,
+            )
         )
 
         # Build per-session rows, tagging leave-covered sessions.
         class_rows = []
         for session_doc in committed_sessions:
             sess_date = session_date_str(session_doc)
-            is_leave  = leave_adjusted and bool(sess_date and sess_date in paper_leave_dates)
+            is_leave = leave_adjusted and bool(
+                sess_date and sess_date in paper_leave_dates
+            )
             session_user_ids = session_doc.get("user_ids") or []
             present = str(uid) in [str(sid) for sid in session_user_ids]
 
@@ -204,34 +230,40 @@ def attendance_summary(user):
             else:
                 status = "Absent"
 
-            raw_date       = session_doc.get("committed_at") or session_doc.get("last_updated_at")
-            date_label     = _format_datetime_india(raw_date, with_time=False)
+            raw_date = session_doc.get("committed_at") or session_doc.get(
+                "last_updated_at"
+            )
+            date_label = _format_datetime_india(raw_date, with_time=False)
             date_time_label = _format_datetime_india(raw_date, with_time=True)
 
-            class_rows.append({
-                "session_id":      session_doc.get("session_id"),
-                "date":            date_label,
-                "date_time":       date_time_label,
-                "timestamp":       raw_date,
-                "status":          status,
-                "present":         present,
-                "is_leave":        is_leave,
-                "students_marked": len(session_user_ids),
-            })
+            class_rows.append(
+                {
+                    "session_id": session_doc.get("session_id"),
+                    "date": date_label,
+                    "date_time": date_time_label,
+                    "timestamp": raw_date,
+                    "status": status,
+                    "present": present,
+                    "is_leave": is_leave,
+                    "students_marked": len(session_user_ids),
+                }
+            )
 
         total = effective_total or paper.get("total_classes", 0)
-        pct   = round((attended / total) * 100, 2) if total > 0 else 0
+        pct = round((attended / total) * 100, 2) if total > 0 else 0
 
-        summary.append({
-            "paper_id":              paper_id,
-            "paper_name":            paper.get("name", ""),
-            "paper_code":            paper.get("code", ""),
-            "attended":              attended,
-            "total_classes":         total,
-            "approved_leave_sessions": leave_sessions,
-            "percentage":            pct,
-            "sessions":              class_rows,
-        })
+        summary.append(
+            {
+                "paper_id": paper_id,
+                "paper_name": paper.get("name", ""),
+                "paper_code": paper.get("code", ""),
+                "attended": attended,
+                "total_classes": total,
+                "approved_leave_sessions": leave_sessions,
+                "percentage": pct,
+                "sessions": class_rows,
+            }
+        )
 
     return jsonify(summary)
 
@@ -249,9 +281,9 @@ def predictions(user):
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404
 
-    uid             = str(user["_id"])
+    uid = str(user["_id"])
     enrolled_papers = profile.get("enrolled_papers", [])
-    sessions_col    = get_collection("attendance", "attendance_sessions")
+    sessions_col = get_collection("attendance", "attendance_sessions")
 
     # One DB call for all approved leaves.
     leave_map = get_approved_leave_dates(uid, enrolled_papers)
@@ -260,7 +292,7 @@ def predictions(user):
     paper_map = find_many_by_ids("academic", "papers", enrolled_papers)
 
     total_attended = 0
-    total_classes  = 0
+    total_classes = 0
 
     for paper_id in enrolled_papers:
         paper_id_text = str(paper_id)
@@ -269,43 +301,69 @@ def predictions(user):
             continue
 
         paper_leave_dates = leave_map.get(paper_id_text, set())
-        attended, effective_total, _, committed_sessions = _compute_paper_attendance(
-            uid, paper_id_text, sessions_col, paper_leave_dates
+        attended, effective_total, _, committed_sessions = (
+            _compute_paper_attendance(
+                uid, paper_id_text, sessions_col, paper_leave_dates
+            )
         )
 
         total_attended += attended
         # Use effective session count when available; fall back to paper metadata.
-        total_classes  += effective_total if committed_sessions else _to_int(paper.get("total_classes"), 0)
+        total_classes += (
+            effective_total
+            if committed_sessions
+            else _to_int(paper.get("total_classes"), 0)
+        )
 
-    overall_pct = round((total_attended / total_classes) * 100, 2) if total_classes > 0 else 0.0
+    overall_pct = (
+        round((total_attended / total_classes) * 100, 2)
+        if total_classes > 0
+        else 0.0
+    )
 
     # (A + n) / (T + n) >= threshold_dec  =>  n >= (threshold_dec*T - A) / (1 - threshold_dec)
-    divider = (1.0 - threshold_dec)
-    needed_float  = ((threshold_dec * total_classes) - total_attended) / divider if divider > 0 and total_classes > 0 else 0
-    classes_needed = max(0, int(needed_float) if isinstance(needed_float, float) and needed_float.is_integer()
-                         else int(needed_float) + 1)
+    divider = 1.0 - threshold_dec
+    needed_float = (
+        ((threshold_dec * total_classes) - total_attended) / divider
+        if divider > 0 and total_classes > 0
+        else 0
+    )
+    classes_needed = max(
+        0,
+        (
+            int(needed_float)
+            if isinstance(needed_float, float) and needed_float.is_integer()
+            else int(needed_float) + 1
+        ),
+    )
 
     # A / (T + b) >= threshold_dec  =>  b <= A/threshold_dec - T
-    safe_bunks = max(0, int((total_attended / threshold_dec) - total_classes)) if threshold_dec > 0 and total_classes > 0 else 0
+    safe_bunks = (
+        max(0, int((total_attended / threshold_dec) - total_classes))
+        if threshold_dec > 0 and total_classes > 0
+        else 0
+    )
 
     result = []
     for paper_id in enrolled_papers:
         paper = paper_map.get(str(paper_id))
         if not paper:
             continue
-        result.append({
-            "paper_id":                   paper_id,
-            "paper_name":                 paper.get("name", ""),
-            "paper_code":                 paper.get("code", ""),
-            "current_percentage":         overall_pct,
-            "overall_attendance_percentage": overall_pct,
-            "overall_attended_classes":   total_attended,
-            "overall_total_classes":      total_classes,
-            "classes_needed_for_threshold": classes_needed,
-            "classes_needed_for_75":      classes_needed,  # Legacy alias
-            "threshold":                  threshold,
-            "safe_bunks_remaining":       safe_bunks,
-        })
+        result.append(
+            {
+                "paper_id": paper_id,
+                "paper_name": paper.get("name", ""),
+                "paper_code": paper.get("code", ""),
+                "current_percentage": overall_pct,
+                "overall_attendance_percentage": overall_pct,
+                "overall_attended_classes": total_attended,
+                "overall_total_classes": total_classes,
+                "classes_needed_for_threshold": classes_needed,
+                "classes_needed_for_75": classes_needed,  # Legacy alias
+                "threshold": threshold,
+                "safe_bunks_remaining": safe_bunks,
+            }
+        )
 
     return jsonify(result)
 
@@ -324,13 +382,13 @@ def exam_eligibility(user):
     if not profile:
         return jsonify({"error": "Student profile not found"}), 404
 
-    uid             = str(user["_id"])
+    uid = str(user["_id"])
     enrolled_papers = profile.get("enrolled_papers", [])
-    sessions_col    = get_collection("attendance", "attendance_sessions")
+    sessions_col = get_collection("attendance", "attendance_sessions")
 
     # Admin overrides take final precedence over all calculations.
     overrides_col = get_collection("attendance", "exam_eligibility_overrides")
-    uid_variants  = _id_variants(uid)
+    uid_variants = _id_variants(uid)
     paper_variants = []
     for pid in enrolled_papers:
         paper_variants.extend(_id_variants(str(pid)))
@@ -338,10 +396,15 @@ def exam_eligibility(user):
     override_map = {}
     if uid_variants and paper_variants:
         for override in overrides_col.find(
-            {"user_id": {"$in": uid_variants}, "paper_id": {"$in": paper_variants}},
+            {
+                "user_id": {"$in": uid_variants},
+                "paper_id": {"$in": paper_variants},
+            },
             {"_id": 0, "paper_id": 1, "override_status": 1},
         ):
-            override_map[_as_text(override.get("paper_id"))] = _to_bool(override.get("override_status"))
+            override_map[_as_text(override.get("paper_id"))] = _to_bool(
+                override.get("override_status")
+            )
 
     # Pre-fetch approved leave dates in one DB call.
     leave_map = get_approved_leave_dates(uid, enrolled_papers)
@@ -350,7 +413,7 @@ def exam_eligibility(user):
     paper_map = find_many_by_ids("academic", "papers", enrolled_papers)
 
     total_attended = 0
-    total_classes  = 0
+    total_classes = 0
     total_leave_sessions = 0
 
     for paper_id in enrolled_papers:
@@ -360,16 +423,26 @@ def exam_eligibility(user):
             continue
 
         paper_leave_dates = leave_map.get(paper_id_text, set())
-        attended, effective_total, leave_sessions, committed_sessions = _compute_paper_attendance(
-            uid, paper_id_text, sessions_col, paper_leave_dates
+        attended, effective_total, leave_sessions, committed_sessions = (
+            _compute_paper_attendance(
+                uid, paper_id_text, sessions_col, paper_leave_dates
+            )
         )
 
-        total_attended       += attended
+        total_attended += attended
         total_leave_sessions += leave_sessions
-        total_classes        += effective_total if committed_sessions else _to_int(paper.get("total_classes"), 0)
+        total_classes += (
+            effective_total
+            if committed_sessions
+            else _to_int(paper.get("total_classes"), 0)
+        )
 
-    overall_pct    = round((total_attended / total_classes) * 100, 2) if total_classes > 0 else 0.0
-    has_lectures   = total_classes > 0
+    overall_pct = (
+        round((total_attended / total_classes) * 100, 2)
+        if total_classes > 0
+        else 0.0
+    )
+    has_lectures = total_classes > 0
     overall_eligible = (overall_pct >= threshold) if has_lectures else None
 
     result = []
@@ -378,31 +451,42 @@ def exam_eligibility(user):
         if not paper:
             continue
 
-        paper_key   = _as_text(paper_id)
+        paper_key = _as_text(paper_id)
         has_override = paper_key in override_map
-        final_eligible = override_map.get(paper_key) if has_override else overall_eligible
+        final_eligible = (
+            override_map.get(paper_key) if has_override else overall_eligible
+        )
 
         if has_override:
-            approval_source = "Admin approved" if final_eligible else "Admin blocked"
+            approval_source = (
+                "Admin approved" if final_eligible else "Admin blocked"
+            )
         elif final_eligible is None:
             approval_source = "Auto pending"
         else:
-            approval_source = "Auto approved" if final_eligible else "Auto blocked"
+            approval_source = (
+                "Auto approved" if final_eligible else "Auto blocked"
+            )
 
-        result.append({
-            "paper_id":                      paper_id,
-            "paper_name":                    paper.get("name", ""),
-            "paper_code":                    paper.get("code", ""),
-            "attendance_percentage":         overall_pct,
-            "overall_attendance_percentage": overall_pct,
-            "overall_attended_classes":      total_attended,
-            "overall_total_classes":         total_classes,
-            "approved_leave_sessions":       total_leave_sessions,
-            "eligible":                      final_eligible,
-            "status":                        "No Lectures Yet" if final_eligible is None
-                                             else ("Eligible" if final_eligible else "Not Eligible"),
-            "approval_source":               approval_source,
-        })
+        result.append(
+            {
+                "paper_id": paper_id,
+                "paper_name": paper.get("name", ""),
+                "paper_code": paper.get("code", ""),
+                "attendance_percentage": overall_pct,
+                "overall_attendance_percentage": overall_pct,
+                "overall_attended_classes": total_attended,
+                "overall_total_classes": total_classes,
+                "approved_leave_sessions": total_leave_sessions,
+                "eligible": final_eligible,
+                "status": (
+                    "No Lectures Yet"
+                    if final_eligible is None
+                    else ("Eligible" if final_eligible else "Not Eligible")
+                ),
+                "approval_source": approval_source,
+            }
+        )
 
     return jsonify(result)
 
@@ -414,11 +498,11 @@ def manage_leave_requests(user):
     leaves_col = get_collection("academic", "leave_requests")
 
     if request.method == "POST":
-        d          = request.get_json(silent=True) or {}
+        d = request.get_json(silent=True) or {}
         start_date = _as_text(d.get("start_date") or d.get("date"))
-        end_date   = _as_text(d.get("end_date") or start_date)
-        reason     = sanitize_string(d.get("reason") or "", max_length=500)
-        paper_id   = d.get("paper_id") # Null indicates "Global/All Papers"
+        end_date = _as_text(d.get("end_date") or start_date)
+        reason = sanitize_string(d.get("reason") or "", max_length=500)
+        paper_id = d.get("paper_id")  # Null indicates "Global/All Papers"
 
         # Validate dates are in proper format (YYYY-MM-DD)
         def _parse_calendar_date(date_str):
@@ -430,23 +514,33 @@ def manage_leave_requests(user):
             except Exception:
                 return False
 
-        if not _parse_calendar_date(start_date) or not _parse_calendar_date(end_date):
-            return jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}), 400
+        if not _parse_calendar_date(start_date) or not _parse_calendar_date(
+            end_date
+        ):
+            return (
+                jsonify({"error": "Invalid date format. Use YYYY-MM-DD."}),
+                400,
+            )
         if not reason:
             return jsonify({"error": "Reason is required"}), 400
 
         new_leave = {
-            "user_id":    str(user["_id"]),
+            "user_id": str(user["_id"]),
             "start_date": start_date,
-            "end_date":   end_date,
-            "date":       start_date, # Fallback for legacy compatibility
-            "paper_id":   paper_id,
-            "reason":     reason,
-            "status":     "pending",
+            "end_date": end_date,
+            "date": start_date,  # Fallback for legacy compatibility
+            "paper_id": paper_id,
+            "reason": reason,
+            "status": "pending",
             "created_at": datetime.now(timezone.utc),
         }
         leaves_col.insert_one(new_leave)
-        return jsonify({"message": "Leave request submitted successfully"}), 201
+        return (
+            jsonify({"message": "Leave request submitted successfully"}),
+            201,
+        )
 
-    requests_cursor = leaves_col.find({"user_id": str(user["_id"])}).sort("created_at", -1)
+    requests_cursor = leaves_col.find({"user_id": str(user["_id"])}).sort(
+        "created_at", -1
+    )
     return jsonify(sanitise_many(list(requests_cursor)))

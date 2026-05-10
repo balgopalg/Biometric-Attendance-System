@@ -1,7 +1,9 @@
-from . import admin_bp
-from ._helpers import *
 from app.models.enrollment import encode_face_embedding
 from app.services.face_recognition import find_best_match
+
+from . import admin_bp
+from ._helpers import *
+
 
 @admin_bp.route("/students/enroll", methods=["POST"])
 @role_required("department_admin", "student")
@@ -21,17 +23,38 @@ def enroll_student_face(user):
 
     # Security check: Students can only enroll themselves
     if user["role"] == "student" and str(user["_id"]) != str(resolved_user_id):
-        return jsonify({"error": "Access Denied: You can only enroll your own face profile."}), 403
+        return (
+            jsonify(
+                {
+                    "error": "Access Denied: You can only enroll your own face profile."
+                }
+            ),
+            403,
+        )
 
     try:
         img = decode_base64_image(photo_b64)
     except ValueError:
         # User error: invalid/corrupt image, do not log traceback
-        return jsonify({"error": "Invalid image format. Please upload a valid PNG or JPEG photo."}), 400
+        return (
+            jsonify(
+                {
+                    "error": "Invalid image format. Please upload a valid PNG or JPEG photo."
+                }
+            ),
+            400,
+        )
     except Exception:
         # Unexpected error: log traceback
         current_app.logger.exception("Unexpected error during image decoding")
-        return jsonify({"error": "Unexpected error while processing image. Please try again or contact support."}), 500
+        return (
+            jsonify(
+                {
+                    "error": "Unexpected error while processing image. Please try again or contact support."
+                }
+            ),
+            500,
+        )
 
     try:
         detector = get_detector()
@@ -47,47 +70,65 @@ def enroll_student_face(user):
     face_crop = faces[0]["crop"]
     try:
         embedding = generate_embedding(face_crop)
-        
+
         # Check for face uniqueness within the same context (dept, course, semester)
         force = _to_bool(d.get("force", False))
         if not force:
             query = {
                 "user_id": {"$ne": resolved_user_id},
                 "course_id": profile.get("course_id"),
-                "current_semester": profile.get("current_semester")
+                "current_semester": profile.get("current_semester"),
             }
             if profile.get("department_id"):
                 query["department_id"] = profile.get("department_id")
-            
-            other_profiles = list(get_collection("academic", "student_profiles").find(
-                query, {"user_id": 1, "face_embeddings": 1, "reg_number": 1}
-            ))
-            
+
+            other_profiles = list(
+                get_collection("academic", "student_profiles").find(
+                    query,
+                    {"user_id": 1, "face_embeddings": 1, "reg_number": 1},
+                )
+            )
+
             if other_profiles:
-                match = find_best_match(embedding, other_profiles, threshold=0.7)
+                match = find_best_match(
+                    embedding, other_profiles, threshold=0.7
+                )
                 if match:
                     matching_user = find_user_by_id(match["user_id"])
                     other_name = matching_user.get("name", "another student")
                     other_reg = match.get("reg_number") or "N/A"
-                    
+
                     # If current user is a student, we don't allow "force" via popup
                     if user["role"] == "student":
-                        return jsonify({
-                            "error": f"This face profile already exists for user {other_name} (Reg No: {other_reg}). Please re-enroll with a clearer photo."
-                        }), 400
-                        
-                    return jsonify({
-                        "match_found": True,
-                        "similarity": match["similarity"],
-                        "matching_user": f"{other_name} (Reg No: {other_reg})",
-                        "error": f"Face profile matches {other_name} [{other_reg}] ({match['similarity']*100:.1f}% similarity).",
-                        "message": f"Face matches {other_name} ({other_reg}) with {match['similarity']*100:.1f}% similarity. Enroll anyway?"
-                    }), 409
+                        return (
+                            jsonify(
+                                {
+                                    "error": f"This face profile already exists for user {other_name} (Reg No: {other_reg}). Please re-enroll with a clearer photo."
+                                }
+                            ),
+                            400,
+                        )
+
+                    return (
+                        jsonify(
+                            {
+                                "match_found": True,
+                                "similarity": match["similarity"],
+                                "matching_user": f"{other_name} (Reg No: {other_reg})",
+                                "error": f"Face profile matches {other_name} [{other_reg}] ({match['similarity']*100:.1f}% similarity).",
+                                "message": f"Face matches {other_name} ({other_reg}) with {match['similarity']*100:.1f}% similarity. Enroll anyway?",
+                            }
+                        ),
+                        409,
+                    )
 
         add_face_embedding(resolved_user_id, embedding)
     except Exception as exc:
         current_app.logger.exception("Embedding persistence failed")
-        return jsonify({"error": f"Failed to store face embedding: {exc}"}), 500
+        return (
+            jsonify({"error": f"Failed to store face embedding: {exc}"}),
+            500,
+        )
 
     dataset_saved_count = 0
     dataset_warning = None
@@ -131,11 +172,17 @@ def enroll_student_face(user):
                 )
                 dataset_saved_count = len(saved_paths)
         except Exception as exc:
-            current_app.logger.exception("Dataset save failed during face enrollment")
+            current_app.logger.exception(
+                "Dataset save failed during face enrollment"
+            )
             dataset_warning = f"Dataset save failed: {exc}"
 
-    log_action("ENROLL_FACE", str(user["_id"]), target_user=resolved_user_id,
-               details="Face embedding added")
+    log_action(
+        "ENROLL_FACE",
+        str(user["_id"]),
+        target_user=resolved_user_id,
+        details="Face embedding added",
+    )
     _clear_query_cache()
 
     response = {
@@ -176,7 +223,9 @@ def upload_student_photo(user):
     image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
     uploads_dir = current_app.config.get("UPLOAD_FOLDER", "uploads")
-    saved_path = save_student_upload(student_name, image, uploads_dir=uploads_dir)
+    saved_path = save_student_upload(
+        student_name, image, uploads_dir=uploads_dir
+    )
 
     log_action(
         "UPLOAD_STUDENT_PHOTO",
@@ -185,11 +234,16 @@ def upload_student_photo(user):
         details=f"Stored photo for {student_name} as {saved_path}",
     )
 
-    return jsonify({
-        "message": "Student photo uploaded successfully",
-        "file_path": saved_path,
-        "file_name": os.path.basename(saved_path),
-    }), 201
+    return (
+        jsonify(
+            {
+                "message": "Student photo uploaded successfully",
+                "file_path": saved_path,
+                "file_name": os.path.basename(saved_path),
+            }
+        ),
+        201,
+    )
 
 
 def _add_lecturer_face_embedding(user_id, embedding, photo_url=None):
@@ -224,11 +278,25 @@ def enroll_lecturer_face(user):
         img = decode_base64_image(photo_b64)
     except ValueError:
         # User error: invalid/corrupt image, do not log traceback
-        return jsonify({"error": "Invalid image format. Please upload a valid PNG or JPEG photo."}), 400
+        return (
+            jsonify(
+                {
+                    "error": "Invalid image format. Please upload a valid PNG or JPEG photo."
+                }
+            ),
+            400,
+        )
     except Exception:
         # Unexpected error: log traceback
         current_app.logger.exception("Unexpected error during image decoding")
-        return jsonify({"error": "Unexpected error while processing image. Please try again or contact support."}), 500
+        return (
+            jsonify(
+                {
+                    "error": "Unexpected error while processing image. Please try again or contact support."
+                }
+            ),
+            500,
+        )
 
     try:
         detector = get_detector()
@@ -244,36 +312,57 @@ def enroll_lecturer_face(user):
     face_crop = faces[0]["crop"]
     try:
         embedding = generate_embedding(face_crop)
-        
+
         # Check for face uniqueness across all lecturers
         force = _to_bool(d.get("force", False))
         if not force:
             # Get all lecturers with face embeddings
-            all_lecturers = list(get_collection("auth", "users").find(
-                {"role": "lecturer", "face_embeddings": {"$exists": True, "$ne": []}},
-                {"_id": 1, "face_embeddings": 1, "name": 1}
-            ))
-            
+            all_lecturers = list(
+                get_collection("auth", "users").find(
+                    {
+                        "role": "lecturer",
+                        "face_embeddings": {"$exists": True, "$ne": []},
+                    },
+                    {"_id": 1, "face_embeddings": 1, "name": 1},
+                )
+            )
+
             if all_lecturers:
-                other_lecturers = [l for l in all_lecturers if str(l.get("_id")) != str(resolved_user_id)]
+                other_lecturers = [
+                    l
+                    for l in all_lecturers
+                    if str(l.get("_id")) != str(resolved_user_id)
+                ]
                 if other_lecturers:
-                    match = find_best_match(embedding, other_lecturers, threshold=0.7)
+                    match = find_best_match(
+                        embedding, other_lecturers, threshold=0.7
+                    )
                     if match:
                         matching_user = find_user_by_id(match["user_id"])
-                        other_name = matching_user.get("name", "another lecturer")
-                        
-                        return jsonify({
-                            "match_found": True,
-                            "similarity": match["similarity"],
-                            "matching_user": other_name,
-                            "error": f"Face profile matches {other_name} ({match['similarity']*100:.1f}% similarity).",
-                            "message": f"Face matches {other_name} with {match['similarity']*100:.1f}% similarity. Enroll anyway?"
-                        }), 409
-        
+                        other_name = matching_user.get(
+                            "name", "another lecturer"
+                        )
+
+                        return (
+                            jsonify(
+                                {
+                                    "match_found": True,
+                                    "similarity": match["similarity"],
+                                    "matching_user": other_name,
+                                    "error": f"Face profile matches {other_name} ({match['similarity']*100:.1f}% similarity).",
+                                    "message": f"Face matches {other_name} with {match['similarity']*100:.1f}% similarity. Enroll anyway?",
+                                }
+                            ),
+                            409,
+                        )
+
         _add_lecturer_face_embedding(resolved_user_id, embedding)
     except Exception as exc:
         current_app.logger.exception("Lecturer embedding persistence failed")
-        return jsonify({"error": f"Failed to store face embedding: {exc}"}), 500
+        return (
+            jsonify({"error": f"Failed to store face embedding: {exc}"}),
+            500,
+        )
 
     dataset_saved_count = 0
     dataset_warning = None
@@ -317,7 +406,9 @@ def enroll_lecturer_face(user):
                 )
                 dataset_saved_count = len(saved_paths)
         except Exception as exc:
-            current_app.logger.exception("Dataset save failed during lecturer face enrollment")
+            current_app.logger.exception(
+                "Dataset save failed during lecturer face enrollment"
+            )
             dataset_warning = f"Dataset save failed: {exc}"
     else:
         # Single photo upload — save the detected face crop to the dataset folder
@@ -331,7 +422,9 @@ def enroll_lecturer_face(user):
             )
             dataset_saved_count = len(saved_paths)
         except Exception as exc:
-            current_app.logger.exception("Dataset save failed during lecturer single-photo enrollment")
+            current_app.logger.exception(
+                "Dataset save failed during lecturer single-photo enrollment"
+            )
             dataset_warning = f"Dataset save failed: {exc}"
 
     log_action(
@@ -351,7 +444,6 @@ def enroll_lecturer_face(user):
         response["dataset_warning"] = dataset_warning
 
     return jsonify(response), 200
-
 
 
 @admin_bp.route("/students/<sid>/train-face", methods=["POST"])
@@ -386,24 +478,34 @@ def train_face_from_dataset(user, sid):
             stage="queued",
             message="Queued",
         )
-        return jsonify({
-            "message": "Face training queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-            "requested_count": 1,
-        }), 202
+        return (
+            jsonify(
+                {
+                    "message": "Face training queued",
+                    "job_id": job_id,
+                    "status_url": f"/api/admin/jobs/{job_id}",
+                    "requested_count": 1,
+                }
+            ),
+            202,
+        )
 
     try:
         train_result = _train_single_face_job(str(user["_id"]), user_id)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify({
-        "message": "Face training completed",
-        "trained_embeddings": train_result["trained_embeddings"],
-        "skipped_images": train_result["skipped_images"],
-        "dataset_dir": train_result["dataset_dir"],
-    }), 200
+    return (
+        jsonify(
+            {
+                "message": "Face training completed",
+                "trained_embeddings": train_result["trained_embeddings"],
+                "skipped_images": train_result["skipped_images"],
+                "dataset_dir": train_result["dataset_dir"],
+            }
+        ),
+        200,
+    )
 
 
 @admin_bp.route("/students/train-face/bulk", methods=["POST"])
@@ -437,12 +539,17 @@ def bulk_train_face_from_dataset(user):
             stage="queued",
             message="Queued",
         )
-        return jsonify({
-            "message": "Bulk training queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-            "requested_count": len(user_ids),
-        }), 202
+        return (
+            jsonify(
+                {
+                    "message": "Bulk training queued",
+                    "job_id": job_id,
+                    "status_url": f"/api/admin/jobs/{job_id}",
+                    "requested_count": len(user_ids),
+                }
+            ),
+            202,
+        )
 
     result = _train_bulk_faces_job(str(user["_id"]), user_ids)
     _clear_query_cache()
@@ -472,12 +579,17 @@ def rebuild_all_face_embeddings(user):
             stage="queued",
             message="Queued",
         )
-        return jsonify({
-            "message": "Face embeddings rebuild queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-            "requested_count": len(profiles),
-        }), 202
+        return (
+            jsonify(
+                {
+                    "message": "Face embeddings rebuild queued",
+                    "job_id": job_id,
+                    "status_url": f"/api/admin/jobs/{job_id}",
+                    "requested_count": len(profiles),
+                }
+            ),
+            202,
+        )
 
     result = _rebuild_all_faces_job(str(user["_id"]))
     if result.get("error"):
@@ -517,24 +629,34 @@ def train_lecturer_face_from_dataset(user, lid):
             stage="queued",
             message="Queued",
         )
-        return jsonify({
-            "message": "Face training queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-            "requested_count": 1,
-        }), 202
+        return (
+            jsonify(
+                {
+                    "message": "Face training queued",
+                    "job_id": job_id,
+                    "status_url": f"/api/admin/jobs/{job_id}",
+                    "requested_count": 1,
+                }
+            ),
+            202,
+        )
 
     try:
         train_result = _train_single_face_job(str(user["_id"]), user_id)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
-    return jsonify({
-        "message": "Face training completed",
-        "trained_embeddings": train_result["trained_embeddings"],
-        "skipped_images": train_result["skipped_images"],
-        "dataset_dir": train_result["dataset_dir"],
-    }), 200
+    return (
+        jsonify(
+            {
+                "message": "Face training completed",
+                "trained_embeddings": train_result["trained_embeddings"],
+                "skipped_images": train_result["skipped_images"],
+                "dataset_dir": train_result["dataset_dir"],
+            }
+        ),
+        200,
+    )
 
 
 @admin_bp.route("/lecturers/train-face/bulk", methods=["POST"])
@@ -568,12 +690,17 @@ def bulk_train_lecturer_face_from_dataset(user):
             stage="queued",
             message="Queued",
         )
-        return jsonify({
-            "message": "Bulk training queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-            "requested_count": len(user_ids),
-        }), 202
+        return (
+            jsonify(
+                {
+                    "message": "Bulk training queued",
+                    "job_id": job_id,
+                    "status_url": f"/api/admin/jobs/{job_id}",
+                    "requested_count": len(user_ids),
+                }
+            ),
+            202,
+        )
 
     result = _train_bulk_faces_job(str(user["_id"]), user_ids)
     _clear_query_cache()
@@ -605,12 +732,17 @@ def rebuild_all_lecturer_face_embeddings(user):
             stage="queued",
             message="Queued",
         )
-        return jsonify({
-            "message": "Lecturer face embeddings rebuild queued",
-            "job_id": job_id,
-            "status_url": f"/api/admin/jobs/{job_id}",
-            "requested_count": len(lecturers),
-        }), 202
+        return (
+            jsonify(
+                {
+                    "message": "Lecturer face embeddings rebuild queued",
+                    "job_id": job_id,
+                    "status_url": f"/api/admin/jobs/{job_id}",
+                    "requested_count": len(lecturers),
+                }
+            ),
+            202,
+        )
 
     result = _rebuild_all_lecturer_faces_job(str(user["_id"]))
     if result.get("error"):
@@ -649,8 +781,17 @@ def capture_faces_dataset(user):
         details=f"Captured {len(saved_paths)} images for {user_name}",
     )
 
-    return jsonify({
-        "message": "Face dataset captured successfully",
-        "captured_count": len(saved_paths),
-        "dataset_folder": os.path.dirname(saved_paths[0]) if saved_paths else "dataset",
-    }), 200
+    return (
+        jsonify(
+            {
+                "message": "Face dataset captured successfully",
+                "captured_count": len(saved_paths),
+                "dataset_folder": (
+                    os.path.dirname(saved_paths[0])
+                    if saved_paths
+                    else "dataset"
+                ),
+            }
+        ),
+        200,
+    )

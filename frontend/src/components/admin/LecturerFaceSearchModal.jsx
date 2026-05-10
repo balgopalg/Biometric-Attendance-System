@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { HiOutlineCamera, HiOutlineX, HiOutlineIdentification, HiOutlinePhotograph } from 'react-icons/hi';
 import { useWebcam } from '../../hooks/useWebcam';
 import WebcamFeed from '../recognition/WebcamFeed';
+import resolveImageUrl from '../../utils/resolveImageUrl';
 
 const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -20,6 +21,7 @@ export default function LecturerFaceSearchModal({ isOpen, onClose }) {
   const [uploadedPhoto, setUploadedPhoto] = useState(null);
   const fileInputRef = useRef(null);
   const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, flipCamera, captureFrame } = useWebcam({ cropSquare: true, outSize: 160 });
+  const lecturerPhotoUrl = resolveImageUrl(matchedLecturer?.photo_url);
 
   const handleStartCamera = async () => {
     const started = await startCamera();
@@ -288,17 +290,32 @@ export default function LecturerFaceSearchModal({ isOpen, onClose }) {
                       background: 'var(--bg-tertiary)',
                       border: '1px solid var(--border)'
                     }}>
-                      {matchedLecturer.photo_url ? (
+                      {lecturerPhotoUrl ? (
                         <img 
-                          src={`${api.defaults.baseURL}${matchedLecturer.photo_url}`} 
+                          src={lecturerPhotoUrl}
                           alt={matchedLecturer.name} 
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => {
+                            e.target.onerror = null;
+                            e.target.style.display = 'none';
+                            if (e.target.nextElementSibling) {
+                              e.target.nextElementSibling.style.display = 'flex';
+                            }
+                          }}
                         />
-                      ) : (
-                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                          <HiOutlineIdentification size={32} />
-                        </div>
-                      )}
+                      ) : null}
+                      <div style={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        display: lecturerPhotoUrl ? 'none' : 'flex', 
+                        flexDirection: 'column',
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        color: 'var(--text-muted)' 
+                      }}>
+                        <HiOutlineIdentification size={32} />
+                        <span style={{ fontSize: '0.65rem', marginTop: 4, fontWeight: 600 }}>No Profile photo</span>
+                      </div>
                     </div>
                   </div>
                 </div>

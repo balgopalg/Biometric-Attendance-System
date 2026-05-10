@@ -5,6 +5,7 @@ import { HiOutlineCamera, HiOutlineX, HiOutlineIdentification, HiOutlinePhotogra
 import { useWebcam } from '../../hooks/useWebcam';
 import WebcamFeed from '../recognition/WebcamFeed';
 import Modal from '../ui/Modal';
+import resolveImageUrl from '../../utils/resolveImageUrl';
 
 const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -21,6 +22,7 @@ export default function FaceSearchModal({ isOpen, onClose }) {
   const [uploadedPhoto, setUploadedPhoto] = useState(null);
   const fileInputRef = useRef(null);
   const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, flipCamera, captureFrame } = useWebcam({ cropSquare: true, outSize: 160 });
+  const studentPhotoUrl = resolveImageUrl(matchedStudent?.photo_url);
 
   const handleStartCamera = async () => {
     const started = await startCamera();
@@ -289,9 +291,9 @@ export default function FaceSearchModal({ isOpen, onClose }) {
                       background: 'var(--bg-tertiary)',
                       border: '1px solid var(--border)'
                     }}>
-                      {matchedStudent.photo_url ? (
+                      {studentPhotoUrl ? (
                         <img 
-                          src={matchedStudent.photo_url} 
+                          src={studentPhotoUrl} 
                           alt={matchedStudent.name} 
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           onError={(e) => {
@@ -306,7 +308,7 @@ export default function FaceSearchModal({ isOpen, onClose }) {
                       <div style={{ 
                         width: '100%', 
                         height: '100%', 
-                        display: matchedStudent.photo_url ? 'none' : 'flex', 
+                        display: studentPhotoUrl ? 'none' : 'flex', 
                         flexDirection: 'column',
                         alignItems: 'center', 
                         justifyContent: 'center', 

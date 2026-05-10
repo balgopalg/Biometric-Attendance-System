@@ -1,19 +1,17 @@
 """User model helpers — thin wrappers around PyMongo operations."""
 
-import secrets
 import hmac
+import secrets
 from datetime import datetime, timezone
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import bcrypt
-from bson import ObjectId
-from bson.errors import InvalidId
-
 from app.extensions import get_collection
 from app.repositories import find_many_by_ids
 from app.security.brute_force_protection import BruteForceProtector
 from app.utils.validation import validate_password_strength
-
+from bson import ObjectId
+from bson.errors import InvalidId
 
 # Valid role values for the 4-tier RBAC model
 VALID_ROLES = {"super_admin", "department_admin", "lecturer", "student"}
@@ -113,7 +111,9 @@ def create_user(
     doc = {
         "name": name,
         "email": normalized_email,
-        "password_hash": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
+        "password_hash": bcrypt.hashpw(
+            password.encode(), bcrypt.gensalt()
+        ).decode(),
         "role": effective_role,
         "department": department,
         "department_id": dept_oid,
@@ -149,12 +149,14 @@ def find_user_by_id(user_id: str) -> Optional[dict]:
         oid = ObjectId(user_id)
     except InvalidId:
         return None
-        
+
     users = get_collection("auth", "users")
     return users.find_one({"_id": oid})
 
 
-def get_users_by_role(role: str, department_id: Optional[Any] = None) -> List[dict]:
+def get_users_by_role(
+    role: str, department_id: Optional[Any] = None
+) -> List[dict]:
     """Return users by role, optionally filtered by department_id."""
     users = get_collection("auth", "users")
     query: Dict[str, Any] = {"role": role}
@@ -176,7 +178,7 @@ def update_user(user_id: str, update_fields: dict) -> Optional[dict]:
         oid = ObjectId(user_id)
     except InvalidId:
         return None
-        
+
     users = get_collection("auth", "users")
     users.update_one({"_id": oid}, {"$set": update_fields})
     return find_user_by_id(user_id)
@@ -187,7 +189,7 @@ def delete_user(user_id: str) -> bool:
         oid = ObjectId(user_id)
     except InvalidId:
         return False
-        
+
     users = get_collection("auth", "users")
     result = users.delete_one({"_id": oid})
     return result.deleted_count > 0
@@ -200,7 +202,9 @@ def verify_password(stored_hash: str, password: str) -> bool:
         return False
 
 
-def reset_user_password(user_id: str, temp_password: Optional[str] = None) -> Optional[str]:
+def reset_user_password(
+    user_id: str, temp_password: Optional[str] = None
+) -> Optional[str]:
     """Set a temporary password for a user and require password change on next login."""
     try:
         oid = ObjectId(user_id)
@@ -209,17 +213,18 @@ def reset_user_password(user_id: str, temp_password: Optional[str] = None) -> Op
 
     temp_pw = temp_password or generate_temp_password()
     pw_hash = bcrypt.hashpw(temp_pw.encode(), bcrypt.gensalt()).decode()
-    
+
     users = get_collection("auth", "users")
     user = users.find_one({"_id": oid}, {"email": 1})
-    
+
     if not user:
         return None
-        
+
     users.update_one(
         {"_id": oid},
         {
-            "$set": {"password_hash": pw_hash, "must_change_password": True},  # nosec B105
+            # nosec B105
+            "$set": {"password_hash": pw_hash, "must_change_password": True},
             "$inc": {"session_version": 1},
         },
     )
@@ -239,10 +244,10 @@ def change_user_password(
     user = find_user_by_id(user_id)
     if not user:
         return False, "User not found"
-        
+
     if not verify_password(user["password_hash"], old_password):
         return False, "Current password is incorrect"
-        
+
     is_strong, msg = validate_password_strength(new_password)
     if not is_strong:
         return False, msg
@@ -252,7 +257,8 @@ def change_user_password(
     users.update_one(
         {"_id": ObjectId(user_id)},
         {
-            "$set": {"password_hash": pw_hash, "must_change_password": False},  # nosec B105
+            # nosec B105
+            "$set": {"password_hash": pw_hash, "must_change_password": False},
             "$inc": {"session_version": 1},
         },
     )

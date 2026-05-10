@@ -2,15 +2,13 @@
 
 import logging
 import os
-import uuid
 import time
+import uuid
 
 import cv2
-from flask import current_app, has_app_context
-
+from app.utils.helpers import _as_uint8_image, save_jpeg_with_size_bounds
 from app.utils.timezone import india_timestamp_token
-from app.utils.helpers import save_jpeg_with_size_bounds, _as_uint8_image
-
+from flask import current_app, has_app_context
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +30,9 @@ def _photo_size_bounds():
 def _safe_name(raw_value):
     """Keep only filename-safe characters."""
     text = str(raw_value or "").strip()
-    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text
+    )
     return cleaned.strip("_") or "unknown"
 
 
@@ -92,13 +92,17 @@ def _save_fixed_jpeg(file_path, image, size=160, quality=85):
     bottom = size - h - top
     left = (size - w) // 2
     right = size - w - left
-    canvas = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    canvas = cv2.copyMakeBorder(
+        img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(0, 0, 0)
+    )
 
     # Encode with fixed quality and write file
-    ok, encoded = cv2.imencode('.jpg', canvas, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
+    ok, encoded = cv2.imencode(
+        ".jpg", canvas, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
+    )
     if not ok:
         raise RuntimeError(f"Failed to encode JPEG for {file_path}")
-    with open(file_path, 'wb') as fh:
+    with open(file_path, "wb") as fh:
         fh.write(encoded.tobytes())
     return len(encoded)
 
@@ -121,7 +125,14 @@ def _to_grayscale_image(image):
     return image
 
 
-def capture_faces_for_user(user_name, dataset_root="dataset", subfolder="", total_images=50, delay_seconds=0.1, camera_index=0):
+def capture_faces_for_user(
+    user_name,
+    dataset_root="dataset",
+    subfolder="",
+    total_images=50,
+    delay_seconds=0.1,
+    camera_index=0,
+):
     """Capture grayscale face images from webcam into dataset/[subfolder]/<user_name>/.
 
     Returns a list of saved file paths.
@@ -130,7 +141,11 @@ def capture_faces_for_user(user_name, dataset_root="dataset", subfolder="", tota
         raise ValueError("total_images must be greater than 0")
 
     safe_user_name = _safe_name(user_name)
-    user_dir = os.path.join(dataset_root, subfolder, safe_user_name) if subfolder else os.path.join(dataset_root, safe_user_name)
+    user_dir = (
+        os.path.join(dataset_root, subfolder, safe_user_name)
+        if subfolder
+        else os.path.join(dataset_root, safe_user_name)
+    )
     _ensure_directory(user_dir)
 
     cap = cv2.VideoCapture(camera_index)
@@ -157,7 +172,9 @@ def capture_faces_for_user(user_name, dataset_root="dataset", subfolder="", tota
             try:
                 _save_bounded_jpeg(file_path, gray)
             except Exception as exc:
-                raise RuntimeError(f"Failed to save image: {file_path}") from exc
+                raise RuntimeError(
+                    f"Failed to save image: {file_path}"
+                ) from exc
 
             saved_paths.append(file_path)
             time.sleep(delay_ms / 1000.0)
@@ -189,7 +206,9 @@ def save_student_upload(student_name, image, uploads_dir="uploads"):
     try:
         _save_bounded_jpeg(file_path, image_to_save)
     except Exception as exc:
-        raise RuntimeError(f"Failed to save student upload: {file_path}") from exc
+        raise RuntimeError(
+            f"Failed to save student upload: {file_path}"
+        ) from exc
 
     return file_path
 
@@ -210,15 +229,23 @@ def save_classroom_upload(image, uploads_dir="uploads"):
     try:
         _save_bounded_jpeg(file_path, image_to_save)
     except Exception as exc:
-        raise RuntimeError(f"Failed to save classroom upload: {file_path}") from exc
+        raise RuntimeError(
+            f"Failed to save classroom upload: {file_path}"
+        ) from exc
 
     return file_path
 
 
-def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", subfolder="", max_images=50):
+def save_cropped_face_dataset(
+    user_name, face_crops, dataset_root="dataset", subfolder="", max_images=50
+):
     """Save cropped face copies to dataset/[subfolder]/<user_name>/<user_name>_<count>.jpg."""
     safe_user_name = _safe_name(user_name)
-    user_dir = os.path.join(dataset_root, subfolder, safe_user_name) if subfolder else os.path.join(dataset_root, safe_user_name)
+    user_dir = (
+        os.path.join(dataset_root, subfolder, safe_user_name)
+        if subfolder
+        else os.path.join(dataset_root, safe_user_name)
+    )
     _ensure_directory(user_dir)
 
     saved_paths = []
@@ -227,10 +254,18 @@ def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", sub
             continue
 
         image_to_save = crop
-        if hasattr(crop, "shape") and len(crop.shape) == 3 and crop.shape[2] == 4:
+        if (
+            hasattr(crop, "shape")
+            and len(crop.shape) == 3
+            and crop.shape[2] == 4
+        ):
             image_to_save = cv2.cvtColor(crop, cv2.COLOR_BGRA2BGR)
 
-        if hasattr(image_to_save, "shape") and len(image_to_save.shape) == 3 and image_to_save.shape[2] == 3:
+        if (
+            hasattr(image_to_save, "shape")
+            and len(image_to_save.shape) == 3
+            and image_to_save.shape[2] == 3
+        ):
             # Detector returns RGB crops; convert to grayscale for offline dataset usage.
             image_to_save = cv2.cvtColor(image_to_save, cv2.COLOR_RGB2GRAY)
 
@@ -241,14 +276,18 @@ def save_cropped_face_dataset(user_name, face_crops, dataset_root="dataset", sub
             # Ensure face dataset images are saved as compact 160x160 JPEGs without upscaling
             _save_fixed_jpeg(file_path, image_to_save, size=160, quality=85)
         except Exception as exc:
-            raise RuntimeError(f"Failed to save dataset image: {file_path}") from exc
+            raise RuntimeError(
+                f"Failed to save dataset image: {file_path}"
+            ) from exc
 
         saved_paths.append(file_path)
 
     return saved_paths
 
 
-def build_session_upload_folder(subject_label, uploads_dir="uploads", session_started_at=None):
+def build_session_upload_folder(
+    subject_label, uploads_dir="uploads", session_started_at=None
+):
     """Return a stable folder path for a session based on subject + session start time."""
     safe_subject = _safe_name(subject_label)
     session_token = india_timestamp_token(session_started_at)
@@ -287,7 +326,9 @@ def save_classroom_upload_bundle(
     try:
         _save_bounded_jpeg(original_path, image_to_save)
     except Exception as exc:
-        raise RuntimeError(f"Failed to save original classroom image: {original_path}") from exc
+        raise RuntimeError(
+            f"Failed to save original classroom image: {original_path}"
+        ) from exc
 
     saved_faces = []
     for idx, crop in enumerate(face_crops or [], start=1):
@@ -306,11 +347,15 @@ def save_classroom_upload_bundle(
             crop_to_save = gray
 
         # Prefer saving a compact 160x160 face crop for storage efficiency
-        face_path = os.path.join(folder_path, f"face_{upload_token}_{idx:02d}.jpg")
+        face_path = os.path.join(
+            folder_path, f"face_{upload_token}_{idx:02d}.jpg"
+        )
         try:
             _save_fixed_jpeg(face_path, crop_to_save, size=160, quality=85)
         except Exception as exc:
-            raise RuntimeError(f"Failed to save classroom face crop: {face_path}") from exc
+            raise RuntimeError(
+                f"Failed to save classroom face crop: {face_path}"
+            ) from exc
 
         saved_faces.append(face_path)
 

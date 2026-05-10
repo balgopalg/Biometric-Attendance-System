@@ -16,7 +16,6 @@ from typing import Any, Dict, Optional, Set
 from bson import ObjectId
 from flask import has_request_context, request
 
-
 # ---------------------------------------------------------------------------
 # Role hierarchy — higher numeric value = more privilege
 # ---------------------------------------------------------------------------
@@ -73,7 +72,9 @@ def effective_allowed_roles(allowed_roles) -> Set[str]:
         roles.add("department_admin")
 
     # Role inheritance: anyone at or above the minimum role is allowed.
-    min_level = min((role_level(r) for r in roles if role_level(r) >= 0), default=999)
+    min_level = min(
+        (role_level(r) for r in roles if role_level(r) >= 0), default=999
+    )
     for role, level in ROLE_HIERARCHY.items():
         if level >= min_level:
             roles.add(role)
@@ -84,6 +85,7 @@ def effective_allowed_roles(allowed_roles) -> Set[str]:
 # ---------------------------------------------------------------------------
 # Department scoping helpers
 # ---------------------------------------------------------------------------
+
 
 def get_user_department_id(user: dict) -> Optional[ObjectId]:
     """Extract a user's department_id as an ObjectId (or None for super_admin)."""

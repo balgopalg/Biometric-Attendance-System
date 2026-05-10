@@ -48,6 +48,7 @@ export default function useLecturerData() {
   const [papers, setPapers] = useState([]);
 
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [showCreds, setShowCreds] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
 
@@ -61,6 +62,7 @@ export default function useLecturerData() {
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const [showMobileOperations, setShowMobileOperations] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [editForm, setEditForm] = useState({ ...EMPTY_FORM, _id: '' });
   const [loadingLecturers, setLoadingLecturers] = useState(false);
   const [lecturersError, setLecturersError] = useState('');
   const [exportingLecturers, setExportingLecturers] = useState(false);
@@ -366,8 +368,9 @@ export default function useLecturerData() {
     showMobileFilters, setShowMobileFilters,
     showMobileOperations, setShowMobileOperations,
     semesterOptions, filteredPapers,
-    // Add modal
+    // Add / Edit modal
     showAdd, setShowAdd, form, setForm,
+    showEdit, setShowEdit, editForm, setEditForm,
     // Credentials modal
     showCreds, setShowCreds, createdCreds, setCreatedCreds,
     // Assign modal

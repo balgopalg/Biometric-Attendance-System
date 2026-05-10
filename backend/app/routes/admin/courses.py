@@ -1,18 +1,33 @@
 from . import admin_bp
 from ._helpers import *
 
+
 @admin_bp.route("/courses", methods=["GET"])
 @role_required("super_admin", "department_admin")
 def list_courses(user):
     # Unified department filter logic
     dept_id = None
     if is_super_admin(user):
-        dept_id = _as_text(request.args.get("department_id", "")).strip() or None
+        dept_id = (
+            _as_text(request.args.get("department_id", "")).strip() or None
+        )
     else:
         dept_id = _user_dept_id(user)
 
     # Fetch all courses first; apply scoped filtering with legacy fallback below.
-    courses = sanitise_many(get_all_courses(["name", "code", "department", "course_duration", "status", "department_id"], department_id=None))
+    courses = sanitise_many(
+        get_all_courses(
+            [
+                "name",
+                "code",
+                "department",
+                "course_duration",
+                "status",
+                "department_id",
+            ],
+            department_id=None,
+        )
+    )
 
     if dept_id:
         selected_dept_id = _as_text(dept_id).strip()
@@ -23,17 +38,25 @@ def list_courses(user):
         except Exception:
             selected_dept = None
         if selected_dept:
-            selected_dept_name = _as_text(selected_dept.get("name", "")).strip().lower()
+            selected_dept_name = (
+                _as_text(selected_dept.get("name", "")).strip().lower()
+            )
 
         scoped_courses = []
         for course in courses:
             course_dept_id = _as_text(course.get("department_id", "")).strip()
-            course_dept_name = _as_text(course.get("department", "")).strip().lower()
+            course_dept_name = (
+                _as_text(course.get("department", "")).strip().lower()
+            )
             if course_dept_id and course_dept_id == selected_dept_id:
                 scoped_courses.append(course)
                 continue
             # Legacy fallback for old course records that only stored department name.
-            if selected_dept_name and course_dept_name and course_dept_name == selected_dept_name:
+            if (
+                selected_dept_name
+                and course_dept_name
+                and course_dept_name == selected_dept_name
+            ):
                 scoped_courses.append(course)
         courses = scoped_courses
 
@@ -44,7 +67,10 @@ def list_courses(user):
     filtered = []
     for c in courses:
         c["status"] = _as_text(c.get("status") or "active").lower() or "active"
-        if course_duration and str(c.get("course_duration", "")) != course_duration:
+        if (
+            course_duration
+            and str(c.get("course_duration", "")) != course_duration
+        ):
             continue
         if status and c.get("status") != status:
             continue
@@ -64,7 +90,10 @@ def list_courses(user):
 def add_course(user):
     d = request.get_json(silent=True) or {}
     if not d.get("name") or not d.get("code") or not d.get("course_duration"):
-        return jsonify({"error": "name, code and course_duration are required"}), 400
+        return (
+            jsonify({"error": "name, code and course_duration are required"}),
+            400,
+        )
     # Resolve department_id: dept admins use their own, super admins may pass in body
     dept_id = None
     body_dept_id = _as_text(d.get("department_id", "")).strip()
@@ -133,30 +162,36 @@ def list_course_sessions(user, cid):
     profiles = get_collection("academic", "student_profiles")
     sessions = set()
     course_duration = max(1, _to_int(course.get("course_duration"), 1))
-    for row in profiles.aggregate([
-        {"$match": {"course_id": cid}},
-        {
-            "$project": {
-                "session": {
-                    "$ifNull": [
-                        "$academic_session",
-                        {
-                            "$ifNull": [
-                                "$academic_year",
-                                {
-                                    "$ifNull": [
-                                        "$year",
-                                        {"$toString": {"$year": "$created_at"}},
-                                    ]
-                                },
-                            ]
-                        },
-                    ]
+    for row in profiles.aggregate(
+        [
+            {"$match": {"course_id": cid}},
+            {
+                "$project": {
+                    "session": {
+                        "$ifNull": [
+                            "$academic_session",
+                            {
+                                "$ifNull": [
+                                    "$academic_year",
+                                    {
+                                        "$ifNull": [
+                                            "$year",
+                                            {
+                                                "$toString": {
+                                                    "$year": "$created_at"
+                                                }
+                                            },
+                                        ]
+                                    },
+                                ]
+                            },
+                        ]
+                    }
                 }
-            }
-        },
-        {"$group": {"_id": "$session"}},
-    ]):
+            },
+            {"$group": {"_id": "$session"}},
+        ]
+    ):
         session = _as_text(row.get("_id"))
         if session:
             sessions.add(session)
@@ -167,8 +202,6 @@ def list_course_sessions(user, cid):
         sessions.add(_derive_academic_session(now_year, course_duration))
 
     return jsonify(sorted(sessions))
-
-
 
 
 @admin_bp.route("/courses/<cid>", methods=["PUT"])
@@ -190,13 +223,19 @@ def edit_course(user, cid):
     if not previous:
         return jsonify({"error": "Course not found"}), 404
 
-    prev_status = _as_text(previous.get("status") or "active").lower() or "active"
-    next_status = _as_text(fields.get("status") or prev_status).lower() or "active"
+    prev_status = (
+        _as_text(previous.get("status") or "active").lower() or "active"
+    )
+    next_status = (
+        _as_text(fields.get("status") or prev_status).lower() or "active"
+    )
 
     detached_count = 0
     detached_papers = []
     if prev_status == "active" and next_status == "inactive":
-        detached_count, detached_papers = _detach_lecturers_from_course_papers(cid)
+        detached_count, detached_papers = _detach_lecturers_from_course_papers(
+            cid
+        )
 
     updated = update_course(cid, fields)
 
@@ -204,11 +243,15 @@ def edit_course(user, cid):
         _rb_replace("academic", "courses", {"_id": cid}, previous),
     ]
     for doc in detached_papers:
-        rollback_ops.append(_rb_replace("academic", "papers", {"_id": doc.get("_id")}, doc))
+        rollback_ops.append(
+            _rb_replace("academic", "papers", {"_id": doc.get("_id")}, doc)
+        )
 
     details = f"Course {cid}"
     if detached_count > 0:
-        details = f"Course {cid}; detached lecturers from {detached_count} paper(s)"
+        details = (
+            f"Course {cid}; detached lecturers from {detached_count} paper(s)"
+        )
 
     log_action(
         "UPDATE_COURSE",
@@ -233,11 +276,15 @@ def remove_course(user, cid):
 
     rollback_ops = [_rb_restore("academic", "courses", previous)]
     for doc in detached_papers:
-        rollback_ops.append(_rb_replace("academic", "papers", {"_id": doc.get("_id")}, doc))
+        rollback_ops.append(
+            _rb_replace("academic", "papers", {"_id": doc.get("_id")}, doc)
+        )
 
     details = f"Course {cid}"
     if detached_count > 0:
-        details = f"Course {cid}; detached lecturers from {detached_count} paper(s)"
+        details = (
+            f"Course {cid}; detached lecturers from {detached_count} paper(s)"
+        )
 
     log_action(
         "DEACTIVATE_COURSE",
@@ -246,11 +293,15 @@ def remove_course(user, cid):
         rollback=_rb_batch(rollback_ops),
     )
     _clear_query_cache()
-    return jsonify({
-        "message": "Course marked inactive",
-        "detached_lecturer_assignments": detached_count,
-    }), 200
+    return (
+        jsonify(
+            {
+                "message": "Course marked inactive",
+                "detached_lecturer_assignments": detached_count,
+            }
+        ),
+        200,
+    )
 
 
 # ─── Papers ─────────────────────────────────────────────────────────────────
-

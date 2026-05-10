@@ -1,18 +1,18 @@
 """Student enrollment / profile model helpers."""
 
-
 import json
 import logging
 import logging.handlers
 import os
 import shutil
 from datetime import datetime, timezone
-from typing import Any, Optional, List
-from bson import ObjectId
-from flask import current_app, has_app_context, has_request_context, request, g
+from typing import Any, List, Optional
+
 from app.extensions import get_collection
 from app.models.audit import log_action
 from app.utils.helpers import _current_env, _id_variants
+from bson import ObjectId
+from flask import current_app, g, has_app_context, has_request_context, request
 
 try:
     from cryptography.fernet import Fernet, InvalidToken
@@ -51,7 +51,10 @@ def _ensure_noisy_handler():
         os.makedirs(logs_dir, exist_ok=True)
         logs_file = os.path.join(logs_dir, "logs.txt")
         handler = logging.handlers.RotatingFileHandler(
-            logs_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+            logs_file,
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
         )
         handler.setFormatter(logging.Formatter("%(message)s"))
         _noisy_logger.addHandler(handler)
@@ -71,14 +74,17 @@ def _append_noisy_profile_log(payload: dict) -> None:
         pass  # Telemetry logging should never fail the request
 
 
-
 def _legacy_safe_name(raw_value: Any) -> str:
     text = str(raw_value or "").strip()
-    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text
+    )
     return cleaned.strip("_") or "unknown"
 
 
-def _log_biometric_read(action: str, user_id: Optional[str] = None, details: Optional[dict] = None) -> None:
+def _log_biometric_read(
+    action: str, user_id: Optional[str] = None, details: Optional[dict] = None
+) -> None:
     if not has_request_context():
         return
 
@@ -133,7 +139,9 @@ def _log_biometric_read(action: str, user_id: Optional[str] = None, details: Opt
             dedupe_seconds=dedupe_seconds,
         )
     except Exception:
-        current_app.logger.debug("biometric read audit logging skipped", exc_info=True)
+        current_app.logger.debug(
+            "biometric read audit logging skipped", exc_info=True
+        )
 
 
 def _get_embedding_cipher() -> Optional[Any]:
@@ -148,7 +156,9 @@ def _get_embedding_cipher() -> Optional[Any]:
         )
 
     if Fernet is None:
-        raise RuntimeError("cryptography is required for biometric embedding encryption")
+        raise RuntimeError(
+            "cryptography is required for biometric embedding encryption"
+        )
 
     if _EMBEDDING_CIPHER is None or _EMBEDDING_CIPHER_KEY != key:
         _EMBEDDING_CIPHER = Fernet(key.encode())
@@ -162,7 +172,11 @@ def encode_face_embedding(embedding: Any) -> Any:
     if isinstance(embedding, str) and embedding.startswith(_EMBEDDING_PREFIX):
         return embedding
 
-    vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding or [])
+    vector = (
+        embedding.tolist()
+        if hasattr(embedding, "tolist")
+        else list(embedding or [])
+    )
     cipher = _get_embedding_cipher()
     if cipher is None:
         return vector
@@ -184,10 +198,12 @@ def decode_face_embedding(stored_embedding: Any) -> Optional[List[Any]]:
 
     if isinstance(stored_embedding, str):
         if stored_embedding.startswith(_EMBEDDING_PREFIX):
-            token = stored_embedding[len(_EMBEDDING_PREFIX):]
+            token = stored_embedding[len(_EMBEDDING_PREFIX) :]
             cipher = _get_embedding_cipher()
             if cipher is None:
-                raise RuntimeError("Encrypted biometric template encountered without an encryption key")
+                raise RuntimeError(
+                    "Encrypted biometric template encountered without an encryption key"
+                )
             try:
                 payload = cipher.decrypt(token.encode("utf-8"))
                 decoded = json.loads(payload.decode("utf-8"))
@@ -217,13 +233,19 @@ def create_student_profile(
     dept_oid = None
     if department_id is not None:
         try:
-            dept_oid = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+            dept_oid = (
+                ObjectId(str(department_id))
+                if not isinstance(department_id, ObjectId)
+                else department_id
+            )
         except Exception:
             dept_oid = None
     elif course_id:
         try:
             courses = get_collection("academic", "courses")
-            course_doc = courses.find_one({"_id": ObjectId(course_id)}, {"department_id": 1})
+            course_doc = courses.find_one(
+                {"_id": ObjectId(course_id)}, {"department_id": 1}
+            )
             if course_doc:
                 dept_oid = course_doc.get("department_id")
         except Exception:
@@ -251,7 +273,13 @@ def create_student_profile(
 def get_profile_by_user(user_id: str) -> Optional[dict]:
     profiles = get_collection("academic", "student_profiles")
     profile = profiles.find_one({"user_id": user_id})
-    _log_biometric_read("student_profile_read", user_id=str(user_id), details={"has_face_embeddings": bool((profile or {}).get("face_embeddings"))})
+    _log_biometric_read(
+        "student_profile_read",
+        user_id=str(user_id),
+        details={
+            "has_face_embeddings": bool((profile or {}).get("face_embeddings"))
+        },
+    )
     return profile
 
 
@@ -262,7 +290,11 @@ def get_profile_by_id(profile_id: str) -> Optional[dict]:
         return None
     profiles = get_collection("academic", "student_profiles")
     profile = profiles.find_one({"_id": oid})
-    _log_biometric_read("student_profile_read_by_id", user_id=str((profile or {}).get("user_id") or ""), details={"profile_id": str(profile_id)})
+    _log_biometric_read(
+        "student_profile_read_by_id",
+        user_id=str((profile or {}).get("user_id") or ""),
+        details={"profile_id": str(profile_id)},
+    )
     return profile
 
 
@@ -275,11 +307,16 @@ def get_all_profiles(fields: Optional[List[str]] = None) -> List[dict]:
     cursor = profiles.find({}, projection) if projection else profiles.find()
     items = list(cursor)
     if not fields or "face_embeddings" in fields:
-        _log_biometric_read("student_profiles_bulk_read", details={"count": len(items), "fields": list(fields or [])})
+        _log_biometric_read(
+            "student_profiles_bulk_read",
+            details={"count": len(items), "fields": list(fields or [])},
+        )
     return items
 
 
-def add_face_embedding(user_id: str, embedding: Any, photo_url: Optional[str] = None) -> None:
+def add_face_embedding(
+    user_id: str, embedding: Any, photo_url: Optional[str] = None
+) -> None:
     """Append a new face embedding vector (list of floats) to the student profile."""
     push_fields = {"face_embeddings": encode_face_embedding(embedding)}
     if photo_url:
@@ -295,7 +332,14 @@ def set_face_embeddings(user_id: str, embeddings: List[Any]) -> None:
     profiles = get_collection("academic", "student_profiles")
     profiles.update_one(
         {"user_id": user_id},
-        {"$set": {"face_embeddings": [encode_face_embedding(embedding) for embedding in (embeddings or [])]}},
+        {
+            "$set": {
+                "face_embeddings": [
+                    encode_face_embedding(embedding)
+                    for embedding in (embeddings or [])
+                ]
+            }
+        },
     )
 
 
@@ -307,7 +351,9 @@ def enroll_in_papers(user_id: str, paper_ids: List[str]) -> int:
 
     user_id_filters = _id_variants(normalized_user_id)
 
-    normalized_paper_ids = [str(pid).strip() for pid in (paper_ids or []) if str(pid).strip()]
+    normalized_paper_ids = [
+        str(pid).strip() for pid in (paper_ids or []) if str(pid).strip()
+    ]
     if not normalized_paper_ids:
         return 0
 
@@ -324,7 +370,10 @@ def get_profiles_for_paper(paper_id: str) -> List[dict]:
     profiles = get_collection("academic", "student_profiles")
     filters = _id_variants(paper_id)
     items = list(profiles.find({"enrolled_papers": {"$in": filters}}))
-    _log_biometric_read("paper_profile_read", details={"paper_id": str(paper_id), "count": len(items)})
+    _log_biometric_read(
+        "paper_profile_read",
+        details={"paper_id": str(paper_id), "count": len(items)},
+    )
     return items
 
 
@@ -332,8 +381,13 @@ def count_profiles_for_paper(paper_id: str) -> int:
     """Count enrolled students for a paper, handling string/ObjectId ids."""
     profiles = get_collection("academic", "student_profiles")
     filters = _id_variants(paper_id)
-    count = int(profiles.count_documents({"enrolled_papers": {"$in": filters}}))
-    _log_biometric_read("paper_profile_count", details={"paper_id": str(paper_id), "count": count})
+    count = int(
+        profiles.count_documents({"enrolled_papers": {"$in": filters}})
+    )
+    _log_biometric_read(
+        "paper_profile_count",
+        details={"paper_id": str(paper_id), "count": count},
+    )
     return count
 
 
@@ -360,7 +414,11 @@ def _remove_prefix_matches(root_dir: str, prefixes: List[str]) -> None:
         return
 
     for name in os.listdir(root_dir):
-        if any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes if prefix):
+        if any(
+            name == prefix or name.startswith(f"{prefix}_")
+            for prefix in prefixes
+            if prefix
+        ):
             _remove_path(os.path.join(root_dir, name))
 
 
@@ -372,8 +430,12 @@ def delete_profile(user_id: str, user: Optional[dict] = None) -> None:
         safe_name = _legacy_safe_name(profile.get("reg_number") or "")
 
     user_id_text = str(user_id).strip()
-    dataset_root = current_app.config.get("DATASET_ABSOLUTE_PATH") or os.path.abspath(os.path.join(current_app.root_path, "..", "dataset"))
-    uploads_root = current_app.config.get("UPLOADS_ABSOLUTE_PATH") or os.path.abspath(os.path.join(current_app.root_path, "..", "uploads"))
+    dataset_root = current_app.config.get(
+        "DATASET_ABSOLUTE_PATH"
+    ) or os.path.abspath(os.path.join(current_app.root_path, "..", "dataset"))
+    uploads_root = current_app.config.get(
+        "UPLOADS_ABSOLUTE_PATH"
+    ) or os.path.abspath(os.path.join(current_app.root_path, "..", "uploads"))
 
     _remove_path(os.path.join(dataset_root, user_id_text))
     if safe_name:
@@ -409,4 +471,6 @@ def _cascade_cleanup_user_data(user_id: str) -> None:
         leaves.delete_many({"user_id": {"$in": uid_variants}})
     except Exception:
         # Cascade failures should not block the primary profile deletion.
-        current_app.logger.exception("Cascade cleanup failed for user_id=%s", user_id)
+        current_app.logger.exception(
+            "Cascade cleanup failed for user_id=%s", user_id
+        )

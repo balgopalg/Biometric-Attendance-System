@@ -1,16 +1,13 @@
 """Notification inbox routes for authenticated users."""
 
-from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
-
 from app.models.user import find_user_by_email
+from app.services.notification_service import (delete_notification,
+                                               list_notifications,
+                                               mark_all_notifications_read,
+                                               mark_notification_read)
 from app.utils.validation import validate_object_id
-from app.services.notification_service import (
-    list_notifications,
-    mark_all_notifications_read,
-    mark_notification_read,
-    delete_notification,
-)
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 notifications_bp = Blueprint("notifications", __name__)
 
@@ -53,7 +50,12 @@ def read_all_notifications():
         return jsonify({"error": "User not found"}), 404
 
     updated = mark_all_notifications_read(user.get("_id"))
-    return jsonify({"message": "All notifications marked as read", "updated_count": updated})
+    return jsonify(
+        {
+            "message": "All notifications marked as read",
+            "updated_count": updated,
+        }
+    )
 
 
 @notifications_bp.route("/<notification_id>", methods=["DELETE"])
@@ -68,6 +70,9 @@ def remove_notification(notification_id):
         return jsonify({"error": "Invalid notification ID"}), 400
 
     if not delete_notification(user.get("_id"), notification_id):
-        return jsonify({"error": "Notification not found or already deleted"}), 404
+        return (
+            jsonify({"error": "Notification not found or already deleted"}),
+            404,
+        )
 
     return jsonify({"message": "Notification deleted successfully"})

@@ -5,20 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
-from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
-
-from app.models.calendar import (
-    archive_existing_calendars,
-    create_calendar,
-    get_current_calendar,
-    list_calendars,
-    serialize_calendar,
-)
+from app.models.calendar import (archive_existing_calendars, create_calendar,
+                                 get_current_calendar, list_calendars,
+                                 serialize_calendar)
 from app.models.user import find_user_by_email
 from app.services.calendar_ocr import extract_calendar_draft
 from app.utils.auth_decorators import role_required
-
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 calendar_bp = Blueprint("calendar", __name__)
 
@@ -71,10 +65,15 @@ def _storage_date(value):
 def _normalize_holiday_items(items):
     normalized = []
     seen = set()
-    for item in (items or []):
+    for item in items or []:
         if not isinstance(item, dict):
             continue
-        label = _to_text(item.get("label") or item.get("eventName") or item.get("name") or "Holiday")
+        label = _to_text(
+            item.get("label")
+            or item.get("eventName")
+            or item.get("name")
+            or "Holiday"
+        )
         date_value = _storage_date(item.get("date") or item.get("startDate"))
         if not date_value:
             continue
@@ -104,7 +103,7 @@ def _year_sundays_storage(year):
 
 def _merge_sundays(year, provided):
     values = set(_year_sundays_storage(year))
-    for item in (provided or []):
+    for item in provided or []:
         parsed = _storage_date(item)
         if parsed:
             values.add(parsed)
@@ -121,13 +120,19 @@ def _holiday_bucket_for_type(event_type: str) -> str:
     return "optional" if "optional" in text else "regular"
 
 
-def _extract_calendar_draft_from_excel(*, file_bytes: bytes, year_hint=None, source_filename=""):
+def _extract_calendar_draft_from_excel(
+    *, file_bytes: bytes, year_hint=None, source_filename=""
+):
     try:
         import openpyxl  # lazy import to keep startup light
     except Exception:
-        raise RuntimeError("openpyxl is required for Excel extraction. Install backend dependencies.")
+        raise RuntimeError(
+            "openpyxl is required for Excel extraction. Install backend dependencies."
+        )
 
-    wb = openpyxl.load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+    wb = openpyxl.load_workbook(
+        BytesIO(file_bytes), read_only=True, data_only=True
+    )
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
     if not rows:
@@ -138,17 +143,35 @@ def _extract_calendar_draft_from_excel(*, file_bytes: bytes, year_hint=None, sou
     required = ("eventname", "startdate", "enddate", "eventtype")
     missing = [name for name in required if name not in index_by_name]
     if missing:
-        raise ValueError(f"Missing required Excel columns: {', '.join(missing)}")
+        raise ValueError(
+            f"Missing required Excel columns: {', '.join(missing)}"
+        )
 
     holidays = []
     optional_holidays = []
     all_dates = []
 
     for row_num, row in enumerate(rows[1:], start=2):
-        event_name = _to_text(row[index_by_name["eventname"]] if index_by_name["eventname"] < len(row) else "")
-        start_raw = row[index_by_name["startdate"]] if index_by_name["startdate"] < len(row) else None
-        end_raw = row[index_by_name["enddate"]] if index_by_name["enddate"] < len(row) else None
-        event_type = _to_text(row[index_by_name["eventtype"]] if index_by_name["eventtype"] < len(row) else "")
+        event_name = _to_text(
+            row[index_by_name["eventname"]]
+            if index_by_name["eventname"] < len(row)
+            else ""
+        )
+        start_raw = (
+            row[index_by_name["startdate"]]
+            if index_by_name["startdate"] < len(row)
+            else None
+        )
+        end_raw = (
+            row[index_by_name["enddate"]]
+            if index_by_name["enddate"] < len(row)
+            else None
+        )
+        event_type = _to_text(
+            row[index_by_name["eventtype"]]
+            if index_by_name["eventtype"] < len(row)
+            else ""
+        )
 
         if not event_name:
             continue
@@ -235,7 +258,10 @@ def extract_calendar(user):
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
     except Exception:
-        return jsonify({"error": "Failed to extract calendar text from image"}), 500
+        return (
+            jsonify({"error": "Failed to extract calendar text from image"}),
+            500,
+        )
 
     draft["department_id"] = str(resolved_department_id or "")
     draft["uploaded_by"] = str(user.get("_id") or "")
@@ -251,12 +277,26 @@ def extract_calendar_excel(user):
     if not uploaded or not uploaded.filename:
         return jsonify({"error": "Holiday Excel file is required"}), 400
     if not uploaded.filename.lower().endswith((".xlsx", ".xlsm", ".xltx")):
-        return jsonify({"error": "Unsupported file type. Please upload .xlsx, .xlsm or .xltx"}), 400
+        return (
+            jsonify(
+                {
+                    "error": "Unsupported file type. Please upload .xlsx, .xlsm or .xltx"
+                }
+            ),
+            400,
+        )
 
     # H-9 fix: Validate magic bytes (ZIP/PK signature) before passing to openpyxl
     file_bytes = uploaded.read()
-    if len(file_bytes) < 4 or file_bytes[:2] != b'PK':
-        return jsonify({"error": "Invalid file format. The uploaded file is not a valid Excel document."}), 400
+    if len(file_bytes) < 4 or file_bytes[:2] != b"PK":
+        return (
+            jsonify(
+                {
+                    "error": "Invalid file format. The uploaded file is not a valid Excel document."
+                }
+            ),
+            400,
+        )
 
     year_hint = _to_year(request.form.get("year"))
     try:
@@ -270,8 +310,13 @@ def extract_calendar_excel(user):
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception:
-        current_app.logger.exception("Failed to extract calendar data from Excel")
-        return jsonify({"error": "Failed to extract calendar data from Excel"}), 500
+        current_app.logger.exception(
+            "Failed to extract calendar data from Excel"
+        )
+        return (
+            jsonify({"error": "Failed to extract calendar data from Excel"}),
+            500,
+        )
 
     draft["department_id"] = ""
     draft["uploaded_by"] = str(user.get("_id") or "")
@@ -292,7 +337,9 @@ def save_calendar(user):
 
     holidays = data.get("holidays") or []
     optional_holidays = data.get("optional_holidays") or []
-    if not isinstance(holidays, list) or not isinstance(optional_holidays, list):
+    if not isinstance(holidays, list) or not isinstance(
+        optional_holidays, list
+    ):
         return jsonify({"error": "Holiday payload must be a list"}), 400
 
     normalized_holidays = _normalize_holiday_items(holidays)
@@ -304,7 +351,8 @@ def save_calendar(user):
         {
             "department_id": resolved_department_id,
             "year": year,
-            "title": _to_text(data.get("title")) or f"Academic Calendar {year}",
+            "title": _to_text(data.get("title"))
+            or f"Academic Calendar {year}",
             "source_filename": _to_text(data.get("source_filename")),
             "raw_text": _to_text(data.get("raw_text")),
             "holidays": normalized_holidays,
@@ -319,7 +367,12 @@ def save_calendar(user):
         }
     )
 
-    return jsonify({"message": "Calendar published successfully", "calendar": _calendar_payload(calendar_doc)})
+    return jsonify(
+        {
+            "message": "Calendar published successfully",
+            "calendar": _calendar_payload(calendar_doc),
+        }
+    )
 
 
 @calendar_bp.route("/current", methods=["GET"])
@@ -330,7 +383,9 @@ def current_calendar():
     year = request.args.get("year")
 
     calendar_doc = get_current_calendar(department_id=None, year=year)
-    return jsonify({"calendar": _calendar_payload(calendar_doc) if calendar_doc else None})
+    return jsonify(
+        {"calendar": _calendar_payload(calendar_doc) if calendar_doc else None}
+    )
 
 
 @calendar_bp.route("", methods=["GET"])
@@ -342,6 +397,8 @@ def list_calendar_records(user):
 
     items = [
         _calendar_payload(item)
-        for item in list_calendars(department_id=None, year=year, status=status)
+        for item in list_calendars(
+            department_id=None, year=year, status=status
+        )
     ]
     return jsonify({"items": items})

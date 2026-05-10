@@ -3,11 +3,9 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.extensions import get_collection
 from bson import ObjectId
 from bson.errors import InvalidId
-
-from app.extensions import get_collection
-
 
 VALID_TIMETABLE_STATUSES = {"draft", "active", "archived"}
 
@@ -88,10 +86,14 @@ def list_timetables(
     if session_text:
         query["academic_session"] = session_text
 
-    return list(timetables.find(query).sort([("updated_at", -1), ("created_at", -1)]))
+    return list(
+        timetables.find(query).sort([("updated_at", -1), ("created_at", -1)])
+    )
 
 
-def update_timetable(timetable_id: str, fields: Dict[str, Any]) -> Optional[dict]:
+def update_timetable(
+    timetable_id: str, fields: Dict[str, Any]
+) -> Optional[dict]:
     oid = _to_object_id(timetable_id)
     if not oid:
         return None
@@ -133,12 +135,12 @@ def list_timeslots_for_timetable(timetable_id: str) -> List[dict]:
 
     slots_col = get_collection("academic", "timetable_slots")
     return list(
-        slots_col
-        .find({"timetable_id": oid})
-        .sort([
-            ("day_index", 1),
-            ("start_minutes", 1),
-        ])
+        slots_col.find({"timetable_id": oid}).sort(
+            [
+                ("day_index", 1),
+                ("start_minutes", 1),
+            ]
+        )
     )
 
 
@@ -173,7 +175,13 @@ def get_timeslot_by_id(slot_id: str) -> Optional[dict]:
     return slots_col.find_one({"_id": oid})
 
 
-def clear_active_timetable_for_scope(*, department_id: Any, course_id: Any, semester: Any, academic_session: Any = None) -> None:
+def clear_active_timetable_for_scope(
+    *,
+    department_id: Any,
+    course_id: Any,
+    semester: Any,
+    academic_session: Any = None,
+) -> None:
     timetables = get_collection("academic", "timetables")
     query: Dict[str, Any] = {
         "department_id": _to_object_id(department_id),
@@ -189,7 +197,15 @@ def clear_active_timetable_for_scope(*, department_id: Any, course_id: Any, seme
     if session_text:
         query["academic_session"] = session_text
 
-    timetables.update_many(query, {"$set": {"status": "draft", "updated_at": datetime.now(timezone.utc)}})
+    timetables.update_many(
+        query,
+        {
+            "$set": {
+                "status": "draft",
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
+    )
 
 
 def serialize_timetable(doc: Optional[dict]) -> Optional[dict]:
@@ -197,7 +213,13 @@ def serialize_timetable(doc: Optional[dict]) -> Optional[dict]:
         return None
     payload = dict(doc)
     payload["_id"] = str(payload.get("_id"))
-    for key in ("department_id", "course_id", "created_by", "updated_by", "generated_by"):
+    for key in (
+        "department_id",
+        "course_id",
+        "created_by",
+        "updated_by",
+        "generated_by",
+    ):
         if payload.get(key) is not None:
             payload[key] = str(payload.get(key))
     return payload

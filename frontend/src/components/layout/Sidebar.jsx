@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useTheme } from '../../context/ThemeContext';
+import resolveImageUrl from '../../utils/resolveImageUrl';
 import {
   HiOutlineAcademicCap, HiOutlineUsers, HiOutlineBookOpen,
   HiOutlineClipboardList, HiOutlineShieldCheck, HiOutlineLogout,
@@ -75,6 +76,7 @@ function getAdminBasePath(role) {
 }
 
 function SidebarAvatar({ user, initials, size = 44, borderColor, backgroundColor, textColor }) {
+  const profileImageUrl = resolveImageUrl(user?.profile_picture_url);
   const baseStyle = {
     width: size,
     height: size,
@@ -89,10 +91,10 @@ function SidebarAvatar({ user, initials, size = 44, borderColor, backgroundColor
     overflow: 'hidden',
   };
 
-  if (user?.profile_picture_url) {
+  if (profileImageUrl) {
     return (
       <img
-        src={user.profile_picture_url}
+        src={profileImageUrl}
         alt={`${user?.name || 'User'} avatar`}
         style={{ ...baseStyle, objectFit: 'cover', background: backgroundColor }}
       />

@@ -5,30 +5,24 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from bson import ObjectId
-from flask import Blueprint, jsonify, request
-
 from app.extensions import get_collection
 from app.models.course import get_course_by_id
 from app.models.enrollment import get_profile_by_user
 from app.models.paper import get_papers_by_course
-from app.models.timetable import (
-    clear_active_timetable_for_scope,
-    create_timeslots,
-    create_timetable,
-    delete_timeslots_for_timetable,
-    get_timetable_by_id,
-    list_timeslots_for_timetable,
-    list_timetables,
-    serialize_slot,
-    serialize_timetable,
-    update_timeslot,
-    update_timetable,
-)
+from app.models.timetable import (clear_active_timetable_for_scope,
+                                  create_timeslots, create_timetable,
+                                  delete_timeslots_for_timetable,
+                                  get_timetable_by_id,
+                                  list_timeslots_for_timetable,
+                                  list_timetables, serialize_slot,
+                                  serialize_timetable, update_timeslot,
+                                  update_timetable)
 from app.services.timetable_generator import WEEKDAYS, generate_timetable_slots
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_many
-
+from app.utils.helpers import (_as_text, _id_variants, _to_bool, _to_int,
+                               _to_oid, sanitise_many, sanitise_mongo_doc)
+from bson import ObjectId
+from flask import Blueprint, jsonify, request
 
 timetable_bp = Blueprint("timetable", __name__)
 
@@ -37,32 +31,30 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-from app.utils.helpers import (
-    sanitise_mongo_doc, 
-    sanitise_many, 
-    _to_int, 
-    _as_text, 
-    _id_variants,
-    _to_oid,
-    _to_bool
-)
-
-
 def _normalize_user_role(user: dict) -> str:
     role = _text(user.get("role"))
     return "super_admin" if role == "admin" else role
 
 
-def _normalize_department_scope(user: dict, payload_department_id: Any, *, required_for_super_admin: bool = True) -> Optional[ObjectId]:
+def _normalize_department_scope(
+    user: dict,
+    payload_department_id: Any,
+    *,
+    required_for_super_admin: bool = True,
+) -> Optional[ObjectId]:
     user_role = _normalize_user_role(user)
     user_department_id = _to_oid(user.get("department_id"))
 
     if user_role == "department_admin":
         if not user_department_id:
-            raise ValueError("Department admin is not linked to any department")
+            raise ValueError(
+                "Department admin is not linked to any department"
+            )
         payload_dep_oid = _to_oid(payload_department_id)
         if payload_dep_oid and payload_dep_oid != user_department_id:
-            raise PermissionError("department_id does not match your assigned department")
+            raise PermissionError(
+                "department_id does not match your assigned department"
+            )
         return user_department_id
 
     dep_oid = _to_oid(payload_department_id)
@@ -74,7 +66,9 @@ def _normalize_department_scope(user: dict, payload_department_id: Any, *, requi
     return user_department_id
 
 
-def _get_papers_for_generation(*, department_id: ObjectId, course_id: ObjectId, semester: int) -> List[dict]:
+def _get_papers_for_generation(
+    *, department_id: ObjectId, course_id: ObjectId, semester: int
+) -> List[dict]:
     papers = []
     for paper in get_papers_by_course(str(course_id)):
         sem = paper.get("semester")
@@ -109,12 +103,16 @@ def _enrich_slots(slots: List[dict]) -> List[dict]:
 
     if paper_ids:
         papers_col = get_collection("academic", "papers")
-        for doc in papers_col.find({"_id": {"$in": list({pid for pid in paper_ids})}}):
+        for doc in papers_col.find(
+            {"_id": {"$in": list({pid for pid in paper_ids})}}
+        ):
             papers_map[str(doc.get("_id"))] = doc
 
     if lecturer_ids:
         users_col = get_collection("auth", "users")
-        for doc in users_col.find({"_id": {"$in": list({lid for lid in lecturer_ids})}}):
+        for doc in users_col.find(
+            {"_id": {"$in": list({lid for lid in lecturer_ids})}}
+        ):
             users_map[str(doc.get("_id"))] = doc
 
     enriched = []
@@ -122,8 +120,12 @@ def _enrich_slots(slots: List[dict]) -> List[dict]:
         slot = serialize_slot(raw) or {}
         paper = papers_map.get(_text(slot.get("paper_id")))
         lecturer = users_map.get(_text(slot.get("lecturer_id")))
-        slot["paper_name"] = (paper or {}).get("name") or slot.get("paper_name") or ""
-        slot["paper_code"] = (paper or {}).get("code") or slot.get("paper_code") or ""
+        slot["paper_name"] = (
+            (paper or {}).get("name") or slot.get("paper_name") or ""
+        )
+        slot["paper_code"] = (
+            (paper or {}).get("code") or slot.get("paper_code") or ""
+        )
         slot["lecturer_name"] = (lecturer or {}).get("name") or ""
         enriched.append(slot)
 
@@ -136,7 +138,9 @@ def _build_timetable_payload(doc: dict, include_slots: bool = True) -> dict:
     dep = None
     course = None
     if payload.get("department_id"):
-        dep = get_collection("academic", "departments").find_one({"_id": _to_oid(payload.get("department_id"))})
+        dep = get_collection("academic", "departments").find_one(
+            {"_id": _to_oid(payload.get("department_id"))}
+        )
     if payload.get("course_id"):
         course = get_course_by_id(payload.get("course_id"))
 
@@ -228,7 +232,11 @@ def _derive_academic_session(start_year: int, course_duration: Any) -> str:
 
 
 def _intra_conflicts(slots: List[dict]) -> List[dict]:
-    normalized = [item for item in (_normalize_slot_for_conflict(slot) for slot in slots) if item]
+    normalized = [
+        item
+        for item in (_normalize_slot_for_conflict(slot) for slot in slots)
+        if item
+    ]
     conflicts: List[dict] = []
 
     # Cache for enrichment
@@ -237,17 +245,27 @@ def _intra_conflicts(slots: List[dict]) -> List[dict]:
 
     def get_lec_name(lid):
         lid_str = str(lid)
-        if lid_str in lecturer_names: return lecturer_names[lid_str]
-        doc = get_collection("auth", "users").find_one({"_id": _to_oid(lid)}, {"name": 1})
+        if lid_str in lecturer_names:
+            return lecturer_names[lid_str]
+        doc = get_collection("auth", "users").find_one(
+            {"_id": _to_oid(lid)}, {"name": 1}
+        )
         name = doc.get("name") if doc else "Unknown Lecturer"
         lecturer_names[lid_str] = name
         return name
 
     def get_pap_name(pid):
         pid_str = str(pid)
-        if pid_str in paper_names: return paper_names[pid_str]
-        doc = get_collection("academic", "papers").find_one({"_id": _to_oid(pid)}, {"name": 1, "code": 1})
-        name = f"{doc.get('code')} - {doc.get('name')}" if doc else "Unknown Paper"
+        if pid_str in paper_names:
+            return paper_names[pid_str]
+        doc = get_collection("academic", "papers").find_one(
+            {"_id": _to_oid(pid)}, {"name": 1, "code": 1}
+        )
+        name = (
+            f"{doc.get('code')} - {doc.get('name')}"
+            if doc
+            else "Unknown Paper"
+        )
         paper_names[pid_str] = name
         return name
 
@@ -273,13 +291,17 @@ def _intra_conflicts(slots: List[dict]) -> List[dict]:
                     "day_index": left.get("day_index"),
                     "day": left.get("day"),
                     "slot_a": {
-                        "slot_id": _text(left.get("_id") or left.get("slot_id")),
+                        "slot_id": _text(
+                            left.get("_id") or left.get("slot_id")
+                        ),
                         "paper_name": get_pap_name(left.get("paper_id")),
                         "start_time": left.get("start_time"),
                         "end_time": left.get("end_time"),
                     },
                     "slot_b": {
-                        "slot_id": _text(right.get("_id") or right.get("slot_id")),
+                        "slot_id": _text(
+                            right.get("_id") or right.get("slot_id")
+                        ),
                         "paper_name": get_pap_name(right.get("paper_id")),
                         "start_time": right.get("start_time"),
                         "end_time": right.get("end_time"),
@@ -290,8 +312,14 @@ def _intra_conflicts(slots: List[dict]) -> List[dict]:
     return conflicts
 
 
-def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] = None) -> List[dict]:
-    normalized = [item for item in (_normalize_slot_for_conflict(slot) for slot in slots) if item]
+def _active_conflicts(
+    slots: List[dict], *, exclude_timetable_id: Optional[Any] = None
+) -> List[dict]:
+    normalized = [
+        item
+        for item in (_normalize_slot_for_conflict(slot) for slot in slots)
+        if item
+    ]
     if not normalized:
         return []
 
@@ -305,7 +333,10 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
         if exclude_oid:
             active_filter["_id"] = {"$ne": exclude_oid}
 
-    active_timetable_ids = [doc.get("_id") for doc in timetables_col.find(active_filter, {"_id": 1})]
+    active_timetable_ids = [
+        doc.get("_id")
+        for doc in timetables_col.find(active_filter, {"_id": 1})
+    ]
     if not active_timetable_ids:
         return []
 
@@ -321,7 +352,7 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
     )
 
     conflicts: List[dict] = []
-    
+
     # Enrichment cache
     lecturer_names = {}
     paper_names = {}
@@ -329,30 +360,51 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
 
     def get_lec_name(lid):
         lid_str = str(lid)
-        if lid_str in lecturer_names: return lecturer_names[lid_str]
-        doc = get_collection("auth", "users").find_one({"_id": _to_oid(lid)}, {"name": 1})
+        if lid_str in lecturer_names:
+            return lecturer_names[lid_str]
+        doc = get_collection("auth", "users").find_one(
+            {"_id": _to_oid(lid)}, {"name": 1}
+        )
         name = doc.get("name") if doc else "Unknown Lecturer"
         lecturer_names[lid_str] = name
         return name
 
     def get_pap_name(pid):
         pid_str = str(pid)
-        if pid_str in paper_names: return paper_names[pid_str]
-        doc = get_collection("academic", "papers").find_one({"_id": _to_oid(pid)}, {"name": 1, "code": 1})
-        name = f"{doc.get('code')} - {doc.get('name')}" if doc else "Unknown Paper"
+        if pid_str in paper_names:
+            return paper_names[pid_str]
+        doc = get_collection("academic", "papers").find_one(
+            {"_id": _to_oid(pid)}, {"name": 1, "code": 1}
+        )
+        name = (
+            f"{doc.get('code')} - {doc.get('name')}"
+            if doc
+            else "Unknown Paper"
+        )
         paper_names[pid_str] = name
         return name
 
     def get_tt_info(ttid):
         ttid_str = str(ttid)
-        if ttid_str in timetable_info: return timetable_info[ttid_str]
-        tt_doc = get_collection("academic", "timetables").find_one({"_id": _to_oid(ttid)})
-        if not tt_doc: return {"label": "Unknown Timetable"}
-        
-        course_doc = get_collection("academic", "courses").find_one({"_id": _to_oid(tt_doc.get("course_id"))}, {"name": 1})
-        course_name = course_doc.get("name") if course_doc else "Unknown Course"
+        if ttid_str in timetable_info:
+            return timetable_info[ttid_str]
+        tt_doc = get_collection("academic", "timetables").find_one(
+            {"_id": _to_oid(ttid)}
+        )
+        if not tt_doc:
+            return {"label": "Unknown Timetable"}
+
+        course_doc = get_collection("academic", "courses").find_one(
+            {"_id": _to_oid(tt_doc.get("course_id"))}, {"name": 1}
+        )
+        course_name = (
+            course_doc.get("name") if course_doc else "Unknown Course"
+        )
         label = f"{course_name} (Sem {tt_doc.get('semester')})"
-        info = {"label": label, "academic_session": tt_doc.get("academic_session")}
+        info = {
+            "label": label,
+            "academic_session": tt_doc.get("academic_session"),
+        }
         timetable_info[ttid_str] = info
         return info
 
@@ -361,7 +413,9 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
             existing_norm = _normalize_slot_for_conflict(existing)
             if not existing_norm:
                 continue
-            if existing_norm.get("lecturer_id") != candidate.get("lecturer_id"):
+            if existing_norm.get("lecturer_id") != candidate.get(
+                "lecturer_id"
+            ):
                 continue
             if existing_norm.get("day_index") != candidate.get("day_index"):
                 continue
@@ -381,17 +435,24 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
                     "day_index": candidate.get("day_index"),
                     "day": candidate.get("day"),
                     "candidate_slot": {
-                        "slot_id": _text(candidate.get("_id") or candidate.get("slot_id")),
+                        "slot_id": _text(
+                            candidate.get("_id") or candidate.get("slot_id")
+                        ),
                         "paper_name": get_pap_name(candidate.get("paper_id")),
                         "start_time": candidate.get("start_time"),
                         "end_time": candidate.get("end_time"),
                     },
                     "existing_slot": {
-                        "slot_id": _text(existing_norm.get("_id") or existing_norm.get("slot_id")),
+                        "slot_id": _text(
+                            existing_norm.get("_id")
+                            or existing_norm.get("slot_id")
+                        ),
                         "timetable_id": _text(tt_id),
                         "timetable_label": tt_details.get("label"),
                         "academic_session": tt_details.get("academic_session"),
-                        "paper_name": get_pap_name(existing_norm.get("paper_id")),
+                        "paper_name": get_pap_name(
+                            existing_norm.get("paper_id")
+                        ),
                         "start_time": existing_norm.get("start_time"),
                         "end_time": existing_norm.get("end_time"),
                     },
@@ -401,9 +462,18 @@ def _active_conflicts(slots: List[dict], *, exclude_timetable_id: Optional[Any] 
     return conflicts
 
 
-def _assert_no_conflicts(slots: List[dict], *, check_active_conflicts: bool, exclude_timetable_id: Optional[Any] = None) -> Optional[dict]:
+def _assert_no_conflicts(
+    slots: List[dict],
+    *,
+    check_active_conflicts: bool,
+    exclude_timetable_id: Optional[Any] = None,
+) -> Optional[dict]:
     intra = _intra_conflicts(slots)
-    active = _active_conflicts(slots, exclude_timetable_id=exclude_timetable_id) if check_active_conflicts else []
+    active = (
+        _active_conflicts(slots, exclude_timetable_id=exclude_timetable_id)
+        if check_active_conflicts
+        else []
+    )
     if not intra and not active:
         return None
 
@@ -416,8 +486,16 @@ def _assert_no_conflicts(slots: List[dict], *, check_active_conflicts: bool, exc
     }
 
 
-def _build_conflict_context(*, papers: List[dict], exclude_timetable_id: Optional[Any] = None) -> Dict[str, Any]:
-    lecturer_ids = sorted({str(_to_oid(p.get("lecturer_id")) or "") for p in papers if _to_oid(p.get("lecturer_id"))})
+def _build_conflict_context(
+    *, papers: List[dict], exclude_timetable_id: Optional[Any] = None
+) -> Dict[str, Any]:
+    lecturer_ids = sorted(
+        {
+            str(_to_oid(p.get("lecturer_id")) or "")
+            for p in papers
+            if _to_oid(p.get("lecturer_id"))
+        }
+    )
     if not lecturer_ids:
         return {"lecturer_busy_slots": {}}
 
@@ -428,13 +506,20 @@ def _build_conflict_context(*, papers: List[dict], exclude_timetable_id: Optiona
         if exclude_oid:
             active_filter["_id"] = {"$ne": exclude_oid}
 
-    active_timetable_ids = [doc.get("_id") for doc in timetables_col.find(active_filter, {"_id": 1})]
+    active_timetable_ids = [
+        doc.get("_id")
+        for doc in timetables_col.find(active_filter, {"_id": 1})
+    ]
     if not active_timetable_ids:
         return {"lecturer_busy_slots": {}}
 
     slots_col = get_collection("academic", "timetable_slots")
-    lecturer_oid_map = {ObjectId(lecturer_id): lecturer_id for lecturer_id in lecturer_ids}
-    busy_slots: Dict[str, List[dict]] = {lecturer_id: [] for lecturer_id in lecturer_ids}
+    lecturer_oid_map = {
+        ObjectId(lecturer_id): lecturer_id for lecturer_id in lecturer_ids
+    }
+    busy_slots: Dict[str, List[dict]] = {
+        lecturer_id: [] for lecturer_id in lecturer_ids
+    }
 
     for slot in slots_col.find(
         {
@@ -514,7 +599,11 @@ def _plan_generation_with_conflict_retries(
     last_conflict_payload: Optional[dict] = None
     for attempt_idx in range(attempts):
         use_randomized_order = retry_on_conflict
-        seed_for_attempt = (base_seed + attempt_idx) if (use_randomized_order and base_seed is not None) else None
+        seed_for_attempt = (
+            (base_seed + attempt_idx)
+            if (use_randomized_order and base_seed is not None)
+            else None
+        )
 
         generated_slots, generation_meta = generate_timetable_slots(
             papers=papers,
@@ -566,7 +655,9 @@ def _plan_generation_with_conflict_retries(
 def list_academic_sessions_for_scope(user):
     """List available academic sessions and semester options for a course."""
     try:
-        department_id = _normalize_department_scope(user, request.args.get("department_id"))
+        department_id = _normalize_department_scope(
+            user, request.args.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -582,8 +673,12 @@ def list_academic_sessions_for_scope(user):
         query["department_id"] = department_id
 
     sessions = set()
-    for profile in profiles_col.find(query, {"academic_session": 1, "academic_year": 1}):
-        value = _text(profile.get("academic_session") or profile.get("academic_year"))
+    for profile in profiles_col.find(
+        query, {"academic_session": 1, "academic_year": 1}
+    ):
+        value = _text(
+            profile.get("academic_session") or profile.get("academic_year")
+        )
         if value:
             sessions.add(value)
 
@@ -623,7 +718,9 @@ def list_academic_sessions_for_scope(user):
 def list_papers_for_timetable(user):
     """List papers available for timetable generation, filtered by course and semester."""
     try:
-        department_id = _normalize_department_scope(user, request.args.get("department_id"))
+        department_id = _normalize_department_scope(
+            user, request.args.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -637,7 +734,10 @@ def list_papers_for_timetable(user):
     try:
         semester = int(semester_text)
     except Exception:
-        return jsonify({"error": "semester is required and must be numeric"}), 400
+        return (
+            jsonify({"error": "semester is required and must be numeric"}),
+            400,
+        )
 
     papers = _get_papers_for_generation(
         department_id=department_id,
@@ -653,7 +753,11 @@ def list_papers_for_timetable(user):
 def list_admin_timetables(user):
     """List all timetables for a department with optional course, semester, and status filters."""
     try:
-        department_id = _normalize_department_scope(user, request.args.get("department_id"), required_for_super_admin=False)
+        department_id = _normalize_department_scope(
+            user,
+            request.args.get("department_id"),
+            required_for_super_admin=False,
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -673,7 +777,12 @@ def list_admin_timetables(user):
         academic_session=academic_session,
     )
 
-    return jsonify([_build_timetable_payload(doc, include_slots=include_slots) for doc in docs])
+    return jsonify(
+        [
+            _build_timetable_payload(doc, include_slots=include_slots)
+            for doc in docs
+        ]
+    )
 
 
 @timetable_bp.route("/admin/generate", methods=["POST"])
@@ -683,7 +792,9 @@ def generate_admin_timetable(user):
     payload = request.get_json(silent=True) or {}
 
     try:
-        department_id = _normalize_department_scope(user, payload.get("department_id"))
+        department_id = _normalize_department_scope(
+            user, payload.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -696,12 +807,18 @@ def generate_admin_timetable(user):
     try:
         semester = int(payload.get("semester"))
     except Exception:
-        return jsonify({"error": "semester is required and must be numeric"}), 400
+        return (
+            jsonify({"error": "semester is required and must be numeric"}),
+            400,
+        )
 
     try:
         class_duration_minutes = int(payload.get("class_duration_minutes", 60))
     except Exception:
-        return jsonify({"error": "class_duration_minutes must be numeric"}), 400
+        return (
+            jsonify({"error": "class_duration_minutes must be numeric"}),
+            400,
+        )
 
     class_start_time = _text(payload.get("class_start_time"))
     class_end_time = _text(payload.get("class_end_time"))
@@ -713,9 +830,17 @@ def generate_admin_timetable(user):
         try:
             max_classes_per_day = int(max_classes_per_day_raw)
         except Exception:
-            return jsonify({"error": "max_classes_per_day must be numeric"}), 400
+            return (
+                jsonify({"error": "max_classes_per_day must be numeric"}),
+                400,
+            )
         if max_classes_per_day <= 0:
-            return jsonify({"error": "max_classes_per_day must be greater than 0"}), 400
+            return (
+                jsonify(
+                    {"error": "max_classes_per_day must be greater than 0"}
+                ),
+                400,
+            )
     status = _text(payload.get("status")).lower() or "draft"
     academic_session = _text(payload.get("academic_session"))
     retry_on_conflict = _to_bool(payload.get("retry_on_conflict"))
@@ -735,9 +860,18 @@ def generate_admin_timetable(user):
             return jsonify({"error": "randomize_seed must be numeric"}), 400
 
     if not class_start_time or not class_end_time:
-        return jsonify({"error": "class_start_time and class_end_time are required"}), 400
+        return (
+            jsonify(
+                {"error": "class_start_time and class_end_time are required"}
+            ),
+            400,
+        )
 
-    weekdays = payload.get("weekdays") if isinstance(payload.get("weekdays"), list) else WEEKDAYS
+    weekdays = (
+        payload.get("weekdays")
+        if isinstance(payload.get("weekdays"), list)
+        else WEEKDAYS
+    )
 
     papers = _get_papers_for_generation(
         department_id=department_id,
@@ -745,28 +879,37 @@ def generate_admin_timetable(user):
         semester=semester,
     )
     if not papers:
-        return jsonify({"error": "No papers found for selected department, course, and semester"}), 400
+        return (
+            jsonify(
+                {
+                    "error": "No papers found for selected department, course, and semester"
+                }
+            ),
+            400,
+        )
 
     conflict_context = _build_conflict_context(papers=papers)
 
     try:
-        generated_slots, generation_meta, conflict_payload = _plan_generation_with_conflict_retries(
-            papers=papers,
-            class_duration_minutes=class_duration_minutes,
-            class_start_time=class_start_time,
-            class_end_time=class_end_time,
-            recess_start_time=recess_start_time,
-            recess_end_time=recess_end_time,
-            weekdays=weekdays,
-            max_classes_per_day=max_classes_per_day,
-            department_id=department_id,
-            course_id=course_id,
-            semester=semester,
-            check_active_conflicts=(status == "active"),
-            retry_on_conflict=retry_on_conflict,
-            retry_attempts=retry_attempts,
-            randomize_seed=randomize_seed,
-            conflict_context=conflict_context,
+        generated_slots, generation_meta, conflict_payload = (
+            _plan_generation_with_conflict_retries(
+                papers=papers,
+                class_duration_minutes=class_duration_minutes,
+                class_start_time=class_start_time,
+                class_end_time=class_end_time,
+                recess_start_time=recess_start_time,
+                recess_end_time=recess_end_time,
+                weekdays=weekdays,
+                max_classes_per_day=max_classes_per_day,
+                department_id=department_id,
+                course_id=course_id,
+                semester=semester,
+                check_active_conflicts=(status == "active"),
+                retry_on_conflict=retry_on_conflict,
+                retry_attempts=retry_attempts,
+                randomize_seed=randomize_seed,
+                conflict_context=conflict_context,
+            )
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -817,7 +960,10 @@ def generate_admin_timetable(user):
 
     create_timeslots(slot_docs)
 
-    return jsonify(_build_timetable_payload(timetable_doc, include_slots=True)), 201
+    return (
+        jsonify(_build_timetable_payload(timetable_doc, include_slots=True)),
+        201,
+    )
 
 
 @timetable_bp.route("/admin/<timetable_id>/slots", methods=["PUT"])
@@ -829,7 +975,9 @@ def update_admin_timetable_slots(user, timetable_id):
         return jsonify({"error": "Timetable not found"}), 404
 
     try:
-        scoped_department_id = _normalize_department_scope(user, timetable.get("department_id"))
+        scoped_department_id = _normalize_department_scope(
+            user, timetable.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -839,7 +987,9 @@ def update_admin_timetable_slots(user, timetable_id):
         return jsonify({"error": "Access denied for this timetable"}), 403
 
     payload = request.get_json(silent=True) or {}
-    slot_updates = payload.get("slots") if isinstance(payload.get("slots"), list) else []
+    slot_updates = (
+        payload.get("slots") if isinstance(payload.get("slots"), list) else []
+    )
     status_update = _text(payload.get("status")).lower()
 
     if not slot_updates and not status_update:
@@ -848,7 +998,11 @@ def update_admin_timetable_slots(user, timetable_id):
     current_slots = list_timeslots_for_timetable(timetable_id)
     slots_by_id = {str(slot.get("_id")): dict(slot) for slot in current_slots}
     slots_by_period = {
-        (_text(slot.get("day")), _text(slot.get("start_time")), _text(slot.get("end_time"))): dict(slot)
+        (
+            _text(slot.get("day")),
+            _text(slot.get("start_time")),
+            _text(slot.get("end_time")),
+        ): dict(slot)
         for slot in current_slots
     }
     resolved_updates: Dict[str, Dict[str, Any]] = {}
@@ -859,7 +1013,9 @@ def update_admin_timetable_slots(user, timetable_id):
 
         if slot_id:
             existing_slot = slots_by_id.get(slot_id)
-            if not existing_slot or str(existing_slot.get("timetable_id")) != str(timetable.get("_id")):
+            if not existing_slot or str(
+                existing_slot.get("timetable_id")
+            ) != str(timetable.get("_id")):
                 return jsonify({"error": f"Invalid slot_id: {slot_id}"}), 400
         else:
             day = _text(item.get("day"))
@@ -889,8 +1045,20 @@ def update_admin_timetable_slots(user, timetable_id):
                 except Exception:
                     end_minutes = _time_to_minutes(end_time)
 
-                if day_index is None or start_minutes is None or end_minutes is None or end_minutes <= start_minutes:
-                    return jsonify({"error": "Unable to resolve timetable slot for edit"}), 400
+                if (
+                    day_index is None
+                    or start_minutes is None
+                    or end_minutes is None
+                    or end_minutes <= start_minutes
+                ):
+                    return (
+                        jsonify(
+                            {
+                                "error": "Unable to resolve timetable slot for edit"
+                            }
+                        ),
+                        400,
+                    )
 
                 slot_id = f"__new__{len(slots_by_id)}"
                 existing_slot = {
@@ -915,8 +1083,12 @@ def update_admin_timetable_slots(user, timetable_id):
         if "paper_id" in item:
             updates["paper_id"] = _to_oid(item.get("paper_id"))
             if updates["paper_id"]:
-                paper_doc = get_collection("academic", "papers").find_one({"_id": updates["paper_id"]})
-                updates["lecturer_id"] = _to_oid((paper_doc or {}).get("lecturer_id"))
+                paper_doc = get_collection("academic", "papers").find_one(
+                    {"_id": updates["paper_id"]}
+                )
+                updates["lecturer_id"] = _to_oid(
+                    (paper_doc or {}).get("lecturer_id")
+                )
             else:
                 updates["lecturer_id"] = None
         if "lecturer_id" in item:
@@ -929,7 +1101,10 @@ def update_admin_timetable_slots(user, timetable_id):
             resolved_updates[slot_id] = updates
 
     prospective_slots = list(slots_by_id.values())
-    check_active_conflicts = str(timetable.get("status") or "").lower() == "active" or status_update == "active"
+    check_active_conflicts = (
+        str(timetable.get("status") or "").lower() == "active"
+        or status_update == "active"
+    )
     conflict_payload = _assert_no_conflicts(
         prospective_slots,
         check_active_conflicts=check_active_conflicts,
@@ -950,7 +1125,9 @@ def update_admin_timetable_slots(user, timetable_id):
     if new_slot_docs:
         create_timeslots(new_slot_docs)
 
-    timetable_updates: Dict[str, Any] = {"updated_by": _to_oid(user.get("_id"))}
+    timetable_updates: Dict[str, Any] = {
+        "updated_by": _to_oid(user.get("_id"))
+    }
     if status_update in {"draft", "active", "archived"}:
         if status_update == "active":
             clear_active_timetable_for_scope(
@@ -975,7 +1152,9 @@ def regenerate_admin_timetable(user, timetable_id):
         return jsonify({"error": "Timetable not found"}), 404
 
     try:
-        scoped_department_id = _normalize_department_scope(user, timetable.get("department_id"))
+        scoped_department_id = _normalize_department_scope(
+            user, timetable.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -986,11 +1165,23 @@ def regenerate_admin_timetable(user, timetable_id):
 
     payload = request.get_json(silent=True) or {}
 
-    class_duration_minutes = int(payload.get("class_duration_minutes") or timetable.get("class_duration_minutes") or 60)
-    class_start_time = _text(payload.get("class_start_time") or timetable.get("class_start_time"))
-    class_end_time = _text(payload.get("class_end_time") or timetable.get("class_end_time"))
-    recess_start_time = _text(payload.get("recess_start_time") or timetable.get("recess_start_time"))
-    recess_end_time = _text(payload.get("recess_end_time") or timetable.get("recess_end_time"))
+    class_duration_minutes = int(
+        payload.get("class_duration_minutes")
+        or timetable.get("class_duration_minutes")
+        or 60
+    )
+    class_start_time = _text(
+        payload.get("class_start_time") or timetable.get("class_start_time")
+    )
+    class_end_time = _text(
+        payload.get("class_end_time") or timetable.get("class_end_time")
+    )
+    recess_start_time = _text(
+        payload.get("recess_start_time") or timetable.get("recess_start_time")
+    )
+    recess_end_time = _text(
+        payload.get("recess_end_time") or timetable.get("recess_end_time")
+    )
     max_classes_per_day_raw = payload.get("max_classes_per_day")
     if max_classes_per_day_raw in (None, ""):
         max_classes_per_day_raw = timetable.get("max_classes_per_day")
@@ -999,10 +1190,22 @@ def regenerate_admin_timetable(user, timetable_id):
         try:
             max_classes_per_day = int(max_classes_per_day_raw)
         except Exception:
-            return jsonify({"error": "max_classes_per_day must be numeric"}), 400
+            return (
+                jsonify({"error": "max_classes_per_day must be numeric"}),
+                400,
+            )
         if max_classes_per_day <= 0:
-            return jsonify({"error": "max_classes_per_day must be greater than 0"}), 400
-    weekdays = payload.get("weekdays") if isinstance(payload.get("weekdays"), list) else (timetable.get("weekdays") or WEEKDAYS)
+            return (
+                jsonify(
+                    {"error": "max_classes_per_day must be greater than 0"}
+                ),
+                400,
+            )
+    weekdays = (
+        payload.get("weekdays")
+        if isinstance(payload.get("weekdays"), list)
+        else (timetable.get("weekdays") or WEEKDAYS)
+    )
     retry_on_conflict = _to_bool(payload.get("retry_on_conflict"))
     retry_attempts_raw = payload.get("retry_attempts", 8)
     randomize_seed_raw = payload.get("randomize_seed")
@@ -1025,30 +1228,41 @@ def regenerate_admin_timetable(user, timetable_id):
         semester=int(timetable.get("semester") or 0),
     )
     if not papers:
-        return jsonify({"error": "No papers found for selected course and semester"}), 400
+        return (
+            jsonify(
+                {"error": "No papers found for selected course and semester"}
+            ),
+            400,
+        )
 
-    conflict_context = _build_conflict_context(papers=papers, exclude_timetable_id=timetable.get("_id"))
+    conflict_context = _build_conflict_context(
+        papers=papers, exclude_timetable_id=timetable.get("_id")
+    )
 
-    check_active_conflicts = str(timetable.get("status") or "").lower() == "active"
+    check_active_conflicts = (
+        str(timetable.get("status") or "").lower() == "active"
+    )
     try:
-        generated_slots, generation_meta, conflict_payload = _plan_generation_with_conflict_retries(
-            papers=papers,
-            class_duration_minutes=class_duration_minutes,
-            class_start_time=class_start_time,
-            class_end_time=class_end_time,
-            recess_start_time=recess_start_time,
-            recess_end_time=recess_end_time,
-            weekdays=weekdays,
-            max_classes_per_day=max_classes_per_day,
-            department_id=_to_oid(timetable.get("department_id")),
-            course_id=_to_oid(timetable.get("course_id")),
-            semester=int(timetable.get("semester") or 0),
-            check_active_conflicts=check_active_conflicts,
-            exclude_timetable_id=timetable.get("_id"),
-            retry_on_conflict=retry_on_conflict,
-            retry_attempts=retry_attempts,
-            randomize_seed=randomize_seed,
-            conflict_context=conflict_context,
+        generated_slots, generation_meta, conflict_payload = (
+            _plan_generation_with_conflict_retries(
+                papers=papers,
+                class_duration_minutes=class_duration_minutes,
+                class_start_time=class_start_time,
+                class_end_time=class_end_time,
+                recess_start_time=recess_start_time,
+                recess_end_time=recess_end_time,
+                weekdays=weekdays,
+                max_classes_per_day=max_classes_per_day,
+                department_id=_to_oid(timetable.get("department_id")),
+                course_id=_to_oid(timetable.get("course_id")),
+                semester=int(timetable.get("semester") or 0),
+                check_active_conflicts=check_active_conflicts,
+                exclude_timetable_id=timetable.get("_id"),
+                retry_on_conflict=retry_on_conflict,
+                retry_attempts=retry_attempts,
+                randomize_seed=randomize_seed,
+                conflict_context=conflict_context,
+            )
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1097,7 +1311,9 @@ def set_timetable_status(user, timetable_id):
         return jsonify({"error": "Timetable not found"}), 404
 
     try:
-        scoped_department_id = _normalize_department_scope(user, timetable.get("department_id"))
+        scoped_department_id = _normalize_department_scope(
+            user, timetable.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -1109,7 +1325,12 @@ def set_timetable_status(user, timetable_id):
     payload = request.get_json(silent=True) or {}
     status = _text(payload.get("status")).lower()
     if status not in {"draft", "active", "archived"}:
-        return jsonify({"error": "status must be one of: draft, active, archived"}), 400
+        return (
+            jsonify(
+                {"error": "status must be one of: draft, active, archived"}
+            ),
+            400,
+        )
 
     if status == "active":
         existing_slots = list_timeslots_for_timetable(timetable_id)
@@ -1128,7 +1349,10 @@ def set_timetable_status(user, timetable_id):
             academic_session=timetable.get("academic_session"),
         )
 
-    updated = update_timetable(timetable_id, {"status": status, "updated_by": _to_oid(user.get("_id"))})
+    updated = update_timetable(
+        timetable_id,
+        {"status": status, "updated_by": _to_oid(user.get("_id"))},
+    )
     return jsonify(_build_timetable_payload(updated, include_slots=True))
 
 
@@ -1141,7 +1365,9 @@ def delete_admin_timetable(user, timetable_id):
         return jsonify({"error": "Timetable not found"}), 404
 
     try:
-        scoped_department_id = _normalize_department_scope(user, timetable.get("department_id"))
+        scoped_department_id = _normalize_department_scope(
+            user, timetable.get("department_id")
+        )
     except PermissionError as exc:
         return jsonify({"error": str(exc)}), 403
     except ValueError as exc:
@@ -1152,7 +1378,12 @@ def delete_admin_timetable(user, timetable_id):
 
     status = _text(timetable.get("status")).lower()
     if status not in {"draft", "active"}:
-        return jsonify({"error": "Only draft or active timetables can be deleted"}), 400
+        return (
+            jsonify(
+                {"error": "Only draft or active timetables can be deleted"}
+            ),
+            400,
+        )
 
     delete_timeslots_for_timetable(timetable_id)
     timetables_col = get_collection("academic", "timetables")
@@ -1173,7 +1404,11 @@ def lecturer_my_timetable(user):
     timetables_col = get_collection("academic", "timetables")
 
     status_filter = _text(request.args.get("status")).lower() or "active"
-    timetable_filter = {"status": status_filter} if status_filter in {"active", "draft", "archived"} else {}
+    timetable_filter = (
+        {"status": status_filter}
+        if status_filter in {"active", "draft", "archived"}
+        else {}
+    )
 
     timetable_docs = list(timetables_col.find(timetable_filter, {"_id": 1}))
     timetable_ids = [doc.get("_id") for doc in timetable_docs]
@@ -1181,9 +1416,12 @@ def lecturer_my_timetable(user):
         return jsonify({"items": []})
 
     slots = list(
-        slots_col.find({"timetable_id": {"$in": timetable_ids}, "lecturer_id": lecturer_id}).sort(
-            [("day_index", 1), ("start_minutes", 1)]
-        )
+        slots_col.find(
+            {
+                "timetable_id": {"$in": timetable_ids},
+                "lecturer_id": lecturer_id,
+            }
+        ).sort([("day_index", 1), ("start_minutes", 1)])
     )
 
     items = _enrich_slots(slots)
@@ -1208,7 +1446,9 @@ def student_my_timetable(user):
     except Exception:
         return jsonify({"error": "Student semester is not configured"}), 400
 
-    academic_session = _text(profile.get("academic_session") or profile.get("academic_year"))
+    academic_session = _text(
+        profile.get("academic_session") or profile.get("academic_year")
+    )
 
     docs = list_timetables(
         course_id=course_id,
@@ -1217,10 +1457,14 @@ def student_my_timetable(user):
         academic_session=academic_session,
     )
     if not docs:
-        docs = list_timetables(course_id=course_id, semester=semester, status="active")
+        docs = list_timetables(
+            course_id=course_id, semester=semester, status="active"
+        )
 
     if not docs:
-        return jsonify({"items": [], "semester": semester, "course_id": str(course_id)})
+        return jsonify(
+            {"items": [], "semester": semester, "course_id": str(course_id)}
+        )
 
     timetable = docs[0]
     slots = list_timeslots_for_timetable(str(timetable.get("_id")))
@@ -1231,7 +1475,9 @@ def student_my_timetable(user):
             "course_id": str(course_id),
             "semester": semester,
             "academic_session": academic_session,
-            "timetable": _build_timetable_payload(timetable, include_slots=False),
+            "timetable": _build_timetable_payload(
+                timetable, include_slots=False
+            ),
             "items": items,
         }
     )

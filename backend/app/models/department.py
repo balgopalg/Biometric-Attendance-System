@@ -1,12 +1,11 @@
 """Department model helpers — thin wrappers around PyMongo operations."""
 
 from datetime import datetime, timezone
-from typing import Optional, List
-
-from bson import ObjectId
-from bson.errors import InvalidId
+from typing import List, Optional
 
 from app.extensions import get_collection
+from bson import ObjectId
+from bson.errors import InvalidId
 
 
 def create_department(name: str, code: str) -> dict:
@@ -76,7 +75,12 @@ def delete_department(department_id: str) -> bool:
     departments = get_collection("academic", "departments")
     result = departments.update_one(
         {"_id": oid},
-        {"$set": {"status": "inactive", "updated_at": datetime.now(timezone.utc)}},
+        {
+            "$set": {
+                "status": "inactive",
+                "updated_at": datetime.now(timezone.utc),
+            }
+        },
     )
     return result.modified_count > 0
 
@@ -103,7 +107,9 @@ def find_or_create_department_by_name(name: str) -> dict:
 
     clean_name = name.strip()
     # Build a simple code from the name (first 6 chars, uppercase, no spaces)
-    code = "".join(ch for ch in clean_name.upper() if ch.isalnum())[:6] or "GEN"
+    code = (
+        "".join(ch for ch in clean_name.upper() if ch.isalnum())[:6] or "GEN"
+    )
 
     departments = get_collection("academic", "departments")
     existing = departments.find_one({"name": clean_name})

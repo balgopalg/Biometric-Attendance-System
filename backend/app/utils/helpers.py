@@ -4,7 +4,7 @@ import base64
 import io
 import os
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -12,9 +12,12 @@ from bson import ObjectId
 from PIL import Image, ImageOps
 
 try:
-    from flask import has_app_context, current_app
+    from flask import current_app, has_app_context
 except ImportError:  # pragma: no cover - allows use outside Flask
-    has_app_context = lambda: False  # noqa: E731
+
+    def has_app_context():
+        return False  # noqa: E731
+
     current_app = None
 
 
@@ -233,7 +236,9 @@ def save_jpeg_with_size_bounds(
     max_kb: int = 300,
 ) -> int:
     """Encode and save image as JPEG with bounded file size; returns bytes written."""
-    payload = encode_jpeg_with_size_bounds(img_array, min_kb=min_kb, max_kb=max_kb)
+    payload = encode_jpeg_with_size_bounds(
+        img_array, min_kb=min_kb, max_kb=max_kb
+    )
     with open(file_path, "wb") as f:
         f.write(payload)
     return len(payload)
@@ -268,4 +273,3 @@ def sanitise_mongo_doc(doc: dict) -> dict:
 def sanitise_many(docs) -> list:
     """Sanitise a list of Mongo documents."""
     return [sanitise_mongo_doc(d) for d in docs]
-

@@ -7,6 +7,7 @@ import api from '../../api/axios';
 import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion';
 import Cropper from 'react-easy-crop';
 import { getCroppedImg } from '../../utils/cropImage';
+import resolveImageUrl from '../../utils/resolveImageUrl';
 import {
   HiOutlineBell,
   HiOutlineSun,
@@ -32,6 +33,7 @@ function getInitials(name = '') {
 }
 
 function ProfilePicture({ user, size = 34 }) {
+  const profileImageUrl = resolveImageUrl(user?.profile_picture_url);
   const style = {
     width: size,
     height: size,
@@ -46,10 +48,10 @@ function ProfilePicture({ user, size = 34 }) {
     overflow: 'hidden',
   };
 
-  if (user?.profile_picture_url) {
+  if (profileImageUrl) {
     return (
       <img
-        src={user.profile_picture_url}
+        src={profileImageUrl}
         alt={`${user?.name || 'User'} avatar`}
         style={{ ...style, objectFit: 'cover' }}
       />
@@ -76,7 +78,7 @@ function ProfileModal({ user, onClose, onUploaded }) {
     };
   }, [previewUrl, imageToCrop]);
 
-  const currentPreview = previewUrl || user?.profile_picture_url || '';
+  const currentPreview = previewUrl || resolveImageUrl(user?.profile_picture_url) || '';
 
   const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels);

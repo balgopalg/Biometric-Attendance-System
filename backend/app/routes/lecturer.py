@@ -1,37 +1,38 @@
 """Lecturer routes — paper list, attendance session, PIN commit and rollback."""
 
+import os
 import secrets
 import uuid
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict, defaultdict
 from datetime import datetime, timedelta, timezone
-import os
 from threading import Lock
 
 import cv2
-from flask import Blueprint, request, jsonify, current_app
-from bson import ObjectId
-
 from app.extensions import get_collection
-from app.models.audit import log_action
 from app.models.attendance import log_attendance
+from app.models.audit import log_action
 from app.models.course import get_course_by_id
-from app.models.enrollment import get_profiles_for_paper, get_profile_by_user
-from app.models.paper import get_paper_by_id, get_papers_by_lecturer, increment_total_classes
-from app.models.user import find_user_by_id, set_user_pin, verify_user_pin, get_users_by_ids
-from app.services.face_detection import get_detector
-from app.services.face_recognition import (
-    generate_embedding,
-    generate_embeddings_batch,
-    find_best_match,
-    find_best_match_cached,
-    prepare_profile_candidates,
-)
-from app.services.capture_upload import build_session_upload_folder, save_classroom_upload_bundle
+from app.models.enrollment import get_profile_by_user, get_profiles_for_paper
+from app.models.paper import (get_paper_by_id, get_papers_by_lecturer,
+                              increment_total_classes)
+from app.models.user import (find_user_by_id, get_users_by_ids, set_user_pin,
+                             verify_user_pin)
+from app.observability.logging import attendance_logger
 from app.security.brute_force_protection import BruteForceProtector
 from app.security.rate_limiter import limiter
-from app.observability.logging import attendance_logger
+from app.services.capture_upload import (build_session_upload_folder,
+                                         save_classroom_upload_bundle)
+from app.services.face_detection import get_detector
+from app.services.face_recognition import (find_best_match,
+                                           find_best_match_cached,
+                                           generate_embedding,
+                                           generate_embeddings_batch,
+                                           prepare_profile_candidates)
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import sanitise_mongo_doc, decode_base64_image, decode_image_bytes, _id_variants
+from app.utils.helpers import (_id_variants, decode_base64_image,
+                               decode_image_bytes, sanitise_mongo_doc)
+from bson import ObjectId
+from flask import Blueprint, current_app, jsonify, request
 
 lecturer_bp = Blueprint("lecturer", __name__)
 
@@ -39,7 +40,12 @@ ROLLBACK_MINUTES = 30
 _SESSIONS_NORMALIZED = False
 _SESSIONS_NORMALIZE_LOCK = Lock()
 _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES = 180
-_ALLOWED_UPLOAD_MIME_TYPES = {"image/jpeg", "image/png", "image/bmp", "image/webp"}
+_ALLOWED_UPLOAD_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/bmp",
+    "image/webp",
+}
 _ALLOWED_UPLOAD_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 _MAX_AUTH_UPLOAD_BYTES = 2 * 1024 * 1024
@@ -50,21 +56,29 @@ _SESSION_CANDIDATES_LOCK = Lock()
 
 def _validate_auth_image(image):
     if not image:
-        return None, "Lecturer face photo is required for biometric authentication."
-    
-    content_type = str(getattr(image, "content_type", "") or "").strip().lower()
+        return (
+            None,
+            "Lecturer face photo is required for biometric authentication.",
+        )
+
+    content_type = (
+        str(getattr(image, "content_type", "") or "").strip().lower()
+    )
     extension = os.path.splitext(str(image.filename or "").strip())[1].lower()
     if content_type not in _ALLOWED_UPLOAD_MIME_TYPES:
         return None, "Unsupported image type"
     if extension not in _ALLOWED_UPLOAD_EXTENSIONS:
         return None, "Unsupported image extension"
-        
+
     img_bytes = image.read()
     if not img_bytes:
         return None, "Invalid image file"
     if len(img_bytes) > _MAX_AUTH_UPLOAD_BYTES:
-        return None, f"Image exceeds maximum size of {_MAX_AUTH_UPLOAD_BYTES // (1024*1024)}MB"
-        
+        return (
+            None,
+            f"Image exceeds maximum size of {_MAX_AUTH_UPLOAD_BYTES // (1024*1024)}MB",
+        )
+
     return img_bytes, None
 
 
@@ -115,24 +129,40 @@ def _normalize_attendance_sessions_once():
                 seen.add(text)
                 normalized_students.append(text)
 
-            committed_at = doc.get("committed_at") or doc.get("last_updated_at") or doc.get("created_at")
-            academic_session = doc.get("academic_session") or doc.get("academic_year")
+            committed_at = (
+                doc.get("committed_at")
+                or doc.get("last_updated_at")
+                or doc.get("created_at")
+            )
+            academic_session = doc.get("academic_session") or doc.get(
+                "academic_year"
+            )
             if not academic_session and isinstance(committed_at, datetime):
                 academic_session = str(committed_at.year)
 
             updates = {
                 "session_id": str(session_id),
-                "lecturer_id": str(lecturer_id) if lecturer_id is not None else "",
+                "lecturer_id": (
+                    str(lecturer_id) if lecturer_id is not None else ""
+                ),
                 "paper_id": str(paper_id) if paper_id is not None else "",
                 "user_ids": normalized_students,
-                "academic_session": str(academic_session) if academic_session else "",
-                "academic_year": str(academic_session) if academic_session else "",
-                "last_updated_at": doc.get("last_updated_at") or committed_at or datetime.now(timezone.utc),
+                "academic_session": (
+                    str(academic_session) if academic_session else ""
+                ),
+                "academic_year": (
+                    str(academic_session) if academic_session else ""
+                ),
+                "last_updated_at": doc.get("last_updated_at")
+                or committed_at
+                or datetime.now(timezone.utc),
             }
             if committed_at:
                 updates["committed_at"] = committed_at
 
-            bulk_ops.append(UpdateOne({"_id": doc.get("_id")}, {"$set": updates}))
+            bulk_ops.append(
+                UpdateOne({"_id": doc.get("_id")}, {"$set": updates})
+            )
 
             # Flush in batches of 500 to cap memory usage.
             if len(bulk_ops) >= 500:
@@ -145,7 +175,7 @@ def _normalize_attendance_sessions_once():
         sys_col.update_one(
             {"_id": "normalization_done"},
             {"$set": {"completed_at": datetime.now(timezone.utc)}},
-            upsert=True
+            upsert=True,
         )
         _SESSIONS_NORMALIZED = True
 
@@ -160,11 +190,17 @@ def _enrich_paper(paper):
             course = None
     item["course_name"] = (course or {}).get("name")
     item["course_code"] = (course or {}).get("code")
-    item["course_status"] = str((course or {}).get("status") or "active").lower()
+    item["course_status"] = str(
+        (course or {}).get("status") or "active"
+    ).lower()
     item["is_course_inactive"] = item["course_status"] != "active"
-    item["academic_year"] = item.get("academic_session") or item.get("academic_year")
+    item["academic_year"] = item.get("academic_session") or item.get(
+        "academic_year"
+    )
     item["semester"] = item.get("semester")
-    profiles = get_profiles_for_paper(item.get("_id")) if item.get("_id") else []
+    profiles = (
+        get_profiles_for_paper(item.get("_id")) if item.get("_id") else []
+    )
     item["total_enrolled_students"] = len(profiles)
 
     # Derive academic sessions from enrolled student profiles so lecturer dashboard
@@ -207,7 +243,10 @@ def _active_sessions_collection():
 
 
 def _active_session_timeout_minutes():
-    raw = current_app.config.get("ACTIVE_SESSION_TIMEOUT_MINUTES", _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES)
+    raw = current_app.config.get(
+        "ACTIVE_SESSION_TIMEOUT_MINUTES",
+        _DEFAULT_ACTIVE_SESSION_TIMEOUT_MINUTES,
+    )
     try:
         return max(10, int(raw))
     except (TypeError, ValueError):
@@ -239,7 +278,9 @@ def _get_active_session(session_id):
     if not session_id:
         return None
 
-    session = _active_sessions_collection().find_one({"session_id": str(session_id)})
+    session = _active_sessions_collection().find_one(
+        {"session_id": str(session_id)}
+    )
     if not session:
         return None
 
@@ -248,7 +289,9 @@ def _get_active_session(session_id):
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at <= datetime.now(timezone.utc):
-            _active_sessions_collection().delete_one({"session_id": str(session_id)})
+            _active_sessions_collection().delete_one(
+                {"session_id": str(session_id)}
+            )
             _clear_cached_session_candidates(session_id)
             return None
 
@@ -279,7 +322,7 @@ def _save_recognized_students(session_id, recognized_ids):
         update_doc["$addToSet"] = {
             "recognized": {"$each": list(recognized_ids)}
         }
-        
+
     _active_sessions_collection().update_one(
         {"session_id": str(session_id)},
         update_doc,
@@ -300,7 +343,9 @@ def _within_rollback(session_doc):
     return datetime.now(timezone.utc) <= rollback_until
 
 
-def _replace_session_attendance(session_id, paper_id, lecturer_id, user_ids, method="biometric"):
+def _replace_session_attendance(
+    session_id, paper_id, lecturer_id, user_ids, method="biometric"
+):
     # Replace entire attendance set for this session atomically from caller perspective.
     logs = get_collection("attendance", "attendance_logs")
     logs.delete_many({"session_id": session_id})
@@ -313,32 +358,39 @@ def _session_review_payload(session_doc):
     profiles = get_profiles_for_paper(session_doc.get("paper_id"))
 
     # Batch-fetch all users in one query to avoid N+1
-    all_uids = list(set(
-        list(present_ids) + [p.get("user_id") for p in profiles if p.get("user_id")]
-    ))
+    all_uids = list(
+        set(
+            list(present_ids)
+            + [p.get("user_id") for p in profiles if p.get("user_id")]
+        )
+    )
     users_map = get_users_by_ids(all_uids)
 
     present_students = []
     for uid in present_ids:
         u = users_map.get(uid)
         if u:
-            present_students.append({
-                "user_id": uid,
-                "name": u.get("name", "Unknown"),
-                "email": u.get("email", ""),
-            })
+            present_students.append(
+                {
+                    "user_id": uid,
+                    "name": u.get("name", "Unknown"),
+                    "email": u.get("email", ""),
+                }
+            )
 
     candidates = []
     for profile in profiles:
         uid = profile.get("user_id")
         u = users_map.get(uid)
         if u:
-            candidates.append({
-                "user_id": uid,
-                "name": u.get("name", "Unknown"),
-                "email": u.get("email", ""),
-                "is_present": uid in present_ids,
-            })
+            candidates.append(
+                {
+                    "user_id": uid,
+                    "name": u.get("name", "Unknown"),
+                    "email": u.get("email", ""),
+                    "is_present": uid in present_ids,
+                }
+            )
 
     paper = get_paper_by_id(session_doc.get("paper_id"))
     committed_at = session_doc.get("committed_at")
@@ -348,9 +400,18 @@ def _session_review_payload(session_doc):
         "paper": _enrich_paper(paper) if paper else None,
         "present_students": present_students,
         "candidates": candidates,
-        "committed_at": committed_at.isoformat() if hasattr(committed_at, "isoformat") else committed_at,
-        "rollback_until": rollback_until.isoformat() if hasattr(rollback_until, "isoformat") else rollback_until,
-        "editable": _within_rollback(session_doc) and not session_doc.get("finalized", False),
+        "committed_at": (
+            committed_at.isoformat()
+            if hasattr(committed_at, "isoformat")
+            else committed_at
+        ),
+        "rollback_until": (
+            rollback_until.isoformat()
+            if hasattr(rollback_until, "isoformat")
+            else rollback_until
+        ),
+        "editable": _within_rollback(session_doc)
+        and not session_doc.get("finalized", False),
         "students_marked": len(present_ids),
     }
 
@@ -442,7 +503,9 @@ def _get_hog_detector():
         with _hog_detector_lock:
             if _hog_detector is None:
                 hog = cv2.HOGDescriptor()
-                hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+                hog.setSVMDetector(
+                    cv2.HOGDescriptor_getDefaultPeopleDetector()
+                )
                 _hog_detector = hog
     return _hog_detector
 
@@ -472,8 +535,10 @@ def _extract_classroom_faces(img_rgb, img_bgr=None):
     )
 
     people_faces = []
-    for (x, y, w, h) in boxes:
-        face = detector._build_face_record(img_rgb, int(x), int(y), int(w), int(h), 0.5)
+    for x, y, w, h in boxes:
+        face = detector._build_face_record(
+            img_rgb, int(x), int(y), int(w), int(h), 0.5
+        )
         if face is not None:
             people_faces.append(face)
 
@@ -492,8 +557,12 @@ def my_papers(user):
 @role_required("lecturer")
 def get_pin_status(user):
     """Check whether the current lecturer has a PIN configured."""
-    has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
-    return jsonify({"has_pin": has_pin, "pin_last_set": user.get("pin_last_set")})
+    has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(
+        str(user.get("pin", "")).strip()
+    )
+    return jsonify(
+        {"has_pin": has_pin, "pin_last_set": user.get("pin_last_set")}
+    )
 
 
 @lecturer_bp.route("/pin", methods=["PUT"])
@@ -506,7 +575,11 @@ def set_pin(user):
         return jsonify({"error": "PIN must be exactly 4 digits"}), 400
 
     set_user_pin(str(user["_id"]), pin)
-    log_action("LECTURER_SET_PIN", str(user["_id"]), details="Lecturer updated personal PIN")
+    log_action(
+        "LECTURER_SET_PIN",
+        str(user["_id"]),
+        details="Lecturer updated personal PIN",
+    )
     return jsonify({"message": "PIN updated successfully"}), 200
 
 
@@ -516,7 +589,11 @@ def generate_pin(user):
     """Auto-generate a random 4-digit PIN for the lecturer."""
     pin = f"{secrets.randbelow(10000):04d}"
     set_user_pin(str(user["_id"]), pin)
-    log_action("LECTURER_GENERATE_PIN", str(user["_id"]), details="Lecturer generated a new PIN")
+    log_action(
+        "LECTURER_GENERATE_PIN",
+        str(user["_id"]),
+        details="Lecturer generated a new PIN",
+    )
     return jsonify({"pin": pin, "message": "New PIN generated"}), 200
 
 
@@ -533,26 +610,41 @@ def start_session(user):
     if not paper:
         return jsonify({"error": "Paper not found"}), 404
 
-    course = get_course_by_id(paper.get("course_id")) if paper.get("course_id") else None
+    course = (
+        get_course_by_id(paper.get("course_id"))
+        if paper.get("course_id")
+        else None
+    )
     if not course or str(course.get("status") or "active").lower() != "active":
-        return jsonify({"error": "This subject belongs to an inactive course and cannot take attendance"}), 409
+        return (
+            jsonify(
+                {
+                    "error": "This subject belongs to an inactive course and cannot take attendance"
+                }
+            ),
+            409,
+        )
 
     if str(paper.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "You are not assigned to this paper"}), 403
 
     session_id = str(uuid.uuid4())
-    _create_active_session(session_id, paper_id=paper_id, lecturer_id=str(user["_id"]))
+    _create_active_session(
+        session_id, paper_id=paper_id, lecturer_id=str(user["_id"])
+    )
     active = _get_active_session(session_id) or {}
 
     started_at = active.get("started_at")
     if started_at and hasattr(started_at, "isoformat"):
         started_at = started_at.isoformat()
 
-    return jsonify({
-        "session_id": session_id,
-        "paper": _enrich_paper(paper),
-        "started_at": started_at,
-    })
+    return jsonify(
+        {
+            "session_id": session_id,
+            "paper": _enrich_paper(paper),
+            "started_at": started_at,
+        }
+    )
 
 
 @lecturer_bp.route("/session/recognize", methods=["POST"])
@@ -580,12 +672,22 @@ def recognize_frame(user):
     try:
         img = decode_base64_image(frame_b64)
     except ValueError as e:
-        current_app.logger.warning("Invalid base64 image in identify_frame: %s", e)
+        current_app.logger.warning(
+            "Invalid base64 image in identify_frame: %s", e
+        )
         return jsonify({"error": "Invalid image data"}), 400
     faces = _extract_classroom_faces(img)
 
     if not faces:
-        return jsonify({"new_matches": [], "faces_detected": 0, "candidates_count": 0, "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60), "best_similarity_seen": None})
+        return jsonify(
+            {
+                "new_matches": [],
+                "faces_detected": 0,
+                "candidates_count": 0,
+                "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
+                "best_similarity_seen": None,
+            }
+        )
 
     candidates = _get_cached_session_candidates(session)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
@@ -629,14 +731,20 @@ def recognize_frame(user):
     _save_recognized_students(session_id, list(recognized_set))
     _touch_active_session(session_id)
 
-    return jsonify({
-        "new_matches": new_matches,
-        "faces_detected": len(faces),
-        "total_recognized": len(recognized_set),
-        "candidates_count": len(candidates),
-        "threshold": threshold,
-        "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
-    })
+    return jsonify(
+        {
+            "new_matches": new_matches,
+            "faces_detected": len(faces),
+            "total_recognized": len(recognized_set),
+            "candidates_count": len(candidates),
+            "threshold": threshold,
+            "best_similarity_seen": (
+                round(best_similarity_seen, 4)
+                if best_similarity_seen >= 0
+                else None
+            ),
+        }
+    )
 
 
 @lecturer_bp.route("/session/recognize-image", methods=["POST"])
@@ -645,13 +753,13 @@ def recognize_frame(user):
 def recognize_image(user):
     """Accept an uploaded classroom image, run detection + recognition, return new matches."""
     session_id = request.form.get("session_id")
-    
+
     if not session_id:
         return jsonify({"error": "Invalid session"}), 400
-    
+
     if "image" not in request.files:
         return jsonify({"error": "image file is required"}), 400
-    
+
     file = request.files["image"]
     if not file or file.filename == "":
         return jsonify({"error": "No image file selected"}), 400
@@ -663,7 +771,7 @@ def recognize_image(user):
         return jsonify({"error": "Unsupported image type"}), 400
     if extension not in _ALLOWED_UPLOAD_EXTENSIONS:
         return jsonify({"error": "Unsupported image extension"}), 400
-    
+
     session = _get_active_session(session_id)
     if not session:
         return jsonify({"error": "Invalid session"}), 400
@@ -672,8 +780,10 @@ def recognize_image(user):
 
     paper_id = session["paper_id"]
     paper = get_paper_by_id(paper_id)
-    subject_label = (paper or {}).get("code") or (paper or {}).get("name") or "classroom"
-    
+    subject_label = (
+        (paper or {}).get("code") or (paper or {}).get("name") or "classroom"
+    )
+
     try:
         file_bytes = file.read()
         if not file_bytes:
@@ -684,7 +794,11 @@ def recognize_image(user):
         is_jpeg = file_bytes.startswith(b"\xff\xd8\xff")
         is_png = file_bytes.startswith(b"\x89PNG\r\n\x1a\n")
         is_bmp = file_bytes.startswith(b"BM")
-        is_webp = len(file_bytes) >= 12 and file_bytes[:4] == b"RIFF" and file_bytes[8:12] == b"WEBP"
+        is_webp = (
+            len(file_bytes) >= 12
+            and file_bytes[:4] == b"RIFF"
+            and file_bytes[8:12] == b"WEBP"
+        )
         if not (is_jpeg or is_png or is_bmp or is_webp):
             return jsonify({"error": "Invalid image signature"}), 400
 
@@ -699,11 +813,17 @@ def recognize_image(user):
             error=str(e),
         )
         return jsonify({"error": "Failed to process image"}), 400
-    
+
     faces = _extract_classroom_faces(img, img_bgr=img_raw)
 
-    uploads_dir = current_app.config.get("UPLOADS_ABSOLUTE_PATH") or os.path.abspath(
-        os.path.join(current_app.root_path, "..", current_app.config.get("UPLOAD_FOLDER", "uploads"))
+    uploads_dir = current_app.config.get(
+        "UPLOADS_ABSOLUTE_PATH"
+    ) or os.path.abspath(
+        os.path.join(
+            current_app.root_path,
+            "..",
+            current_app.config.get("UPLOAD_FOLDER", "uploads"),
+        )
     )
 
     session_folder = session.get("upload_folder")
@@ -735,19 +855,21 @@ def recognize_image(user):
         image_dtype=str(img.dtype),
         saved_folder=saved_bundle.get("folder_path"),
     )
-    
+
     if not faces:
-        return jsonify({
-            "new_matches": [],
-            "faces_detected": 0,
-            "candidates_count": 0,
-            "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
-            "best_similarity_seen": None,
-            "saved_folder": saved_bundle["folder_path"],
-            "original_path": saved_bundle["original_path"],
-            "face_paths": saved_bundle["face_paths"],
-        })
-    
+        return jsonify(
+            {
+                "new_matches": [],
+                "faces_detected": 0,
+                "candidates_count": 0,
+                "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
+                "best_similarity_seen": None,
+                "saved_folder": saved_bundle["folder_path"],
+                "original_path": saved_bundle["original_path"],
+                "face_paths": saved_bundle["face_paths"],
+            }
+        )
+
     candidates = _get_cached_session_candidates(session)
     threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
 
@@ -789,18 +911,24 @@ def recognize_image(user):
 
     _save_recognized_students(session_id, list(recognized_set))
     _touch_active_session(session_id)
-    
-    return jsonify({
-        "new_matches": new_matches,
-        "faces_detected": len(faces),
-        "total_recognized": len(recognized_set),
-        "candidates_count": len(candidates),
-        "threshold": threshold,
-        "best_similarity_seen": round(best_similarity_seen, 4) if best_similarity_seen >= 0 else None,
-        "saved_folder": saved_bundle["folder_path"],
-        "original_path": saved_bundle["original_path"],
-        "face_paths": saved_bundle["face_paths"],
-    })
+
+    return jsonify(
+        {
+            "new_matches": new_matches,
+            "faces_detected": len(faces),
+            "total_recognized": len(recognized_set),
+            "candidates_count": len(candidates),
+            "threshold": threshold,
+            "best_similarity_seen": (
+                round(best_similarity_seen, 4)
+                if best_similarity_seen >= 0
+                else None
+            ),
+            "saved_folder": saved_bundle["folder_path"],
+            "original_path": saved_bundle["original_path"],
+            "face_paths": saved_bundle["face_paths"],
+        }
+    )
 
 
 @lecturer_bp.route("/session/recognized", methods=["GET"])
@@ -820,7 +948,11 @@ def session_recognized_list(user):
     recognized_ids = session.get("recognized") or []
     users_map = get_users_by_ids(recognized_ids)
     students = [
-        {"user_id": uid, "name": u.get("name", "Unknown"), "email": u.get("email", "")}
+        {
+            "user_id": uid,
+            "name": u.get("name", "Unknown"),
+            "email": u.get("email", ""),
+        }
         for uid in recognized_ids
         if (u := users_map.get(uid))
     ]
@@ -861,16 +993,23 @@ def stop_session(user):
 @role_required("lecturer")
 def get_auth_mode(user):
     """Return the configured authentication mode (pin or face) for lecturers."""
-    return jsonify({"mode": current_app.config.get("LECTURER_AUTH_MODE", "pin")}), 200
+    return (
+        jsonify({"mode": current_app.config.get("LECTURER_AUTH_MODE", "pin")}),
+        200,
+    )
 
 
 @lecturer_bp.route("/session/commit", methods=["POST"])
 @role_required("lecturer")
 def commit_session(user):
     """Validate PIN or Face, save attendance, and start 30-minute rollback window."""
-    d = request.form if request.mimetype == "multipart/form-data" else request.get_json(silent=True) or {}
+    d = (
+        request.form
+        if request.mimetype == "multipart/form-data"
+        else request.get_json(silent=True) or {}
+    )
     session_id = d.get("session_id")
-    
+
     auth_mode = current_app.config.get("LECTURER_AUTH_MODE", "pin")
 
     if not session_id:
@@ -887,55 +1026,122 @@ def commit_session(user):
         img_bytes, err_msg = _validate_auth_image(image)
         if err_msg:
             return jsonify({"error": err_msg}), 400
-        
+
         try:
             img = decode_image_bytes(img_bytes)
             if img is None:
                 return jsonify({"error": "Invalid image file"}), 400
-            
+
             # Detect face
             detector = get_detector()
             faces = detector.detect_faces(img)
             if not faces:
-                return jsonify({"error": "No face detected in your commit photo. Please ensure your face is clearly visible."}), 400
-                
+                return (
+                    jsonify(
+                        {
+                            "error": "No face detected in your commit photo. Please ensure your face is clearly visible."
+                        }
+                    ),
+                    400,
+                )
+
             # Generate embedding
             embedding = generate_embedding(faces[0]["crop"])
-            
+
             # Get lecturer's profile (reusing student_profiles as generic biometric store)
             profile = get_profile_by_user(str(user["_id"]))
             if not profile or not profile.get("face_embeddings"):
-                return jsonify({"error": "Biometric profile not found. Please ensure you have enrolled your face samples."}), 403
-                
+                return (
+                    jsonify(
+                        {
+                            "error": "Biometric profile not found. Please ensure you have enrolled your face samples."
+                        }
+                    ),
+                    403,
+                )
+
             # Compare against stored embeddings
             threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
             match = find_best_match(embedding, [profile], threshold=threshold)
             if not match:
-                log_action("LECTURER_AUTH_FAILED", str(user["_id"]), details="Biometric verification failed during session commit")
-                return jsonify({"error": "Biometric verification failed. Face does not match your enrolled profile."}), 403
-                
-            log_action("LECTURER_AUTH_SUCCESS", str(user["_id"]), details="Biometric verification successful")
+                log_action(
+                    "LECTURER_AUTH_FAILED",
+                    str(user["_id"]),
+                    details="Biometric verification failed during session commit",
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "Biometric verification failed. Face does not match your enrolled profile."
+                        }
+                    ),
+                    403,
+                )
+
+            log_action(
+                "LECTURER_AUTH_SUCCESS",
+                str(user["_id"]),
+                details="Biometric verification successful",
+            )
         except Exception as exc:
-            current_app.logger.exception("Biometric commit verification failed")
-            return jsonify({"error": "Biometric system error. Please try again."}), 500
+            current_app.logger.exception(
+                "Biometric commit verification failed"
+            )
+            return (
+                jsonify(
+                    {"error": "Biometric system error. Please try again."}
+                ),
+                500,
+            )
     else:
         pin = str(d.get("pin", "")).strip()
-        has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(str(user.get("pin", "")).strip())
+        has_pin = bool(str(user.get("pin_hash", "")).strip()) or bool(
+            str(user.get("pin", "")).strip()
+        )
         if not has_pin:
-            return jsonify({"error": "PIN not set. Generate or set your 4-digit PIN first."}), 400
+            return (
+                jsonify(
+                    {
+                        "error": "PIN not set. Generate or set your 4-digit PIN first."
+                    }
+                ),
+                400,
+            )
 
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
-            blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
+            max_attempts = max(
+                1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3))
+            )
+            blocked, _ = BruteForceProtector.is_session_pin_blocked(
+                session_id, max_attempts=max_attempts
+            )
             if blocked:
-                return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+                return (
+                    jsonify(
+                        {
+                            "error": "Too many invalid PIN attempts. Try again later."
+                        }
+                    ),
+                    429,
+                )
 
         if not verify_user_pin(user, pin):
             if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-                attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
-                max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+                attempts = BruteForceProtector.record_pin_failure(
+                    session_id, str(user["_id"]), request.remote_addr
+                )
+                max_attempts = max(
+                    1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3))
+                )
                 if attempts >= max_attempts:
-                    return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+                    return (
+                        jsonify(
+                            {
+                                "error": "Too many invalid PIN attempts. Try again later."
+                            }
+                        ),
+                        429,
+                    )
             return jsonify({"error": "Invalid PIN"}), 403
 
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
@@ -945,7 +1151,9 @@ def commit_session(user):
     lecturer_id = session["lecturer_id"]
     present_user_ids = list(session["recognized"])
 
-    _replace_session_attendance(session_id, paper_id, lecturer_id, present_user_ids, method="biometric")
+    _replace_session_attendance(
+        session_id, paper_id, lecturer_id, present_user_ids, method="biometric"
+    )
     increment_total_classes(paper_id)
 
     committed_at = datetime.now(timezone.utc)
@@ -979,12 +1187,16 @@ def commit_session(user):
 
     _delete_active_session(session_id)
 
-    return jsonify({
-        "message": "Attendance committed successfully",
-        "students_marked": len(present_user_ids),
-        "session_id": session_id,
-        "rollback_until": rollback_until.isoformat() if rollback_until else None,
-    })
+    return jsonify(
+        {
+            "message": "Attendance committed successfully",
+            "students_marked": len(present_user_ids),
+            "session_id": session_id,
+            "rollback_until": (
+                rollback_until.isoformat() if rollback_until else None
+            ),
+        }
+    )
 
 
 @lecturer_bp.route("/session/<session_id>/review", methods=["GET"])
@@ -1022,15 +1234,24 @@ def adjust_committed_session(user, session_id):
         sessions.update_one(
             {"session_id": session_id}, {"$set": {"finalized": True}}
         )
-        return jsonify({"error": "Rollback window expired. Session is finalized."}), 403
+        return (
+            jsonify(
+                {"error": "Rollback window expired. Session is finalized."}
+            ),
+            403,
+        )
 
     d = request.get_json(silent=True) or {}
     user_ids = d.get("user_ids") or []
 
     # C-1 fix: Validate each user_id is a valid ObjectId and enrolled in the paper
     from app.utils.validation import validate_object_id
+
     valid_ids = [str(uid) for uid in user_ids if validate_object_id(str(uid))]
-    enrolled = {str(p["user_id"]) for p in get_profiles_for_paper(session_doc.get("paper_id", ""))}
+    enrolled = {
+        str(p["user_id"])
+        for p in get_profiles_for_paper(session_doc.get("paper_id", ""))
+    }
     user_ids = [uid for uid in valid_ids if uid in enrolled]
 
     # C-2 fix: Respect LECTURER_AUTH_MODE for adjustments (not PIN-only)
@@ -1049,7 +1270,14 @@ def adjust_committed_session(user, session_id):
             detector = get_detector()
             faces = detector.detect_faces(img)
             if not faces:
-                return jsonify({"error": "No face detected. Please ensure your face is clearly visible."}), 400
+                return (
+                    jsonify(
+                        {
+                            "error": "No face detected. Please ensure your face is clearly visible."
+                        }
+                    ),
+                    400,
+                )
             embedding = generate_embedding(faces[0]["crop"])
             profile = get_profile_by_user(str(user["_id"]))
             if not profile or not profile.get("face_embeddings"):
@@ -1057,26 +1285,62 @@ def adjust_committed_session(user, session_id):
             threshold = current_app.config.get("FACENET_THRESHOLD", 0.6)
             match = find_best_match(embedding, [profile], threshold=threshold)
             if not match:
-                log_action("LECTURER_ADJUST_AUTH_FAILED", str(user["_id"]), details="Biometric verification failed during session adjust")
-                return jsonify({"error": "Biometric verification failed."}), 403
+                log_action(
+                    "LECTURER_ADJUST_AUTH_FAILED",
+                    str(user["_id"]),
+                    details="Biometric verification failed during session adjust",
+                )
+                return (
+                    jsonify({"error": "Biometric verification failed."}),
+                    403,
+                )
         except Exception:
-            current_app.logger.exception("Biometric adjust verification failed")
-            return jsonify({"error": "Biometric system error. Please try again."}), 500
+            current_app.logger.exception(
+                "Biometric adjust verification failed"
+            )
+            return (
+                jsonify(
+                    {"error": "Biometric system error. Please try again."}
+                ),
+                500,
+            )
     else:
         pin = str(d.get("pin", "")).strip()
 
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-            max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
-            blocked, _ = BruteForceProtector.is_session_pin_blocked(session_id, max_attempts=max_attempts)
+            max_attempts = max(
+                1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3))
+            )
+            blocked, _ = BruteForceProtector.is_session_pin_blocked(
+                session_id, max_attempts=max_attempts
+            )
             if blocked:
-                return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+                return (
+                    jsonify(
+                        {
+                            "error": "Too many invalid PIN attempts. Try again later."
+                        }
+                    ),
+                    429,
+                )
 
         if not verify_user_pin(user, pin):
             if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
-                attempts = BruteForceProtector.record_pin_failure(session_id, str(user["_id"]), request.remote_addr)
-                max_attempts = max(1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3)))
+                attempts = BruteForceProtector.record_pin_failure(
+                    session_id, str(user["_id"]), request.remote_addr
+                )
+                max_attempts = max(
+                    1, int(current_app.config.get("PIN_MAX_ATTEMPTS", 3))
+                )
                 if attempts >= max_attempts:
-                    return jsonify({"error": "Too many invalid PIN attempts. Try again later."}), 429
+                    return (
+                        jsonify(
+                            {
+                                "error": "Too many invalid PIN attempts. Try again later."
+                            }
+                        ),
+                        429,
+                    )
             return jsonify({"error": "Invalid PIN"}), 403
 
         if current_app.config.get("BRUTE_FORCE_PROTECTION_ENABLED"):
@@ -1108,10 +1372,12 @@ def adjust_committed_session(user, session_id):
     )
 
     refreshed = _get_session_doc(session_id)
-    return jsonify({
-        "message": "Attendance updated and re-committed successfully",
-        "review": _session_review_payload(refreshed),
-    })
+    return jsonify(
+        {
+            "message": "Attendance updated and re-committed successfully",
+            "review": _session_review_payload(refreshed),
+        }
+    )
 
 
 @lecturer_bp.route("/progress", methods=["GET"])
@@ -1123,8 +1389,12 @@ def lecturer_progress(user):
     lecturer_id = str(user["_id"])
     paper_id = request.args.get("paper_id", "").strip()
     tz_offset_minutes = request.args.get("tz_offset_minutes", 0)
-    from_local = _parse_date(request.args.get("from_date", ""), end_of_day=False)
-    to_local_exclusive = _parse_date(request.args.get("to_date", ""), end_of_day=True)
+    from_local = _parse_date(
+        request.args.get("from_date", ""), end_of_day=False
+    )
+    to_local_exclusive = _parse_date(
+        request.args.get("to_date", ""), end_of_day=True
+    )
     from_date = _local_midnight_to_utc(from_local, tz_offset_minutes)
     to_date = _local_midnight_to_utc(to_local_exclusive, tz_offset_minutes)
 
@@ -1143,14 +1413,18 @@ def lecturer_progress(user):
 
     logs_col = get_collection("attendance", "attendance_logs")
     logs = list(logs_col.find(query).sort("timestamp", 1).limit(5000))
-    assigned_papers = [_enrich_paper(p) for p in get_papers_by_lecturer(lecturer_id)]
+    assigned_papers = [
+        _enrich_paper(p) for p in get_papers_by_lecturer(lecturer_id)
+    ]
     paper_lookup = {p["_id"]: p for p in assigned_papers}
 
     # H-4 fix: Pre-collect all paper_ids from committed docs + logs to batch-fetch
     _extra_paper_ids = set()
-    for _doc in (list(get_collection("attendance", "attendance_sessions").find(
-        {"lecturer_id": {"$in": lecturer_id_variants}}, {"paper_id": 1}
-    ))):
+    for _doc in list(
+        get_collection("attendance", "attendance_sessions").find(
+            {"lecturer_id": {"$in": lecturer_id_variants}}, {"paper_id": 1}
+        )
+    ):
         _pid = str(_doc.get("paper_id") or "")
         if _pid and _pid not in paper_lookup:
             _extra_paper_ids.add(_pid)
@@ -1177,7 +1451,11 @@ def lecturer_progress(user):
         session_query["committed_at"] = committed_ts
 
     committed_docs = list(sessions_col.find(session_query).limit(5000))
-    session_docs = {doc.get("session_id"): doc for doc in committed_docs if doc.get("session_id")}
+    session_docs = {
+        doc.get("session_id"): doc
+        for doc in committed_docs
+        if doc.get("session_id")
+    }
 
     # Precompute total enrolled students per paper for attended/total metrics.
     enrolled_totals_by_paper = {}
@@ -1195,7 +1473,7 @@ def lecturer_progress(user):
     # ── Batch-fetch all user data upfront to avoid N+1 queries ──────────
     all_user_ids = set()
     for session_doc in committed_docs:
-        for uid in (session_doc.get("user_ids") or []):
+        for uid in session_doc.get("user_ids") or []:
             all_user_ids.add(str(uid).strip())
     for entries in logs_by_session.values():
         for entry in entries:
@@ -1210,7 +1488,9 @@ def lecturer_progress(user):
 
     # Source of truth: committed sessions collection.
     for session_doc in committed_docs:
-        sid = str(session_doc.get("session_id") or session_doc.get("_id") or "")
+        sid = str(
+            session_doc.get("session_id") or session_doc.get("_id") or ""
+        )
         if not sid or sid in seen_session_ids:
             continue
         seen_session_ids.add(sid)
@@ -1224,7 +1504,11 @@ def lecturer_progress(user):
 
         user_ids = session_doc.get("user_ids")
         if not isinstance(user_ids, list) or len(user_ids) == 0:
-            user_ids = [entry.get("user_id") for entry in entries if entry.get("user_id")]
+            user_ids = [
+                entry.get("user_id")
+                for entry in entries
+                if entry.get("user_id")
+            ]
 
         students = []
         seen = set()
@@ -1234,35 +1518,53 @@ def lecturer_progress(user):
                 continue
             seen.add(stu)
             u = users_map.get(stu)
-            students.append({
-                "user_id": stu,
-                "name": u.get("name", "Unknown") if u else "Unknown",
-                "email": u.get("email", "") if u else "",
-            })
+            students.append(
+                {
+                    "user_id": stu,
+                    "name": u.get("name", "Unknown") if u else "Unknown",
+                    "email": u.get("email", "") if u else "",
+                }
+            )
 
         paper = paper_lookup.get(pid)
         first_ts = (
             session_doc.get("committed_at")
             or session_doc.get("last_updated_at")
-            or min((e.get("timestamp") for e in entries if e.get("timestamp")), default=None)
+            or min(
+                (e.get("timestamp") for e in entries if e.get("timestamp")),
+                default=None,
+            )
         )
         rollback_until = session_doc.get("rollback_until")
-        editable = _within_rollback(session_doc) and not session_doc.get("finalized", False)
+        editable = _within_rollback(session_doc) and not session_doc.get(
+            "finalized", False
+        )
 
-        sessions.append({
-            "session_id": sid,
-            "paper_id": pid,
-            "paper_name": (paper or {}).get("name", "Unknown"),
-            "paper_code": (paper or {}).get("code", ""),
-            "course_name": (paper or {}).get("course_name"),
-            "academic_year": session_doc.get("academic_year") or (paper or {}).get("academic_year"),
-            "timestamp": first_ts.isoformat() if hasattr(first_ts, "isoformat") else first_ts,
-            "students_count": len(students),
-            "total_students": enrolled_totals_by_paper.get(pid, 0),
-            "students": students,
-            "rollback_until": rollback_until.isoformat() if hasattr(rollback_until, "isoformat") else rollback_until,
-            "editable": editable,
-        })
+        sessions.append(
+            {
+                "session_id": sid,
+                "paper_id": pid,
+                "paper_name": (paper or {}).get("name", "Unknown"),
+                "paper_code": (paper or {}).get("code", ""),
+                "course_name": (paper or {}).get("course_name"),
+                "academic_year": session_doc.get("academic_year")
+                or (paper or {}).get("academic_year"),
+                "timestamp": (
+                    first_ts.isoformat()
+                    if hasattr(first_ts, "isoformat")
+                    else first_ts
+                ),
+                "students_count": len(students),
+                "total_students": enrolled_totals_by_paper.get(pid, 0),
+                "students": students,
+                "rollback_until": (
+                    rollback_until.isoformat()
+                    if hasattr(rollback_until, "isoformat")
+                    else rollback_until
+                ),
+                "editable": editable,
+            }
+        )
 
     # Fallback for legacy data where logs exist but session doc is missing.
     for sid, entries in logs_by_session.items():
@@ -1280,33 +1582,46 @@ def lecturer_progress(user):
                 continue
             seen.add(stu)
             u = users_map.get(stu)
-            students.append({
-                "user_id": stu,
-                "name": u.get("name", "Unknown") if u else "Unknown",
-                "email": u.get("email", "") if u else "",
-            })
+            students.append(
+                {
+                    "user_id": stu,
+                    "name": u.get("name", "Unknown") if u else "Unknown",
+                    "email": u.get("email", "") if u else "",
+                }
+            )
 
         paper = paper_lookup.get(pid)
-        first_ts = min((e.get("timestamp") for e in entries if e.get("timestamp")), default=None)
-        sessions.append({
-            "session_id": sid,
-            "paper_id": pid,
-            "paper_name": (paper or {}).get("name", "Unknown"),
-            "paper_code": (paper or {}).get("code", ""),
-            "course_name": (paper or {}).get("course_name"),
-            "academic_year": (paper or {}).get("academic_year"),
-            "timestamp": first_ts.isoformat() if hasattr(first_ts, "isoformat") else first_ts,
-            "students_count": len(students),
-            "total_students": enrolled_totals_by_paper.get(pid, 0),
-            "students": students,
-            "rollback_until": None,
-            "editable": False,
-        })
+        first_ts = min(
+            (e.get("timestamp") for e in entries if e.get("timestamp")),
+            default=None,
+        )
+        sessions.append(
+            {
+                "session_id": sid,
+                "paper_id": pid,
+                "paper_name": (paper or {}).get("name", "Unknown"),
+                "paper_code": (paper or {}).get("code", ""),
+                "course_name": (paper or {}).get("course_name"),
+                "academic_year": (paper or {}).get("academic_year"),
+                "timestamp": (
+                    first_ts.isoformat()
+                    if hasattr(first_ts, "isoformat")
+                    else first_ts
+                ),
+                "students_count": len(students),
+                "total_students": enrolled_totals_by_paper.get(pid, 0),
+                "students": students,
+                "rollback_until": None,
+                "editable": False,
+            }
+        )
 
     sessions.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
 
     # Per-paper aggregate.
-    paper_stats = defaultdict(lambda: {"classes_taken": 0, "attendance_marks": 0})
+    paper_stats = defaultdict(
+        lambda: {"classes_taken": 0, "attendance_marks": 0}
+    )
     for s in sessions:
         pid = s.get("paper_id")
         paper_stats[pid]["classes_taken"] += 1
@@ -1315,44 +1630,60 @@ def lecturer_progress(user):
     per_paper = []
     for pid, stat in paper_stats.items():
         paper = paper_lookup.get(pid)
-        per_paper.append({
-            "paper_id": pid,
-            "paper_name": (paper or {}).get("name", "Unknown"),
-            "paper_code": (paper or {}).get("code", ""),
-            "course_name": (paper or {}).get("course_name"),
-            "academic_year": (next((s for s in sessions if s.get("paper_id") == pid), {}) or {}).get("academic_year") or (paper or {}).get("academic_year"),
-            "classes_taken": stat["classes_taken"],
-            "attendance_marks": stat["attendance_marks"],
-            "avg_attendance_per_class": round(
-                stat["attendance_marks"] / stat["classes_taken"], 2
-            ) if stat["classes_taken"] else 0,
-        })
+        per_paper.append(
+            {
+                "paper_id": pid,
+                "paper_name": (paper or {}).get("name", "Unknown"),
+                "paper_code": (paper or {}).get("code", ""),
+                "course_name": (paper or {}).get("course_name"),
+                "academic_year": (
+                    next((s for s in sessions if s.get("paper_id") == pid), {})
+                    or {}
+                ).get("academic_year")
+                or (paper or {}).get("academic_year"),
+                "classes_taken": stat["classes_taken"],
+                "attendance_marks": stat["attendance_marks"],
+                "avg_attendance_per_class": (
+                    round(stat["attendance_marks"] / stat["classes_taken"], 2)
+                    if stat["classes_taken"]
+                    else 0
+                ),
+            }
+        )
 
     total_classes = len(sessions)
     total_attendance_marks = sum(s.get("students_count", 0) for s in sessions)
-    return jsonify({
-        "filters": {
-            "paper_id": paper_id or None,
-            "from_date": request.args.get("from_date", "") or None,
-            "to_date": request.args.get("to_date", "") or None,
-        },
-        "summary": {
-            "total_classes_taken": total_classes,
-            "total_attendance_marks": total_attendance_marks,
-            "average_attendance_per_class": round(total_attendance_marks / total_classes, 2) if total_classes else 0,
-        },
-        "papers": assigned_papers,
-        "per_paper": per_paper,
-        "sessions": sessions,
-    })
+    return jsonify(
+        {
+            "filters": {
+                "paper_id": paper_id or None,
+                "from_date": request.args.get("from_date", "") or None,
+                "to_date": request.args.get("to_date", "") or None,
+            },
+            "summary": {
+                "total_classes_taken": total_classes,
+                "total_attendance_marks": total_attendance_marks,
+                "average_attendance_per_class": (
+                    round(total_attendance_marks / total_classes, 2)
+                    if total_classes
+                    else 0
+                ),
+            },
+            "papers": assigned_papers,
+            "per_paper": per_paper,
+            "sessions": sessions,
+        }
+    )
 
 
-@lecturer_bp.route('/capabilities', methods=['GET'])
-@role_required('lecturer')
+@lecturer_bp.route("/capabilities", methods=["GET"])
+@role_required("lecturer")
 def get_lecturer_capabilities(user):
     """Return a JSON object describing enabled lecturer features."""
     # Example: add more features as needed
-    return jsonify({
-        "can_stop_session": True,
-        # Add other feature flags here as needed
-    })
+    return jsonify(
+        {
+            "can_stop_session": True,
+            # Add other feature flags here as needed
+        }
+    )

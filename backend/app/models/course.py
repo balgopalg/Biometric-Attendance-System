@@ -2,15 +2,20 @@
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Optional, List
+from typing import Any, List, Optional
 
+from app.extensions import get_collection
 from bson import ObjectId
 from bson.errors import InvalidId
 
-from app.extensions import get_collection
 
-
-def create_course(name: str, code: str, department: str, course_duration: Any, department_id: Any = None) -> dict:
+def create_course(
+    name: str,
+    code: str,
+    department: str,
+    course_duration: Any,
+    department_id: Any = None,
+) -> dict:
     courses = get_collection("academic", "courses")
     dept_oid = None
     if department_id is not None and str(department_id).strip():
@@ -32,7 +37,9 @@ def create_course(name: str, code: str, department: str, course_duration: Any, d
     return doc
 
 
-def get_all_courses(fields: Optional[List[str]] = None, department_id: Any = None) -> List[dict]:
+def get_all_courses(
+    fields: Optional[List[str]] = None, department_id: Any = None
+) -> List[dict]:
     """Return all courses, optionally filtered by department_id."""
     courses = get_collection("academic", "courses")
     projection = None
@@ -42,10 +49,16 @@ def get_all_courses(fields: Optional[List[str]] = None, department_id: Any = Non
     query: dict = {}
     if department_id is not None:
         try:
-            query["department_id"] = ObjectId(str(department_id)) if not isinstance(department_id, ObjectId) else department_id
+            query["department_id"] = (
+                ObjectId(str(department_id))
+                if not isinstance(department_id, ObjectId)
+                else department_id
+            )
         except (InvalidId, Exception):
             pass
-    cursor = courses.find(query, projection) if projection else courses.find(query)
+    cursor = (
+        courses.find(query, projection) if projection else courses.find(query)
+    )
     return list(cursor)
 
 
@@ -61,7 +74,9 @@ def get_course_by_id(course_id: str) -> Optional[dict]:
 def get_course_by_code(code: str) -> Optional[dict]:
     courses = get_collection("academic", "courses")
     escaped = re.escape(code.strip())
-    return courses.find_one({"code": {"$regex": f"^{escaped}$", "$options": "i"}})
+    return courses.find_one(
+        {"code": {"$regex": f"^{escaped}$", "$options": "i"}}
+    )
 
 
 def update_course(course_id: str, fields: dict) -> Optional[dict]:

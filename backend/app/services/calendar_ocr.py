@@ -16,8 +16,13 @@ except Exception:  # pragma: no cover - optional runtime dependency
     pytesseract = None
 
 
-MONTH_LOOKUP = {name.lower(): idx for idx, name in enumerate(month_name) if name}
-DATE_RE = re.compile(r"(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:[-:–—]|to)\s*(?P<label>.+)", re.IGNORECASE)
+MONTH_LOOKUP = {
+    name.lower(): idx for idx, name in enumerate(month_name) if name
+}
+DATE_RE = re.compile(
+    r"(?P<date>\d{1,2}[/-]\d{1,2}[/-]\d{4})\s*(?:[-:–—]|to)\s*(?P<label>.+)",
+    re.IGNORECASE,
+)
 OPTIONAL_HEADER_RE = re.compile(r"optional\s+holidays", re.IGNORECASE)
 YEAR_RE = re.compile(r"(20\d{2})")
 
@@ -41,7 +46,9 @@ def _preprocess_image(image: Image.Image) -> Image.Image:
 
 def _ocr_text(image: Image.Image) -> str:
     if pytesseract is None:
-        raise RuntimeError("pytesseract is not installed. Add pytesseract and Tesseract OCR to enable calendar extraction.")
+        raise RuntimeError(
+            "pytesseract is not installed. Add pytesseract and Tesseract OCR to enable calendar extraction."
+        )
 
     config = "--oem 3 --psm 6"
     return _sanitize_text(pytesseract.image_to_string(image, config=config))
@@ -49,7 +56,7 @@ def _ocr_text(image: Image.Image) -> str:
 
 def _parse_date_text(value: str) -> Optional[date]:
     """Parse date text in multiple formats: DD/MM/YYYY, MM/DD/YYYY, DD-MM-YYYY, YYYY-MM-DD, YYYY/MM/DD."""
-    for fmt in ('%d/%m/%Y', '%m/%d/%Y', '%d-%m-%Y', '%Y-%m-%d', '%Y/%m/%d'):
+    for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d"):
         try:
             return datetime.strptime(value, fmt).date()
         except Exception:
@@ -95,13 +102,16 @@ def _extract_holiday_rows(text: str) -> List[dict]:
         if not parsed_date:
             continue
 
-        items.append({
-            "date": parsed_date.isoformat(),
-            "label": label or ("Optional Holiday" if optional_mode else "Holiday"),
-            "month": _month_name_for_date(parsed_date),
-            "is_optional": optional_mode,
-            "source_line": line,
-        })
+        items.append(
+            {
+                "date": parsed_date.isoformat(),
+                "label": label
+                or ("Optional Holiday" if optional_mode else "Holiday"),
+                "month": _month_name_for_date(parsed_date),
+                "is_optional": optional_mode,
+                "source_line": line,
+            }
+        )
 
     return items
 
@@ -111,12 +121,12 @@ def _extract_optional_block(text: str) -> List[str]:
     lines = [line for line in text.splitlines() if line.strip()]
     capture = False
     for line in lines:
-      if OPTIONAL_HEADER_RE.search(line):
+        if OPTIONAL_HEADER_RE.search(line):
             capture = True
             continue
-      if capture and line.lower().startswith("note"):
+        if capture and line.lower().startswith("note"):
             break
-      if capture:
+        if capture:
             optional_lines.append(line)
     return optional_lines
 
@@ -131,7 +141,9 @@ def _sundays_for_year(year: int) -> List[str]:
     return values
 
 
-def extract_calendar_draft(*, file_bytes: bytes, filename: str = "", year_hint: Optional[int] = None) -> dict:
+def extract_calendar_draft(
+    *, file_bytes: bytes, filename: str = "", year_hint: Optional[int] = None
+) -> dict:
     image = Image.open(io.BytesIO(file_bytes))
     image = _preprocess_image(image)
     text = _ocr_text(image)
@@ -145,7 +157,9 @@ def extract_calendar_draft(*, file_bytes: bytes, filename: str = "", year_hint: 
         "source_filename": filename,
         "raw_text": text,
         "holidays": [item for item in holidays if not item.get("is_optional")],
-        "optional_holidays": [item for item in holidays if item.get("is_optional")],
+        "optional_holidays": [
+            item for item in holidays if item.get("is_optional")
+        ],
         "optional_holiday_lines": optional_lines,
         "sundays": _sundays_for_year(year),
         "source_dimensions": {"width": image.width, "height": image.height},

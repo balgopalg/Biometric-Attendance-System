@@ -1,33 +1,34 @@
 """Admin CRUD routes — Courses, Papers, Lecturers, Students, Enrollment, Audit.
 
-NOTE: This is currently a "god file" (>6,000 lines). Future refactoring should 
+NOTE: This is currently a "god file" (>6,000 lines). Future refactoring should
 decompose this into domain-specific blueprints:
 - `admin_courses.py`
-- `admin_papers.py` 
+- `admin_papers.py`
 - `admin_lecturers.py`
 - `admin_students.py`
 - `admin_attendance.py`
 - `admin_jobs.py`
 """
 
-import re
-import random
-import secrets
+import csv
 import os
+import random
+import re
+import secrets
 import shutil
 import time
-import csv
-from io import BytesIO, StringIO
-import openpyxl
-from datetime import datetime, timedelta, timezone
-import cv2
-import numpy as np
-from threading import Lock, Thread
 from collections import OrderedDict
+from datetime import datetime, timedelta, timezone
+from io import BytesIO, StringIO
+from threading import Lock, Thread
 from uuid import uuid4
 
-from flask import Blueprint, request, jsonify, current_app, send_file, has_app_context
+import cv2
+import numpy as np
+import openpyxl
 from bson import ObjectId
+from flask import (Blueprint, current_app, has_app_context, jsonify, request,
+                   send_file)
 from pymongo.errors import DuplicateKeyError
 
 try:
@@ -36,88 +37,51 @@ except Exception:  # pragma: no cover - optional dependency at runtime
     redis = None
 
 from app.extensions import get_collection
-from app.models.attendance import log_attendance, get_approved_leave_dates, session_date_str
-from app.models.audit import log_action, get_audit_logs, get_audit_log_by_id, mark_audit_log_rolled_back
-from app.models.course import (
-    create_course,
-    get_all_courses,
-    get_course_by_id,
-    get_course_by_code,
-    update_course,
-    delete_course,
-    is_course_active,
-)
-from app.models.enrollment import (
-    create_student_profile,
-    get_profile_by_user,
-    get_profile_by_id,
-    add_face_embedding,
-    set_face_embeddings,
-    enroll_in_papers,
-    get_all_profiles,
-    update_profile,
-    delete_profile,
-)
-from app.models.paper import (
-    create_paper,
-    get_all_papers,
-    get_paper_by_id,
-    get_paper_by_code,
-    get_papers_by_course,
-    update_paper,
-    delete_paper,
-    bulk_assign_lecturer,
-    bulk_assign_course,
-)
-from app.models.user import (
-    create_user,
-    get_users_by_role,
-    get_users_by_ids,
-    update_user,
-    delete_user,
-    find_user_by_id,
-    find_user_by_email,
-    reset_user_password,
-    set_user_pin,
-)
+from app.models.attendance import (get_approved_leave_dates, log_attendance,
+                                   session_date_str)
+from app.models.audit import (get_audit_log_by_id, get_audit_logs, log_action,
+                              mark_audit_log_rolled_back)
+from app.models.course import (create_course, delete_course, get_all_courses,
+                               get_course_by_code, get_course_by_id,
+                               is_course_active, update_course)
+from app.models.department import create_department
+from app.models.department import delete_department as soft_delete_department
+from app.models.department import (get_all_departments, get_department_by_code,
+                                   get_department_by_id, update_department)
+from app.models.enrollment import (add_face_embedding, create_student_profile,
+                                   delete_profile, enroll_in_papers,
+                                   get_all_profiles, get_profile_by_id,
+                                   get_profile_by_user, set_face_embeddings,
+                                   update_profile)
+from app.models.paper import (bulk_assign_course, bulk_assign_lecturer,
+                              create_paper, delete_paper, get_all_papers,
+                              get_paper_by_code, get_paper_by_id,
+                              get_papers_by_course, update_paper)
+from app.models.user import (create_user, delete_user, find_user_by_email,
+                             find_user_by_id, get_users_by_ids,
+                             get_users_by_role, reset_user_password,
+                             set_user_pin, update_user)
+from app.security.rbac import (dept_scope_filter, get_user_department_id,
+                               is_super_admin)
+from app.services.capture_upload import (capture_faces_for_user,
+                                         save_cropped_face_dataset,
+                                         save_student_upload)
+from app.services.email_service import (is_email_delivery_enabled,
+                                        send_password_reset_email,
+                                        send_shortage_alert_email,
+                                        send_welcome_email)
 from app.services.face_detection import get_detector
-from app.services.face_recognition import generate_embedding, generate_embeddings_batch
-from app.services.capture_upload import capture_faces_for_user, save_student_upload, save_cropped_face_dataset
-from utilities.train_model import train_and_save_face_model
-from app.utils.auth_decorators import role_required, super_admin_required, validate_ids
-from app.security.rbac import (
-    dept_scope_filter,
-    is_super_admin,
-    get_user_department_id,
-)
-from app.models.department import (
-    create_department,
-    get_all_departments,
-    get_department_by_id,
-    get_department_by_code,
-    update_department,
-    delete_department as soft_delete_department,
-)
-from app.utils.helpers import (
-    sanitise_mongo_doc, 
-    sanitise_many, 
-    decode_base64_image, 
-    decode_image_bytes,
-    _to_int,
-    _to_float,
-    _as_text,
-    _id_variants,
-    _to_oid
-)
+from app.services.face_recognition import (generate_embedding,
+                                           generate_embeddings_batch)
+from app.utils.auth_decorators import (role_required, super_admin_required,
+                                       validate_ids)
+from app.utils.helpers import (_as_text, _id_variants, _to_float, _to_int,
+                               _to_oid, decode_base64_image,
+                               decode_image_bytes, sanitise_many,
+                               sanitise_mongo_doc)
 from app.utils.timezone import india_timestamp_token
 from app.utils.validation import validate_password_strength
-from app.services.email_service import (
-    send_welcome_email,
-    send_password_reset_email,
-    send_shortage_alert_email,
-    is_email_delivery_enabled,
-)
-
+from utilities.train_model import train_and_save_face_model
 
 _QUERY_CACHE = OrderedDict()
 _QUERY_CACHE_LOCK = Lock()
@@ -141,62 +105,153 @@ _AUDIT_EXCLUDED_ACTIONS = [
 # ---------------------------------------------------------------------------
 __all__ = [
     # Flask / HTTP
-    "admin_bp", "request", "jsonify", "current_app", "send_file", "has_app_context",
-    "Blueprint", "ObjectId", "DuplicateKeyError",
+    "admin_bp",
+    "request",
+    "jsonify",
+    "current_app",
+    "send_file",
+    "has_app_context",
+    "Blueprint",
+    "ObjectId",
+    "DuplicateKeyError",
     # Re-exported helpers
-    "sanitise_mongo_doc", "sanitise_many", "decode_base64_image", "decode_image_bytes",
-    "_to_int", "_to_float", "_as_text", "_id_variants", "_to_oid",
+    "sanitise_mongo_doc",
+    "sanitise_many",
+    "decode_base64_image",
+    "decode_image_bytes",
+    "_to_int",
+    "_to_float",
+    "_as_text",
+    "_id_variants",
+    "_to_oid",
     # Standard library
-    "re", "random", "secrets", "os", "time", "csv", "openpyxl",
-    "BytesIO", "StringIO", "datetime", "timedelta", "timezone",
-    "cv2", "np", "uuid4",
+    "re",
+    "random",
+    "secrets",
+    "os",
+    "time",
+    "csv",
+    "openpyxl",
+    "BytesIO",
+    "StringIO",
+    "datetime",
+    "timedelta",
+    "timezone",
+    "cv2",
+    "np",
+    "uuid4",
     # Models
-    "log_attendance", "get_approved_leave_dates", "session_date_str",
-    "log_action", "get_audit_logs", "get_audit_log_by_id", "mark_audit_log_rolled_back",
-    "create_course", "get_all_courses", "get_course_by_id", "get_course_by_code",
-    "update_course", "delete_course", "is_course_active",
-    "create_student_profile", "get_profile_by_user", "get_profile_by_id",
-    "add_face_embedding", "set_face_embeddings", "enroll_in_papers",
-    "get_all_profiles", "update_profile", "delete_profile",
-    "create_paper", "get_all_papers", "get_paper_by_id", "get_paper_by_code",
-    "get_papers_by_course", "update_paper", "delete_paper",
-    "bulk_assign_lecturer", "bulk_assign_course",
-    "create_user", "get_users_by_role", "get_users_by_ids", "update_user",
-    "delete_user", "find_user_by_id", "find_user_by_email",
-    "reset_user_password", "set_user_pin",
+    "log_attendance",
+    "get_approved_leave_dates",
+    "session_date_str",
+    "log_action",
+    "get_audit_logs",
+    "get_audit_log_by_id",
+    "mark_audit_log_rolled_back",
+    "create_course",
+    "get_all_courses",
+    "get_course_by_id",
+    "get_course_by_code",
+    "update_course",
+    "delete_course",
+    "is_course_active",
+    "create_student_profile",
+    "get_profile_by_user",
+    "get_profile_by_id",
+    "add_face_embedding",
+    "set_face_embeddings",
+    "enroll_in_papers",
+    "get_all_profiles",
+    "update_profile",
+    "delete_profile",
+    "create_paper",
+    "get_all_papers",
+    "get_paper_by_id",
+    "get_paper_by_code",
+    "get_papers_by_course",
+    "update_paper",
+    "delete_paper",
+    "bulk_assign_lecturer",
+    "bulk_assign_course",
+    "create_user",
+    "get_users_by_role",
+    "get_users_by_ids",
+    "update_user",
+    "delete_user",
+    "find_user_by_id",
+    "find_user_by_email",
+    "reset_user_password",
+    "set_user_pin",
     # Services
-    "get_detector", "generate_embedding", "generate_embeddings_batch",
-    "capture_faces_for_user", "save_student_upload", "save_cropped_face_dataset",
+    "get_detector",
+    "generate_embedding",
+    "generate_embeddings_batch",
+    "capture_faces_for_user",
+    "save_student_upload",
+    "save_cropped_face_dataset",
     "train_and_save_face_model",
     # Security / RBAC
-    "role_required", "super_admin_required", "validate_ids",
-    "dept_scope_filter", "is_super_admin", "get_user_department_id",
+    "role_required",
+    "super_admin_required",
+    "validate_ids",
+    "dept_scope_filter",
+    "is_super_admin",
+    "get_user_department_id",
     # Departments
-    "create_department", "get_all_departments", "get_department_by_id",
-    "get_department_by_code", "update_department", "soft_delete_department",
+    "create_department",
+    "get_all_departments",
+    "get_department_by_id",
+    "get_department_by_code",
+    "update_department",
+    "soft_delete_department",
     # Utilities
-    "india_timestamp_token", "validate_password_strength",
-    "send_welcome_email", "send_password_reset_email",
-    "send_shortage_alert_email", "is_email_delivery_enabled",
+    "india_timestamp_token",
+    "validate_password_strength",
+    "send_welcome_email",
+    "send_password_reset_email",
+    "send_shortage_alert_email",
+    "is_email_delivery_enabled",
     # Internal helpers exposed to route modules
-    "_dept_filter", "_user_dept_id", "_get_paginated_data",
-    "_utcnow", "_temp_pass_display_enabled",
-    "_cache_get", "_cache_set", "_cache_payload", "_clear_query_cache",
-    "_create_background_job", "_update_background_job", "_get_background_job",
-    "_enqueue_background_job", "_get_task_queue_client",
-    "_update_training_job_progress", "_raise_if_job_cancelled",
-    "_train_single_face_job", "_train_bulk_faces_job", "_rebuild_all_faces_job",
-    "_execute_background_job", "process_background_job",
-    "recover_stuck_background_jobs", "promote_due_delayed_jobs",
-    "_AUDIT_EXCLUDED_ACTIONS", "_ELIGIBILITY_CACHE_TTL_SECONDS",
-    "_QUERY_CACHE_TTL_SECONDS", "_JobCancelledError",
+    "_dept_filter",
+    "_user_dept_id",
+    "_get_paginated_data",
+    "_utcnow",
+    "_temp_pass_display_enabled",
+    "_cache_get",
+    "_cache_set",
+    "_cache_payload",
+    "_clear_query_cache",
+    "_create_background_job",
+    "_update_background_job",
+    "_get_background_job",
+    "_enqueue_background_job",
+    "_get_task_queue_client",
+    "_update_training_job_progress",
+    "_raise_if_job_cancelled",
+    "_train_single_face_job",
+    "_train_bulk_faces_job",
+    "_rebuild_all_faces_job",
+    "_execute_background_job",
+    "process_background_job",
+    "recover_stuck_background_jobs",
+    "promote_due_delayed_jobs",
+    "_AUDIT_EXCLUDED_ACTIONS",
+    "_ELIGIBILITY_CACHE_TTL_SECONDS",
+    "_QUERY_CACHE_TTL_SECONDS",
+    "_JobCancelledError",
     "_to_bool",
     # Additional helpers used by route modules
-    "_parse_iso_date", "_local_midnight_to_utc", "_normalise_year",
-    "_resolve_user_identity", "_safe_get_course", "_get_active_course_or_error",
+    "_parse_iso_date",
+    "_local_midnight_to_utc",
+    "_normalise_year",
+    "_resolve_user_identity",
+    "_safe_get_course",
+    "_get_active_course_or_error",
     "_execute_rollback_operation",
-    "_train_embeddings_from_dataset_for_user", "_refresh_face_trainer_artifact",
-    "_schedule_local_retry", "_get_queue_names",
+    "_train_embeddings_from_dataset_for_user",
+    "_refresh_face_trainer_artifact",
+    "_schedule_local_retry",
+    "_get_queue_names",
     "get_collection",
 ]
 
@@ -204,6 +259,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Department scoping helpers
 # ---------------------------------------------------------------------------
+
 
 def _dept_filter(user):
     """Build a MongoDB query filter for department-level data isolation.
@@ -218,7 +274,10 @@ def _user_dept_id(user):
     """Return the user's department_id as ObjectId (or None for super_admin)."""
     return get_user_department_id(user)
 
-def _get_paginated_data(collection, filter_query, page=1, per_page=10, sort=None, project=None):
+
+def _get_paginated_data(
+    collection, filter_query, page=1, per_page=10, sort=None, project=None
+):
     """Refactored pagination helper to ensure consistency across all admin routes."""
     try:
         page = max(1, int(page or 1))
@@ -226,22 +285,22 @@ def _get_paginated_data(collection, filter_query, page=1, per_page=10, sort=None
     except (ValueError, TypeError):
         page = 1
         per_page = 10
-        
+
     skip = (page - 1) * per_page
-    
+
     cursor = collection.find(filter_query, project)
     if sort:
         cursor = cursor.sort(sort)
-    
+
     total = collection.count_documents(filter_query)
     data = list(cursor.skip(skip).limit(per_page))
-    
+
     return {
         "data": data,
         "total": total,
         "page": page,
         "per_page": per_page,
-        "total_pages": (total + per_page - 1) // per_page
+        "total_pages": (total + per_page - 1) // per_page,
     }
 
 
@@ -276,7 +335,15 @@ def _cache_set(key, value, ttl_seconds):
     max_entries = _QUERY_CACHE_MAX_ENTRIES_DEFAULT
     if has_app_context():
         try:
-            max_entries = max(50, int(current_app.config.get("QUERY_CACHE_MAX_ENTRIES", _QUERY_CACHE_MAX_ENTRIES_DEFAULT)))
+            max_entries = max(
+                50,
+                int(
+                    current_app.config.get(
+                        "QUERY_CACHE_MAX_ENTRIES",
+                        _QUERY_CACHE_MAX_ENTRIES_DEFAULT,
+                    )
+                ),
+            )
         except Exception:
             max_entries = _QUERY_CACHE_MAX_ENTRIES_DEFAULT
 
@@ -320,7 +387,9 @@ def _update_training_job_progress(
     if total_faces is not None:
         updates["training_total_faces"] = max(0, _to_int(total_faces, 0))
     if processed_faces is not None:
-        updates["training_processed_faces"] = max(0, _to_int(processed_faces, 0))
+        updates["training_processed_faces"] = max(
+            0, _to_int(processed_faces, 0)
+        )
     if trained_faces is not None:
         updates["training_trained_faces"] = max(0, _to_int(trained_faces, 0))
     if failed_faces is not None:
@@ -331,11 +400,19 @@ def _update_training_job_progress(
         updates["training_message"] = _as_text(message)
 
     current_job = _get_background_job(job_id) or {}
-    total = updates.get("training_total_faces", _to_int(current_job.get("training_total_faces"), 0))
-    processed = updates.get("training_processed_faces", _to_int(current_job.get("training_processed_faces"), 0))
+    total = updates.get(
+        "training_total_faces",
+        _to_int(current_job.get("training_total_faces"), 0),
+    )
+    processed = updates.get(
+        "training_processed_faces",
+        _to_int(current_job.get("training_processed_faces"), 0),
+    )
 
     if total > 0:
-        updates["training_progress_percent"] = round((processed / total) * 100, 2)
+        updates["training_progress_percent"] = round(
+            (processed / total) * 100, 2
+        )
     else:
         updates["training_progress_percent"] = 0
 
@@ -345,7 +422,9 @@ def _update_training_job_progress(
 def _create_background_job(job_type, payload=None):
     job_id = str(uuid4())
     now = _utcnow()
-    max_attempts = max(1, _to_int(current_app.config.get("TASK_QUEUE_MAX_RETRIES", 3), 3))
+    max_attempts = max(
+        1, _to_int(current_app.config.get("TASK_QUEUE_MAX_RETRIES", 3), 3)
+    )
     get_collection("attendance", "background_jobs").insert_one(
         {
             "job_id": job_id,
@@ -385,13 +464,17 @@ def _update_background_job(job_id, **updates):
 
 
 def _get_background_job(job_id):
-    return get_collection("attendance", "background_jobs").find_one({"job_id": job_id})
+    return get_collection("attendance", "background_jobs").find_one(
+        {"job_id": job_id}
+    )
+
 
 def _is_job_cancel_requested(job_id):
     job = _get_background_job(job_id)
     if not job:
         return False
     return bool(job.get("cancel_requested", False))
+
 
 def _raise_if_job_cancelled(job_id):
     if job_id and _is_job_cancel_requested(job_id):
@@ -466,7 +549,9 @@ def promote_due_delayed_jobs(max_items=100):
     queue_name, delayed_queue_name = _get_queue_names()
     now_ts = int(time.time())
     moved = 0
-    candidates = client.zrangebyscore(delayed_queue_name, 0, now_ts, start=0, num=max(1, int(max_items)))
+    candidates = client.zrangebyscore(
+        delayed_queue_name, 0, now_ts, start=0, num=max(1, int(max_items))
+    )
     for job_id in candidates:
         if client.zrem(delayed_queue_name, job_id):
             client.lpush(queue_name, job_id)
@@ -475,19 +560,39 @@ def promote_due_delayed_jobs(max_items=100):
 
 
 def _compute_retry_delay_seconds(attempt_number):
-    base = max(1, _to_int(current_app.config.get("TASK_QUEUE_BASE_BACKOFF_SECONDS", 10), 10))
-    cap = max(base, _to_int(current_app.config.get("TASK_QUEUE_MAX_BACKOFF_SECONDS", 300), 300))
+    base = max(
+        1,
+        _to_int(
+            current_app.config.get("TASK_QUEUE_BASE_BACKOFF_SECONDS", 10), 10
+        ),
+    )
+    cap = max(
+        base,
+        _to_int(
+            current_app.config.get("TASK_QUEUE_MAX_BACKOFF_SECONDS", 300), 300
+        ),
+    )
     exponent = max(0, int(attempt_number) - 1)
-    raw_delay = min(base * (2 ** exponent), cap)
-    jitter_ratio = _to_float(current_app.config.get("TASK_QUEUE_BACKOFF_JITTER_RATIO", 0.25), 0.25)
+    raw_delay = min(base * (2**exponent), cap)
+    jitter_ratio = _to_float(
+        current_app.config.get("TASK_QUEUE_BACKOFF_JITTER_RATIO", 0.25), 0.25
+    )
     jitter_ratio = max(0.0, min(jitter_ratio, 0.9))
-    jitter_multiplier = random.uniform(1.0 - jitter_ratio, 1.0 + jitter_ratio)  # nosec B311
+    jitter_multiplier = random.uniform(
+        1.0 - jitter_ratio, 1.0 + jitter_ratio
+    )  # nosec B311
     return max(1, int(round(raw_delay * jitter_multiplier)))
 
 
 def recover_stuck_background_jobs(max_items=50):
     jobs = get_collection("attendance", "background_jobs")
-    timeout_seconds = max(30, _to_int(current_app.config.get("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900), 900))
+    timeout_seconds = max(
+        30,
+        _to_int(
+            current_app.config.get("TASK_QUEUE_RUNNING_TIMEOUT_SECONDS", 900),
+            900,
+        ),
+    )
     cutoff = _utcnow() - timedelta(seconds=timeout_seconds)
     stale_jobs = list(
         jobs.find(
@@ -521,7 +626,9 @@ def recover_stuck_background_jobs(max_items=50):
         try:
             enqueued = _enqueue_background_job(job_id)
         except Exception:
-            current_app.logger.exception("Recovery enqueue failed for stale job %s", job_id)
+            current_app.logger.exception(
+                "Recovery enqueue failed for stale job %s", job_id
+            )
             enqueued = False
 
         if not enqueued:
@@ -619,7 +726,13 @@ def _train_bulk_faces_job(actor_id, user_ids, job_id=None):
         _raise_if_job_cancelled(job_id)
         user_id, _ = _resolve_user_identity(sid)
         if not user_id:
-            items.append({"user_id": sid, "success": False, "error": "Student not found"})
+            items.append(
+                {
+                    "user_id": sid,
+                    "success": False,
+                    "error": "Student not found",
+                }
+            )
             failure_count += 1
             if job_id:
                 _update_training_job_progress(
@@ -718,7 +831,9 @@ def _rebuild_all_faces_job(actor_id, job_id=None):
         user_id = _as_text(profile.get("user_id"))
         if not user_id:
             failure_count += 1
-            items.append({"user_id": None, "success": False, "error": "Missing user_id"})
+            items.append(
+                {"user_id": None, "success": False, "error": "Missing user_id"}
+            )
             if job_id:
                 _update_training_job_progress(
                     job_id,
@@ -745,7 +860,9 @@ def _rebuild_all_faces_job(actor_id, job_id=None):
             )
         except Exception as exc:
             failure_count += 1
-            items.append({"user_id": user_id, "success": False, "error": str(exc)})
+            items.append(
+                {"user_id": user_id, "success": False, "error": str(exc)}
+            )
 
         if job_id:
             _update_training_job_progress(
@@ -817,7 +934,9 @@ def _rebuild_all_lecturer_faces_job(actor_id, job_id=None):
         user_id = _as_text(lec.get("_id"))
         if not user_id:
             failure_count += 1
-            items.append({"user_id": None, "success": False, "error": "Missing user_id"})
+            items.append(
+                {"user_id": None, "success": False, "error": "Missing user_id"}
+            )
             if job_id:
                 _update_training_job_progress(
                     job_id,
@@ -844,7 +963,9 @@ def _rebuild_all_lecturer_faces_job(actor_id, job_id=None):
             )
         except Exception as exc:
             failure_count += 1
-            items.append({"user_id": user_id, "success": False, "error": str(exc)})
+            items.append(
+                {"user_id": user_id, "success": False, "error": str(exc)}
+            )
 
         if job_id:
             _update_training_job_progress(
@@ -1011,9 +1132,13 @@ def process_background_job(job_id):
             )
 
             try:
-                enqueued = _enqueue_background_job(job_id, delay_seconds=delay_seconds)
+                enqueued = _enqueue_background_job(
+                    job_id, delay_seconds=delay_seconds
+                )
             except Exception:
-                current_app.logger.exception("Retry enqueue failed for job %s", job_id)
+                current_app.logger.exception(
+                    "Retry enqueue failed for job %s", job_id
+                )
                 enqueued = False
 
             if not enqueued:
@@ -1059,9 +1184,13 @@ def _launch_background_job(app, job_type, payload):
 
     env = str(current_app.config.get("ENV") or "").lower()
     if env not in {"development", "dev", "local", "testing", "test"}:
-        raise RuntimeError("Background jobs require TASK_QUEUE_ENABLED in non-local environments")
+        raise RuntimeError(
+            "Background jobs require TASK_QUEUE_ENABLED in non-local environments"
+        )
 
-    thread = Thread(target=_run_background_job, args=(app, job_id), daemon=True)
+    thread = Thread(
+        target=_run_background_job, args=(app, job_id), daemon=True
+    )
     thread.start()
     return job_id
 
@@ -1071,7 +1200,6 @@ def _normalise_year(value):
         return ""
     text = _as_text(value)
     return text
-
 
 
 def _to_float(value, default=0.0):
@@ -1093,7 +1221,6 @@ def _as_object_id(value):
         return None
 
 
-
 def _normalise_filter_ids(filter_doc):
     if not isinstance(filter_doc, dict):
         return filter_doc
@@ -1102,7 +1229,9 @@ def _normalise_filter_ids(filter_doc):
         if isinstance(out["_id"], dict):
             oid_map = dict(out["_id"])
             if "$in" in oid_map and isinstance(oid_map["$in"], list):
-                oid_map["$in"] = [_as_object_id(v) or v for v in oid_map["$in"]]
+                oid_map["$in"] = [
+                    _as_object_id(v) or v for v in oid_map["$in"]
+                ]
             out["_id"] = oid_map
         else:
             out["_id"] = _as_object_id(out["_id"]) or out["_id"]
@@ -1172,7 +1301,9 @@ def _execute_rollback_operation(operation):
 
     if op_type == "replace_document":
         filt = _normalise_filter_ids(operation.get("filter") or {})
-        prev_doc = _normalise_document_ids(operation.get("previous_document") or {})
+        prev_doc = _normalise_document_ids(
+            operation.get("previous_document") or {}
+        )
         if filt and prev_doc:
             col.replace_one(filt, prev_doc, upsert=True)
         return
@@ -1239,7 +1370,14 @@ def _get_active_course_or_error(course_id):
     if not course:
         return None, (jsonify({"error": "Course not found"}), 404)
     if _course_is_inactive(course):
-        return None, (jsonify({"error": "Course is inactive. Reassign entities to an active course first."}), 409)
+        return None, (
+            jsonify(
+                {
+                    "error": "Course is inactive. Reassign entities to an active course first."
+                }
+            ),
+            409,
+        )
     return course, None
 
 
@@ -1249,7 +1387,14 @@ def _ensure_student_course_active(user_id):
         return None, (jsonify({"error": "Student profile not found"}), 404)
     course = _safe_get_course(profile.get("course_id"))
     if _course_is_inactive(course):
-        return profile, (jsonify({"error": "Student is linked to an inactive course and is read-only"}), 409)
+        return profile, (
+            jsonify(
+                {
+                    "error": "Student is linked to an inactive course and is read-only"
+                }
+            ),
+            409,
+        )
     return profile, None
 
 
@@ -1262,7 +1407,11 @@ def _normalise_course_semester(course_id, semester):
     if not course:
         return None, None, "Course not found"
     if _course_is_inactive(course):
-        return None, None, "Course is inactive. Reassign entities to an active course first"
+        return (
+            None,
+            None,
+            "Course is inactive. Reassign entities to an active course first",
+        )
 
     sem = _to_int(semester, 0)
     if sem <= 0:
@@ -1270,7 +1419,11 @@ def _normalise_course_semester(course_id, semester):
 
     max_sem = max(1, _to_int(course.get("course_duration"), 1) * 2)
     if sem > max_sem:
-        return None, None, f"semester must be between 1 and {max_sem} for selected course"
+        return (
+            None,
+            None,
+            f"semester must be between 1 and {max_sem} for selected course",
+        )
 
     return cid, sem, None
 
@@ -1280,7 +1433,14 @@ def _ensure_paper_course_active(paper):
     if not course_id:
         return jsonify({"error": "Paper is not linked to a valid course"}), 409
     if not is_course_active(course_id):
-        return jsonify({"error": "Paper is linked to an inactive course and is read-only"}), 409
+        return (
+            jsonify(
+                {
+                    "error": "Paper is linked to an inactive course and is read-only"
+                }
+            ),
+            409,
+        )
     return None
 
 
@@ -1296,13 +1456,16 @@ def _detach_lecturers_from_course_papers(course_id):
     )
 
     affected_papers = [
-        p for p in assigned_papers
+        p
+        for p in assigned_papers
         if _as_text(p.get("course_id")) in course_keys
     ]
     if not affected_papers:
         return 0, []
 
-    affected_ids = [p.get("_id") for p in affected_papers if p.get("_id") is not None]
+    affected_ids = [
+        p.get("_id") for p in affected_papers if p.get("_id") is not None
+    ]
     if not affected_ids:
         return 0, []
 
@@ -1315,7 +1478,9 @@ def _detach_lecturers_from_course_papers(course_id):
 
 def _legacy_safe_name(raw_value):
     text = _as_text(raw_value)
-    cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
+    cleaned = "".join(
+        ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text
+    )
     return cleaned.strip("_") or "unknown"
 
 
@@ -1323,25 +1488,27 @@ def _resolve_dataset_dir_for_user(user_id):
     user_id_text = _as_text(user_id)
     user = _safe_find_user(user_id_text) or {}
     role = _as_text(user.get("role", "student")).lower()
-    
+
     if role == "lecturer":
         target_dir = os.path.join("dataset", "lecturers", user_id_text)
     else:
         target_dir = os.path.join("dataset", "students", user_id_text)
-        
+
     if os.path.isdir(target_dir):
         return target_dir
-        
+
     # Automatic migration: check for legacy directories and move them if they exist
     legacy_dirs = [
         os.path.join("dataset", user_id_text),
-        os.path.join("dataset", f"lec_{user_id_text}")
+        os.path.join("dataset", f"lec_{user_id_text}"),
     ]
-    
+
     legacy_name = _as_text(user.get("name"))
     if legacy_name:
-        legacy_dirs.append(os.path.join("dataset", _legacy_safe_name(legacy_name)))
-        
+        legacy_dirs.append(
+            os.path.join("dataset", _legacy_safe_name(legacy_name))
+        )
+
     for l_dir in legacy_dirs:
         if os.path.isdir(l_dir) and l_dir != target_dir:
             try:
@@ -1349,9 +1516,11 @@ def _resolve_dataset_dir_for_user(user_id):
                 shutil.move(l_dir, target_dir)
                 return target_dir
             except Exception as e:
-                current_app.logger.error(f"Failed to migrate dataset from {l_dir} to {target_dir}: {e}")
-                return l_dir # fallback to reading from old dir if move fails
-                
+                current_app.logger.error(
+                    f"Failed to migrate dataset from {l_dir} to {target_dir}: {e}"
+                )
+                return l_dir  # fallback to reading from old dir if move fails
+
     return target_dir
 
 
@@ -1394,10 +1563,12 @@ def _train_embeddings_from_dataset_for_user(user_id):
             continue
 
     if not valid_crops:
-        raise ValueError("Training failed: no valid faces found in dataset images")
+        raise ValueError(
+            "Training failed: no valid faces found in dataset images"
+        )
 
     raw_embeddings = generate_embeddings_batch(valid_crops)
-    
+
     embeddings = []
     seen_signatures = set()
     for embedding in raw_embeddings:
@@ -1405,10 +1576,14 @@ def _train_embeddings_from_dataset_for_user(user_id):
         if signature in seen_signatures:
             continue
         seen_signatures.add(signature)
-        embeddings.append(embedding.tolist() if hasattr(embedding, "tolist") else embedding)
+        embeddings.append(
+            embedding.tolist() if hasattr(embedding, "tolist") else embedding
+        )
 
     if not embeddings:
-        raise ValueError("Training failed: no valid faces found in dataset images")
+        raise ValueError(
+            "Training failed: no valid faces found in dataset images"
+        )
 
     # Keep the strongest set of embeddings, but cap the storage size to reduce noisy duplicates.
     if len(embeddings) > 25:
@@ -1442,7 +1617,10 @@ def _resolve_user_identity(user_identifier):
     """Resolve route id that may be either user_id or profile_id."""
     profile = _get_profile_by_user_any(user_identifier)
     if profile:
-        return _as_text(profile.get("user_id")) or _as_text(user_identifier), profile
+        return (
+            _as_text(profile.get("user_id")) or _as_text(user_identifier),
+            profile,
+        )
 
     profile = _safe_get_profile_by_id(user_identifier)
     if profile:
@@ -1452,16 +1630,23 @@ def _resolve_user_identity(user_identifier):
     if user:
         role = _as_text(user.get("role")).lower()
         if role == "student":
-            return _as_text(user_identifier), _get_profile_by_user_any(user_identifier)
+            return _as_text(user_identifier), _get_profile_by_user_any(
+                user_identifier
+            )
         if role == "lecturer":
             return _as_text(user_identifier), user
 
     return None, None
 
 
-def _generate_registration_number(course, academic_session, exclude_user_id=None):
+def _generate_registration_number(
+    course, academic_session, exclude_user_id=None
+):
     """Generate a unique registration number, compatible with legacy and new session fields."""
-    prefix = re.sub(r"[^A-Za-z0-9]", "", (course or {}).get("code", "STU")).upper() or "STU"
+    prefix = (
+        re.sub(r"[^A-Za-z0-9]", "", (course or {}).get("code", "STU")).upper()
+        or "STU"
+    )
     session = _as_text(academic_session) or "NA"
     course_id = _as_text((course or {}).get("_id"))
 
@@ -1489,7 +1674,9 @@ def _generate_registration_number(course, academic_session, exclude_user_id=None
         existing = profiles.find_one({"reg_number": candidate}, {"user_id": 1})
         if not existing:
             return candidate
-        if exclude_user_id and _as_text(existing.get("user_id")) == _as_text(exclude_user_id):
+        if exclude_user_id and _as_text(existing.get("user_id")) == _as_text(
+            exclude_user_id
+        ):
             return candidate
         seq += 1
 
@@ -1500,10 +1687,14 @@ def _enrich_paper(paper, course_map, lecturer_map):
     lecturer = lecturer_map.get(item.get("lecturer_id"))
     item["course_name"] = course.get("name") if course else None
     item["course_code"] = course.get("code") if course else None
-    item["course_status"] = _as_text((course or {}).get("status") or "active").lower() or "active"
+    item["course_status"] = (
+        _as_text((course or {}).get("status") or "active").lower() or "active"
+    )
     item["is_course_inactive"] = item["course_status"] != "active"
     item["semester"] = item.get("semester")
-    item["academic_year"] = item.get("academic_session") or item.get("academic_year")
+    item["academic_year"] = item.get("academic_session") or item.get(
+        "academic_year"
+    )
     item["lecturer_name"] = lecturer.get("name") if lecturer else None
     item["lecturer_email"] = lecturer.get("email") if lecturer else None
     return item
@@ -1538,16 +1729,17 @@ def _paginate_items(items):
     start = (page - 1) * per_page
     end = start + per_page
 
-    return jsonify({
-        "items": items[start:end],
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-    })
+    return jsonify(
+        {
+            "items": items[start:end],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        }
+    )
 
 
 # ─── Courses ────────────────────────────────────────────────────────────────
 
 
-
-__all__ = [name for name in globals() if not name.startswith('__')]
+__all__ = [name for name in globals() if not name.startswith("__")]

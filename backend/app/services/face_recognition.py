@@ -2,18 +2,15 @@
 
 import hashlib
 import os
-import warnings
-
-import numpy as np
-from flask import current_app, has_app_context
-
-from app.models.enrollment import decode_face_embedding
-from app.utils.helpers import _current_env
-
-
 # We use keras-facenet which provides a ready-to-use InceptionResNetV1 model.
 # It will be lazily loaded on first call to avoid slow startup.
 import threading
+import warnings
+
+import numpy as np
+from app.models.enrollment import decode_face_embedding
+from app.utils.helpers import _current_env
+from flask import current_app, has_app_context
 
 _model = None
 _model_is_stub = False
@@ -41,7 +38,9 @@ def _vectors_cache_get(key):
 def _vectors_cache_set(key, value):
     _init_vectors_cache()
     if has_app_context():
-        max_entries = int(current_app.config.get("VECTORS_CACHE_MAX_ENTRIES", 128))
+        max_entries = int(
+            current_app.config.get("VECTORS_CACHE_MAX_ENTRIES", 128)
+        )
     else:
         max_entries = 128
     with _VECTORS_CACHE_LOCK:
@@ -73,8 +72,10 @@ def _prepared_candidates_cache_key(prepared_candidates: list):
 
     return digest.hexdigest()
 
+
 def is_model_stub() -> bool:
     return _model_is_stub
+
 
 def _normalize_np(vector: np.ndarray) -> np.ndarray:
     """L2-normalize a numpy vector in-place (no list conversion)."""
@@ -89,6 +90,7 @@ def normalize_embedding(embedding: list) -> list:
     """Return an L2-normalized embedding vector as a Python list."""
     return _normalize_np(np.asarray(embedding, dtype=np.float32)).tolist()
 
+
 def _load_model():
     global _model, _model_is_stub
     if _model is not None:
@@ -102,19 +104,23 @@ def _load_model():
             # Force TF CPU to prevent MediaPipe GPU allocation hangs.
             os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
             os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-            
+
             from keras_facenet import FaceNet
+
             _model = FaceNet()
             _model_is_stub = False
-            
+
             # Pre-warm model cache in background to prevent first-call latency
             def _warmup():
                 try:
-                    _model.embeddings(np.zeros((1, 160, 160, 3), dtype=np.uint8))
+                    _model.embeddings(
+                        np.zeros((1, 160, 160, 3), dtype=np.uint8)
+                    )
                 except Exception:
                     pass
+
             threading.Thread(target=_warmup, daemon=True).start()
-            
+
         except Exception as exc:
             env = _current_env()
             if env not in {"development", "dev", "local", "testing", "test"}:
@@ -181,7 +187,10 @@ def generate_embeddings_batch(face_crops: list) -> list:
     model = _load_model()
     batch = np.stack(face_crops)  # (N, 160, 160, 3)
     raw_embeddings = model.embeddings(batch)
-    return [_normalize_np(np.asarray(emb, dtype=np.float32)) for emb in raw_embeddings]
+    return [
+        _normalize_np(np.asarray(emb, dtype=np.float32))
+        for emb in raw_embeddings
+    ]
 
 
 def compare_embeddings(embedding_a: list, embedding_b: list) -> float:
@@ -201,7 +210,9 @@ def prepare_profile_candidates(stored_profiles: list) -> list:
             if decoded is None:
                 continue
             # Use _normalize_np to stay in numpy land (no list↔numpy conversion)
-            vectors.append(_normalize_np(np.asarray(decoded, dtype=np.float32)))
+            vectors.append(
+                _normalize_np(np.asarray(decoded, dtype=np.float32))
+            )
 
         if not vectors:
             continue
@@ -216,7 +227,9 @@ def prepare_profile_candidates(stored_profiles: list) -> list:
     return prepared
 
 
-def find_best_match_cached(query_embedding, prepared_candidates: list, threshold=0.6):
+def find_best_match_cached(
+    query_embedding, prepared_candidates: list, threshold=0.6
+):
     """Match against pre-normalized candidates. Returns (match_dict_or_none, best_score).
 
     query_embedding can be a list (will be normalized) or a pre-normalized
@@ -232,7 +245,9 @@ def find_best_match_cached(query_embedding, prepared_candidates: list, threshold
         query = _normalize_np(np.asarray(query_embedding, dtype=np.float32))
 
     # Quick path: if there are few candidates, fall back to simple loop
-    total_vectors = sum([len(c.get("vectors", [])) for c in prepared_candidates])
+    total_vectors = sum(
+        [len(c.get("vectors", [])) for c in prepared_candidates]
+    )
     best_candidate = None
     best_score = -1.0
 
@@ -290,7 +305,10 @@ def find_best_match_cached(query_embedding, prepared_candidates: list, threshold
         if key is not None:
             try:
                 # Store small caches of stacked arrays to speed future calls
-                _vectors_cache_set(key, (all_vectors, np.asarray(owner_indices, dtype=np.int32)))
+                _vectors_cache_set(
+                    key,
+                    (all_vectors, np.asarray(owner_indices, dtype=np.int32)),
+                )
             except Exception:
                 pass
 
@@ -318,7 +336,9 @@ def find_best_match_cached(query_embedding, prepared_candidates: list, threshold
     return None, best_score
 
 
-def find_best_match(query_embedding: list, stored_profiles: list, threshold=0.6):
+def find_best_match(
+    query_embedding: list, stored_profiles: list, threshold=0.6
+):
     """Compare a query embedding against all stored student profiles.
 
     .. deprecated::

@@ -1,5 +1,6 @@
 import Modal from '../../../components/ui/Modal';
 import { formatCourseName } from '../../../utils/courseDisplay';
+import { motion } from 'framer-motion';
 
 /**
  * Modal for managing paper assignments for a lecturer with department/course/semester filters.
@@ -57,11 +58,15 @@ export default function AssignPapersModal({
           ))}
         </select>
       </div>
-      <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8, marginBottom: 16 }}>
+      <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius-lg)', padding: 12, marginBottom: 16, background: 'linear-gradient(180deg, var(--bg-card), var(--bg-glass))', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {assignmentFilteredPapers.map((p) => {
           const checked = assignedPaperIds.includes(p._id);
           return (
-            <label key={p._id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', cursor: 'pointer', fontSize: '0.82rem' }}>
+            <motion.label 
+              key={p._id} 
+              whileHover={{ backgroundColor: 'rgba(139, 92, 246, 0.08)' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', cursor: 'pointer', fontSize: '0.85rem', borderRadius: '8px', border: checked ? '1px solid var(--accent-purple)' : '1px solid transparent', background: checked ? 'rgba(139, 92, 246, 0.05)' : 'transparent', transition: 'all 0.2s' }}
+            >
               <input
                 type="checkbox"
                 checked={checked}
@@ -71,9 +76,12 @@ export default function AssignPapersModal({
                     : assignedPaperIds.filter((id) => id !== p._id);
                   setAssignedPaperIds(next);
                 }}
+                style={{ accentColor: 'var(--accent-purple)', width: 16, height: 16, cursor: 'pointer' }}
               />
-              {p.name}{p.code ? ` [${p.code}]` : ''} {p.course_name ? `- ${formatCourseName(p.course_name, { isInactive: p.is_course_inactive, status: p.course_status })}` : ''}
-            </label>
+              <span style={{ fontWeight: checked ? 600 : 500, color: checked ? 'var(--accent-purple)' : 'var(--text-primary)' }}>
+                {p.name}{p.code ? ` [${p.code}]` : ''} <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 400, marginLeft: 4 }}>{p.course_name ? `- ${formatCourseName(p.course_name, { isInactive: p.is_course_inactive, status: p.course_status })}` : ''}</span>
+              </span>
+            </motion.label>
           );
         })}
         {assignmentFilteredPapers.length === 0 && (

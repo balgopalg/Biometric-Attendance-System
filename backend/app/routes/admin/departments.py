@@ -3,11 +3,18 @@ import re
 from . import admin_bp
 from ._helpers import *
 
+
 @admin_bp.route("/departments", methods=["GET"])
 @super_admin_required
 def list_departments(user):
     """Return all departments."""
-    include_inactive = _as_text(request.args.get("include_inactive", "")).lower() in ("1", "true", "yes")
+    include_inactive = _as_text(
+        request.args.get("include_inactive", "")
+    ).lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     depts = get_all_departments(include_inactive=include_inactive)
 
     # Enrich with user counts. Support legacy records where users may only have a department name.
@@ -22,12 +29,14 @@ def list_departments(user):
             if dept_oid:
                 query["$or"] = [{"department_id": dept_oid}]
                 if dept_name:
-                    query["$or"].append({
-                        "department": {
-                            "$regex": f"^{re.escape(dept_name)}$",
-                            "$options": "i",
-                        },
-                    })
+                    query["$or"].append(
+                        {
+                            "department": {
+                                "$regex": f"^{re.escape(dept_name)}$",
+                                "$options": "i",
+                            },
+                        }
+                    )
             elif dept_name:
                 query["department"] = {
                     "$regex": f"^{re.escape(dept_name)}$",
@@ -57,7 +66,10 @@ def add_department(user):
 
     # Check uniqueness
     if get_department_by_code(code):
-        return jsonify({"error": f"Department code '{code}' already exists"}), 409
+        return (
+            jsonify({"error": f"Department code '{code}' already exists"}),
+            409,
+        )
 
     dept = create_department(name, code)
     log_action(
@@ -92,7 +104,12 @@ def edit_department(user, dept_id):
         new_code = _as_text(d["code"]).strip().upper()
         existing = get_department_by_code(new_code)
         if existing and str(existing["_id"]) != dept_id:
-            return jsonify({"error": f"Department code '{new_code}' already in use"}), 409
+            return (
+                jsonify(
+                    {"error": f"Department code '{new_code}' already in use"}
+                ),
+                409,
+            )
         fields["code"] = new_code
     if "status" in d and d["status"] in ("active", "inactive"):
         fields["status"] = d["status"]
@@ -123,11 +140,18 @@ def remove_department(user, dept_id):
 
     # Prevent deletion if department has active users
     users_col = get_collection("auth", "users")
-    active_users = users_col.count_documents({"department_id": ObjectId(dept_id)})
+    active_users = users_col.count_documents(
+        {"department_id": ObjectId(dept_id)}
+    )
     if active_users > 0:
-        return jsonify({
-            "error": f"Cannot delete department with {active_users} active users. Reassign them first."
-        }), 409
+        return (
+            jsonify(
+                {
+                    "error": f"Cannot delete department with {active_users} active users. Reassign them first."
+                }
+            ),
+            409,
+        )
 
     soft_delete_department(dept_id)
     log_action(
@@ -175,7 +199,10 @@ def add_department_admin(user):
     initial_password = _as_text(d.get("initial_password", "")).strip()
 
     if not name or not email or not department_id:
-        return jsonify({"error": "name, email, and department_id are required"}), 400
+        return (
+            jsonify({"error": "name, email, and department_id are required"}),
+            400,
+        )
 
     # Validate department exists
     dept = get_department_by_id(department_id)
@@ -212,11 +239,16 @@ def add_department_admin(user):
         details=f"Dept admin {email} for {dept.get('code')}",
     )
 
-    return jsonify({
-        "message": f"Department admin created. Temp password: {initial_password}",
-        "user": sanitise_mongo_doc(new_admin),
-        "temp_password": initial_password,
-    }), 201
+    return (
+        jsonify(
+            {
+                "message": f"Department admin created. Temp password: {initial_password}",
+                "user": sanitise_mongo_doc(new_admin),
+                "temp_password": initial_password,
+            }
+        ),
+        201,
+    )
 
 
 @admin_bp.route("/department-admins/<uid>", methods=["PUT"])
@@ -291,7 +323,9 @@ def reset_department_admin_password(user, uid):
         return jsonify({"error": "User is not a department admin"}), 400
 
     d = request.get_json(silent=True) or {}
-    temp_password = reset_user_password(uid, temp_password=_as_text(d.get("temp_password", "")).strip() or None)
+    temp_password = reset_user_password(
+        uid, temp_password=_as_text(d.get("temp_password", "")).strip() or None
+    )
 
     log_action(
         "RESET_PASSWORD",
@@ -299,4 +333,6 @@ def reset_department_admin_password(user, uid):
         target_user=uid,
         details=f"Password reset for dept admin {target.get('email')}",
     )
-    return jsonify({"message": "Password reset", "temp_password": temp_password})
+    return jsonify(
+        {"message": "Password reset", "temp_password": temp_password}
+    )

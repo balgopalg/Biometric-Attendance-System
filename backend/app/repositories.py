@@ -1,8 +1,7 @@
 """Small repository helpers for common MongoDB access patterns."""
 
-from bson import ObjectId
-
 from app.extensions import get_collection
+from bson import ObjectId
 
 
 def _normalize_object_ids(values):
@@ -30,7 +29,11 @@ def find_many_by_ids(alias, collection_name, ids, projection=None):
 
     collection = get_collection(alias, collection_name)
     query = {"_id": {"$in": object_ids}}
-    cursor = collection.find(query, projection) if projection else collection.find(query)
+    cursor = (
+        collection.find(query, projection)
+        if projection
+        else collection.find(query)
+    )
     return {str(doc["_id"]): doc for doc in cursor}
 
 

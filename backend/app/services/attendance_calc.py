@@ -1,7 +1,6 @@
 """Attendance calculation service — predictive analytics."""
 
 import numpy as np
-
 from app.models.attendance import count_attendance
 from app.models.paper import get_paper_by_id
 
@@ -62,5 +61,3 @@ def safe_bunks_remaining(
     # attended / total >= threshold / 100  →  safe if attended >= threshold * total / 100
     min_needed = int(np.ceil(threshold * total / 100))
     return max(0, attended - min_needed)
-
-

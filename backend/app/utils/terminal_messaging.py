@@ -28,7 +28,9 @@ class TerminalMessenger:
 
     def __init__(self, use_color: bool | None = None, stream=None):
         self.stream = stream or sys.stdout
-        self.use_color = self._should_use_color() if use_color is None else bool(use_color)
+        self.use_color = (
+            self._should_use_color() if use_color is None else bool(use_color)
+        )
 
     def banner(self, title: str, subtitle: str | None = None) -> None:
         width = 72
@@ -54,7 +56,9 @@ class TerminalMessenger:
     def error(self, message: str) -> None:
         self._write(self._style(f"[FAIL] {message}", _Ansi.FG_RED))
 
-    def check(self, name: str, passed: bool, details: str | None = None) -> None:
+    def check(
+        self, name: str, passed: bool, details: str | None = None
+    ) -> None:
         if passed:
             self.success(name)
             return
@@ -64,7 +68,9 @@ class TerminalMessenger:
         else:
             self.error(name)
 
-    def summary(self, title: str, passed: int, failed: int, warnings: int = 0) -> None:
+    def summary(
+        self, title: str, passed: int, failed: int, warnings: int = 0
+    ) -> None:
         total = passed + failed
         self._write("")
         self._write("-" * 72)
@@ -76,7 +82,9 @@ class TerminalMessenger:
         self._write(f"Total     : {total}")
         self._write("-" * 72)
 
-    def final_status(self, ok: bool, success_message: str, failure_message: str) -> None:
+    def final_status(
+        self, ok: bool, success_message: str, failure_message: str
+    ) -> None:
         self._write("")
         if ok:
             self.success(success_message)
