@@ -52,7 +52,7 @@ class Config:
             "CRITICAL: JWT_SECRET_KEY not set in production. "
             "Set via environment variable to a strong random string (64+ characters)"
         )
-    JWT_SECRET_KEY = _JWT_SECRET_KEY or ("dev_secret_key_change_in_production" if ENV not in {"production", "prod", "staging"} else os.urandom(32).hex())
+    JWT_SECRET_KEY = _JWT_SECRET_KEY or ("dev_secret_key_change_in_production" if ENV not in {"production", "prod", "staging"} else os.urandom(32).hex())  # gitleaks:allow
     
     # Enforce secret strength validation
     STRICT_JWT_SECRET = _env_bool("STRICT_JWT_SECRET", ENV in {"production", "prod", "staging"})

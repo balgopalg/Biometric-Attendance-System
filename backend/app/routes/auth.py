@@ -107,7 +107,7 @@ def _serialize_auth_user(user):
 
 
 def _otp_hash(email, otp):
-    secret = str(current_app.config.get("JWT_SECRET_KEY") or "dev-only-otp-secret")
+    secret = str(current_app.config.get("JWT_SECRET_KEY") or "dev-only-otp-secret")  # gitleaks:allow
     payload = f"{normalize_email(email)}:{otp}:{secret}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 

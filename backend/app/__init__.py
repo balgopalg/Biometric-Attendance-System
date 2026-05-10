@@ -178,7 +178,7 @@ def _validate_security_config(app):
         "change-me",
         "dev-only-change-this-secret",
         "replace-with-a-strong-random-secret",
-        "admin123",
+        "admin123",  # gitleaks:allow
         "",
         None,
     }
