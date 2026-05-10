@@ -553,7 +553,7 @@ export default function ManageStudents() {
       </div>
 
       <div className="students-toolbar-actions students-toolbar-actions-primary" style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-          <button className="btn-secondary" title="Import students from Excel" onClick={() => {
+          <button className="btn-secondary desktop-only" title="Import students from Excel" onClick={() => {
             setExcelForm({ course_id: '', semester: '' });
             setExcelFile(null);
             setExcelResults(null);
@@ -592,38 +592,39 @@ export default function ManageStudents() {
         </button>
       </div>
 
+      {/* Search bar — always visible */}
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <HiOutlineSearch size={18} style={{ 
+          position: 'absolute', 
+          left: 14, 
+          top: '50%', 
+          transform: 'translateY(-50%)', 
+          color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
+          transition: 'color 0.2s ease'
+        }} />
+        <input 
+          className="search-input" 
+          placeholder="Search by name, reg no, email..." 
+          value={search} 
+          onChange={(e) => setSearch(e.target.value)}
+          onFocus={() => setIsSearchFocused(true)}
+          onBlur={() => setIsSearchFocused(false)}
+          style={{
+            paddingLeft: 40,
+            width: '100%',
+            borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
+            background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
+            transition: 'all 0.3s ease'
+          }}
+        />
+      </div>
+
       <div className={`students-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ 
         display: 'grid', 
-        gridTemplateColumns: isSearchFocused ? '2.5fr 0.8fr 0.8fr 0.8fr 0.8fr' : '1.5fr 1.2fr 1fr 1fr 1fr', 
-        transition: 'grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        gridTemplateColumns: '1fr 1fr 1fr 1fr', 
         gap: 10, 
         marginBottom: 14 
       }}>
-        <div style={{ position: 'relative' }}>
-          <HiOutlineSearch size={18} style={{ 
-            position: 'absolute', 
-            left: 14, 
-            top: '50%', 
-            transform: 'translateY(-50%)', 
-            color: isSearchFocused ? 'var(--accent-primary)' : 'var(--text-muted)',
-            transition: 'color 0.2s ease'
-          }} />
-          <input 
-            className="search-input" 
-            placeholder="Search by name, reg no, email..." 
-            value={search} 
-            onChange={(e) => setSearch(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            style={{
-              paddingLeft: 40,
-              width: '100%',
-              borderColor: isSearchFocused ? 'var(--accent-primary)' : 'var(--border-glass)',
-              background: isSearchFocused ? 'var(--bg-glass-heavy)' : 'var(--bg-glass)',
-              transition: 'all 0.3s ease'
-            }}
-          />
-        </div>
 
         <select className="input-field" value={filters.department_id} onChange={(e) => setFilters({ department_id: e.target.value, course_id: '', semester: '', paper_id: '' })} disabled={isDepartmentAdmin}>
           <option value="">{isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}</option>
@@ -686,6 +687,9 @@ export default function ManageStudents() {
               </span>
             </label>
           </div>
+          <button className="btn-secondary" onClick={() => { setShowMobileOps(false); setExcelForm({ course_id: '', semester: '' }); setExcelFile(null); setExcelResults(null); if (excelFileInputRef.current) excelFileInputRef.current.value = ''; setShowExcelImport(true); }}>
+            <HiOutlineDocumentAdd size={16} /> Import Excel
+          </button>
           <button className="btn-secondary" onClick={() => { setShowMobileOps(false); handleRebuildAllFaces(); }} disabled={rebuildingAllFaces}>
             <HiOutlineSparkles size={16} /> {rebuildingAllFaces ? 'Rebuilding...' : 'Rebuild All Faces'}
           </button>

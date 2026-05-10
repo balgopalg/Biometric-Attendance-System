@@ -510,70 +510,150 @@ export default function ManageTimetable() {
   };
 
   const handleExportPdf = async () => {
-    if (!selectedTimetable || !timetableExportRef.current) return;
+    if (!selectedTimetable) return;
     try {
-      const target = timetableExportRef.current;
       const popup = window.open('', '_blank', 'width=1200,height=900');
       if (!popup) {
         toast.error('Please allow popups to export PDF');
         return;
       }
 
-      const theme = document.documentElement.getAttribute('data-theme');
-      const clone = target.cloneNode(true);
+      const slots = Array.isArray(selectedTimetable.slots) ? selectedTimetable.slots : [];
+      const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-      const doc = popup.document;
-      if (theme) {
-        doc.documentElement.setAttribute('data-theme', theme);
+      // Build time rows from meta or from slots
+      const toMin = (t) => { const [h, m] = String(t || '').split(':'); return Number(h) * 60 + Number(m); };
+      const toHhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const to12h = (t) => { const [h, m] = String(t).split(':'); const hr = Number(h); return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`; };
+
+      const dur = Number(selectedTimetable.class_duration_minutes || selectedTimetable.generation_meta?.class_duration_minutes || 0);
+      const cStart = toMin(selectedTimetable.class_start_time || selectedTimetable.generation_meta?.class_start_time || '');
+      const cEnd = toMin(selectedTimetable.class_end_time || selectedTimetable.generation_meta?.class_end_time || '');
+      const rStart = toMin(selectedTimetable.recess_start_time || selectedTimetable.generation_meta?.recess_start_time || '');
+      const rEnd = toMin(selectedTimetable.recess_end_time || selectedTimetable.generation_meta?.recess_end_time || '');
+      const hasRecess = rStart < rEnd;
+
+      let timeRows = [];
+      if (dur > 0 && cStart < cEnd) {
+        let p = cStart;
+        while (p + dur <= cEnd) {
+          if (hasRecess && p < rEnd && p + dur > rStart) { p = Math.max(p + 1, rEnd); continue; }
+          timeRows.push({ start: toHhmm(p), end: toHhmm(p + dur), startMin: p });
+          p += dur;
+        }
+      }
+      if (!timeRows.length) {
+        const unique = new Map();
+        slots.forEach((s) => {
+          const k = `${s.start_time}-${s.end_time}`;
+          if (!unique.has(k)) unique.set(k, { start: s.start_time, end: s.end_time, startMin: toMin(s.start_time) });
+        });
+        timeRows = [...unique.values()].sort((a, b) => a.startMin - b.startMin);
       }
 
-      Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).forEach((node) => {
-        doc.head.appendChild(node.cloneNode(true));
-      });
+      // Build slot lookup
+      const slotMap = {};
+      slots.forEach((s) => { slotMap[`${s.day}|${s.start_time}-${s.end_time}`] = s; });
 
-      const printStyles = doc.createElement('style');
-      printStyles.textContent = `
-        @page { size: landscape; margin: 10mm; }
-        html, body { margin: 0; padding: 0; background: #ffffff; }
-        body {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-          color: var(--text-primary);
-        }
-        .timetable-print-root {
-          width: max-content;
-          min-width: 100%;
-          padding: 14px;
-          background: #ffffff;
-        }
-        .timetable-print-root .glass-card {
-          box-shadow: none !important;
-        }
-        .timetable-print-root button,
-        .timetable-print-root .timetable-cell-edit-btn {
-          display: none !important;
-        }
-      `;
-      doc.head.appendChild(printStyles);
+      // Days that have data
+      const daySet = new Set(slots.map((s) => String(s.day || '').trim()));
+      const days = WEEKDAYS.filter((d) => daySet.has(d));
+      if (!days.length) days.push(...WEEKDAYS);
 
-      const mount = doc.createElement('div');
-      mount.className = 'timetable-print-root';
-      doc.body.appendChild(mount);
-
-      mount.appendChild(clone);
-
-      const ready = doc.fonts?.ready;
-      if (ready?.then) {
-        await ready.catch(() => undefined);
+      // Find recess insert position
+      let recessIdx = -1;
+      if (hasRecess) {
+        recessIdx = timeRows.findIndex((r) => r.startMin >= rEnd);
+        if (recessIdx === -1) recessIdx = timeRows.length;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
+      // Build column headers (time slots) with recess column inserted
+      const recessTime = hasRecess ? `${to12h(toHhmm(rStart))} - ${to12h(toHhmm(rEnd))}` : '';
+      let headerCells = '';
+      for (let i = 0; i < timeRows.length; i++) {
+        if (recessIdx === i) {
+          headerCells += `<th style="padding:8px;background:#f0f0f0;border:1px solid #d1d5db;font-size:11px;">RECESS<br>${recessTime}</th>`;
+        }
+        const row = timeRows[i];
+        headerCells += `<th style="padding:8px;background:#e5e7eb;border:1px solid #d1d5db;font-size:11px;white-space:nowrap;">${to12h(row.start)}<br><span style="font-size:10px;color:#6b7280;">to</span><br>${to12h(row.end)}</th>`;
+      }
+      if (hasRecess && recessIdx === timeRows.length) {
+        headerCells += `<th style="padding:8px;background:#f0f0f0;border:1px solid #d1d5db;font-size:11px;">RECESS<br>${recessTime}</th>`;
+      }
+
+      // Build body rows (one per day)
+      let tableRows = '';
+      for (const day of days) {
+        let cells = '';
+        for (let i = 0; i < timeRows.length; i++) {
+          if (recessIdx === i) {
+            cells += `<td style="padding:6px;text-align:center;background:#f9fafb;border:1px solid #d1d5db;color:#6b7280;font-style:italic;font-size:11px;">-</td>`;
+          }
+          const row = timeRows[i];
+          const slot = slotMap[`${day}|${row.start}-${row.end}`];
+          if (!slot || !slot.paper_name) {
+            cells += `<td style="padding:6px;text-align:center;border:1px solid #d1d5db;color:#9ca3af;">-</td>`;
+          } else {
+            const code = slot.paper_code ? `<strong style="font-size:11px;">${slot.paper_code}</strong><br>` : '';
+            const name = `<span style="font-size:12px;">${slot.paper_name}</span>`;
+            const lecturer = slot.lecturer_name ? `<br><span style="font-size:10px;color:#4b5563;">${slot.lecturer_name}</span>` : '';
+            cells += `<td style="padding:6px;text-align:center;border:1px solid #d1d5db;">${code}${name}${lecturer}</td>`;
+          }
+        }
+        if (hasRecess && recessIdx === timeRows.length) {
+          cells += `<td style="padding:6px;text-align:center;background:#f9fafb;border:1px solid #d1d5db;color:#6b7280;font-style:italic;font-size:11px;">-</td>`;
+        }
+        tableRows += `<tr><td style="padding:8px 10px;font-weight:700;border:1px solid #d1d5db;white-space:nowrap;font-size:13px;">${day}</td>${cells}</tr>`;
+      }
+
+      const meta = [
+        selectedTimetable.department_name || 'Department',
+        selectedTimetable.course_name || 'Course',
+        `Semester ${selectedTimetable.semester || 'N/A'}`,
+        `Session ${selectedTimetable.academic_session || 'N/A'}`,
+      ].join(' | ');
+
+      const html = `<!doctype html>
+<html>
+<head>
+<title>Timetable - ${selectedTimetable.course_name || 'Export'}</title>
+<style>
+  @page { size: landscape; margin: 8mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; padding: 16px; color: #111827; }
+  h2 { font-size: 18px; margin-bottom: 4px; }
+  .meta { font-size: 13px; color: #4b5563; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { vertical-align: middle; }
+</style>
+</head>
+<body>
+  <h2>Weekly Timetable</h2>
+  <p class="meta">${meta}</p>
+  <table>
+    <thead>
+      <tr>
+        <th style="padding:8px;background:#e5e7eb;border:1px solid #d1d5db;width:90px;font-size:13px;">Day</th>
+        ${headerCells}
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+      popup.document.open();
+      popup.document.write(html);
+      popup.document.close();
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
       popup.focus();
       popup.print();
     } catch (err) {
       console.error('PDF export failed:', err);
-      const errorText = err?.message ? `Failed to export PDF: ${err.message}` : 'Failed to export PDF';
-      toast.error(errorText);
+      toast.error(err?.message ? `Failed to export PDF: ${err.message}` : 'Failed to export PDF');
     }
   };
 
