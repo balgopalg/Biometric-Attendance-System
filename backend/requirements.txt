@@ -53,6 +53,8 @@ reportlab==4.4.10
 # --- Background Jobs & Caching ---
 # In-memory data store client for queue management and rapid lookups
 redis==5.2.1
+# Redis Queue library for background job processing
+rq==1.15.1
 
 # --- Observability, Logging & Production ---
 # Production-grade WSGI HTTP Server
@@ -67,3 +69,4 @@ sentry-sdk==2.8.0
 # --- Communications ---
 # Email client for sending OTPs, password recovery, and system notifications
 yagmail==0.15.293
+
