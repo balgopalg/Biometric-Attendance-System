@@ -1420,6 +1420,22 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   border-bottom-left-radius: 12px;
 }
 
+/* Disable sticky day column on small screens, but only for the calendar panel instance */
+@media (max-width: 768px) {
+  .academic-calendar-panel .timetable-sketch-table th,
+  .academic-calendar-panel .timetable-sketch-table th:first-child,
+  .academic-calendar-panel .timetable-sketch-table .timetable-day-cell {
+    position: static !important;
+    left: auto !important;
+    z-index: auto !important;
+  }
+
+  .academic-calendar-panel .timetable-sketch-table {
+    min-width: 100%;
+    overflow: auto;
+  }
+}
+
 /* Slot chip inside sketch table — full-bleed, colored */
 .timetable-sketch-table .timetable-slot-chip {
   border: 0;
