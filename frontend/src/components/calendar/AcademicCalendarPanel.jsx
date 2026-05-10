@@ -493,62 +493,156 @@ export default function AcademicCalendarPanel({ scopeDepartmentName = '', compac
   }, [calendar]);
 
   const handleExport = async () => {
-    if (!calendarExportRef.current || !holidayExportRef.current) return;
+    if (!calendar) return;
     setExporting(true);
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import('html2canvas'),
-        import('jspdf'),
-      ]);
+      const popup = window.open('', '_blank', 'width=1200,height=900');
+      if (!popup) { toast.error('Please allow popups to export PDF'); return; }
 
-      // Temporarily make the hidden templates visible for reliable rendering
-      const wrapper = calendarExportRef.current.closest('[data-export-wrapper]');
-      const prevStyle = wrapper?.getAttribute('style') || '';
-      if (wrapper) {
-        wrapper.style.cssText = 'position:fixed;left:0;top:0;z-index:-1;opacity:0;pointer-events:none;';
+      const holidays = calendar?.holidays || [];
+      const optionalHolidays = calendar?.optional_holidays || [];
+
+      // Build compact month grids
+      let monthsHtml = '';
+      for (let m = 0; m < 12; m++) {
+        const cells = getMonthDays(year, m);
+        while (cells.length < 42) cells.push(null);
+
+        let dayCells = '';
+        for (const date of cells) {
+          if (!date) {
+            dayCells += '<div style="height:18px;"></div>';
+            continue;
+          }
+          const key = formatDateKey(date);
+          const isSunday = lookup.sundaySet.has(key);
+          const holiday = lookup.holidayMap.get(key);
+          const optionalH = lookup.optionalMap.get(key);
+          let bg = '#f8fafc', border = '#e2e8f0', color = '#1e293b', fw = 400;
+          if (holiday || isSunday) { bg = '#fef2f2'; border = '#fca5a5'; color = '#dc2626'; fw = 700; }
+          else if (optionalH) { bg = '#fffbeb'; border = '#fcd34d'; color = '#b45309'; fw = 700; }
+          else if (date.getDay() === 0) { color = '#dc2626'; }
+          dayCells += `<div style="height:18px;display:flex;align-items:center;justify-content:center;border-radius:2px;border:1px solid ${border};background:${bg};font-size:7px;font-weight:${fw};color:${color};">${date.getDate()}</div>`;
+        }
+
+        monthsHtml += `<div style="background:#fff;padding:4px 5px;border:1px solid #e2e8f0;">
+          <div style="font-size:8px;font-weight:800;color:#1e3a5f;border-bottom:1px solid #1e3a5f;padding-bottom:2px;margin-bottom:2px;">${MONTH_NAMES[m].toUpperCase().slice(0, 3)} ${year}</div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:1px;">
+            ${['S','M','T','W','T','F','S'].map((d, i) => `<div style="text-align:center;font-size:6px;font-weight:700;color:${i === 0 ? '#dc2626' : '#94a3b8'};">${d}</div>`).join('')}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;">${dayCells}</div>
+        </div>`;
       }
 
-      const calCanvas = await html2canvas(calendarExportRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-      });
 
-      const listCanvas = await html2canvas(holidayExportRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-      });
+      // Build holiday list — group consecutive same-label holidays into ranges
+      const rawItems = [
+        ...holidays.map((h) => ({ ...h, htype: 'Regular' })),
+        ...optionalHolidays.map((h) => ({ ...h, htype: 'Optional' })),
+      ].map((h) => {
+        const d = parseDateKey(h.date);
+        return d ? { ...h, _date: d } : null;
+      }).filter(Boolean).sort((a, b) => a._date - b._date);
 
-      // Restore hidden positioning
-      if (wrapper) {
-        wrapper.style.cssText = prevStyle;
+      // Group consecutive days with same label+type
+      const grouped = [];
+      for (const item of rawItems) {
+        const last = grouped[grouped.length - 1];
+        if (last && last.label === item.label && last.htype === item.htype) {
+          const nextDay = new Date(last.endDate);
+          nextDay.setDate(nextDay.getDate() + 1);
+          if (nextDay.toDateString() === item._date.toDateString()) {
+            last.endDate = new Date(item._date);
+            continue;
+          }
+        }
+        grouped.push({
+          startDate: new Date(item._date),
+          endDate: new Date(item._date),
+          label: item.label || 'Holiday',
+          htype: item.htype,
+        });
       }
 
-      // Convert canvas pixel dimensions to mm (96dpi → 1px ≈ 0.2646mm)
-      const PX_TO_MM = 25.4 / 96;
-      const scaleFactor = 2; // matches html2canvas scale
+      const mid = Math.ceil(grouped.length / 2);
+      const col1 = grouped.slice(0, mid);
+      const col2 = grouped.slice(mid);
 
-      // Page 1 — Calendar grid (page size = exact content size)
-      const calImg = calCanvas.toDataURL('image/png');
-      const calW = (calCanvas.width / scaleFactor) * PX_TO_MM;
-      const calH = (calCanvas.height / scaleFactor) * PX_TO_MM;
-      const pdf = new jsPDF({
-        orientation: calW > calH ? 'l' : 'p',
-        unit: 'mm',
-        format: [calW, calH],
-      });
-      pdf.addImage(calImg, 'PNG', 0, 0, calW, calH);
+      const fmtDate = (d) => `${d.getDate()} ${MONTH_NAMES[d.getMonth()].slice(0, 3)}`;
+      const buildColRows = (items) => items.map((h, i) => {
+        const isRange = h.startDate.getTime() !== h.endDate.getTime();
+        const dateStr = isRange ? `${fmtDate(h.startDate)} - ${fmtDate(h.endDate)}` : fmtDate(h.startDate);
+        const isOpt = h.htype === 'Optional';
+        return `<tr style="background:${i % 2 === 0 ? '#fff' : '#f8fafc'};">
+          <td style="padding:2px 4px;border:1px solid #e2e8f0;font-size:8px;font-weight:600;white-space:nowrap;">${dateStr}</td>
+          <td style="padding:2px 4px;border:1px solid #e2e8f0;font-size:8px;">${h.label}</td>
+          <td style="padding:2px 4px;border:1px solid #e2e8f0;font-size:7px;text-align:center;color:${isOpt ? '#b45309' : '#dc2626'};font-weight:700;">${h.htype}</td>
+        </tr>`;
+      }).join('');
 
-      // Page 2 — Holiday list (page size = exact content size)
-      const listImg = listCanvas.toDataURL('image/png');
-      const listW = (listCanvas.width / scaleFactor) * PX_TO_MM;
-      const listH = (listCanvas.height / scaleFactor) * PX_TO_MM;
-      pdf.addPage([listW, listH], listW > listH ? 'l' : 'p');
-      pdf.addImage(listImg, 'PNG', 0, 0, listW, listH);
+      const colHeader = `<tr><th style="padding:3px 4px;background:#e5e7eb;border:1px solid #d1d5db;font-size:8px;font-weight:700;">Date</th><th style="padding:3px 4px;background:#e5e7eb;border:1px solid #d1d5db;font-size:8px;font-weight:700;">Holiday / Event</th><th style="padding:3px 4px;background:#e5e7eb;border:1px solid #d1d5db;font-size:8px;font-weight:700;text-align:center;">Type</th></tr>`;
 
-      pdf.save(`${calendar?.title || 'Academic-Calendar'}.pdf`);
-      toast.success('Calendar PDF downloaded');
+      const title = calendar?.title || `Academic Calendar ${year}`;
+      const genDate = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+
+      const html = `<!doctype html>
+<html>
+<head>
+<title>${title}</title>
+<style>
+  @page { size: landscape; margin: 6mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #111827; }
+  .page { page-break-after: always; padding: 8px 10px; }
+  .page:last-child { page-break-after: auto; }
+  table { width: 100%; border-collapse: collapse; }
+</style>
+</head>
+<body>
+  <!-- Page 1: Calendar Grid -->
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+      <div>
+        <div style="font-size:14px;font-weight:800;">${title}</div>
+        <div style="font-size:9px;color:#4b5563;">Holiday Schedule - ${year}</div>
+      </div>
+      <div style="font-size:8px;color:#94a3b8;">Generated ${genDate}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;">
+      ${monthsHtml}
+    </div>
+    <div style="display:flex;gap:16px;margin-top:4px;font-size:8px;color:#475569;">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#fef2f2;border:1px solid #fca5a5;vertical-align:middle;margin-right:3px;"></span>Holiday</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#fffbeb;border:1px solid #fcd34d;vertical-align:middle;margin-right:3px;"></span>Optional</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#f8fafc;border:1px solid #e2e8f0;vertical-align:middle;margin-right:3px;"></span>Working</span>
+    </div>
+  </div>
+
+  <!-- Page 2: Holiday List (2-column) -->
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+      <div>
+        <div style="font-size:14px;font-weight:800;">${title}</div>
+        <div style="font-size:9px;color:#4b5563;">Complete Holiday List - ${year} (${holidays.length} Regular, ${optionalHolidays.length} Optional)</div>
+      </div>
+      <div style="font-size:8px;color:#94a3b8;">Generated ${genDate}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+      <table>${colHeader}${buildColRows(col1)}</table>
+      <table>${colHeader}${buildColRows(col2)}</table>
+    </div>
+  </div>
+</body>
+</html>`;
+
+      popup.document.open();
+      popup.document.write(html);
+      popup.document.close();
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      popup.focus();
+      popup.print();
+      toast.success('Calendar print preview opened');
     } catch (err) {
       console.error('Export failed', err);
       toast.error(err?.message ? `Failed to export PDF: ${err.message}` : 'Failed to export PDF');
