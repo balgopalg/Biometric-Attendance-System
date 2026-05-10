@@ -104,8 +104,8 @@ export default function PinCommitModal({
                 borderRightColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
                 borderBottomColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
                 borderLeftColor: digit ? 'var(--accent-purple)' : 'var(--border-glass, #e2e8f0)',
-                background: 'var(--bg-primary, #f8fafc)',
-                color: 'var(--text-main, #0f172a)',
+                background: 'var(--bg-glass, #ffffff)',
+                color: 'var(--text-primary, #0f172a)',
                 transition: 'all 0.2s ease',
                 outline: 'none',
                 boxShadow: digit ? '0 0 0 4px rgba(139, 92, 246, 0.15)' : '0 2px 4px rgba(0,0,0,0.02)'

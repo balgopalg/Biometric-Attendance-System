@@ -48,7 +48,7 @@ def list_courses(user):
             course_dept_name = (
                 _as_text(course.get("department", "")).strip().lower()
             )
-            if course_dept_id and course_dept_id == selected_dept_id:
+            if _as_text(course_dept_id) == selected_dept_id:
                 scoped_courses.append(course)
                 continue
             # Legacy fallback for old course records that only stored department name.

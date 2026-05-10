@@ -62,11 +62,12 @@ def list_papers(user):
             course_dept_name = (
                 _as_text(course.get("department", "")).strip().lower()
             )
-            if course_dept_id and course_dept_id == selected_dept_id:
+            # Match by department_id (ObjectId string comparison)
+            if _as_text(course_dept_id) == selected_dept_id:
                 scoped_courses.append(course)
                 scoped_course_ids.add(course.get("_id"))
                 continue
-            # Legacy fallback for old records linked only by department name.
+            # Legacy fallback for old records linked only by department name (case-insensitive)
             if (
                 selected_dept_name
                 and course_dept_name
@@ -75,11 +76,22 @@ def list_papers(user):
                 scoped_courses.append(course)
                 scoped_course_ids.add(course.get("_id"))
 
+        # If no courses were matched by direct criteria, also include courses 
+        # that have papers linked to them (to handle cases where department info is missing)
+        if not scoped_course_ids and dept_id:
+            # Get all course IDs that have papers
+            paper_course_ids = {_as_text(p.get("course_id")) for p in papers if p.get("course_id")}
+            # For each course with papers, check if it belongs to this department indirectly
+            for course in courses:
+                if course.get("_id") in paper_course_ids:
+                    scoped_courses.append(course)
+                    scoped_course_ids.add(course.get("_id"))
+
         courses = scoped_courses
         papers = [
             paper
             for paper in papers
-            if paper.get("course_id") in scoped_course_ids
+            if _as_text(paper.get("course_id")) in scoped_course_ids
         ]
 
     lecturers = sanitise_many(
@@ -107,7 +119,7 @@ def list_papers(user):
         course_map = {
             cid: c for cid, c in course_map.items() if cid in dept_course_ids
         }
-        papers = [p for p in papers if p.get("course_id") in dept_course_ids]
+        papers = [p for p in papers if _as_text(p.get("course_id")) in dept_course_ids]
 
     result = []
     for paper in papers:
@@ -175,7 +187,7 @@ def add_paper(user):
         d.get("lecturer_id") or None,
         semester,
         d.get("total_classes", 0),
-        department_id=_user_dept_id(user),
+        department_id=d.get("department_id") if is_super_admin(user) else _user_dept_id(user),
     )
     log_action(
         "CREATE_PAPER",
@@ -280,6 +292,7 @@ def bulk_assign(user):
             return lock_error
 
         updated_count = 0
+        already_enrolled = 0
         for sid in user_ids:
             uid, _ = _resolve_user_identity(sid)
             if not uid:
@@ -290,8 +303,10 @@ def bulk_assign(user):
             changed = enroll_in_papers(uid, [paper_id])
             if changed > 0:
                 updated_count += 1
+            else:
+                already_enrolled += 1
 
-        if updated_count <= 0:
+        if updated_count <= 0 and already_enrolled <= 0:
             return (
                 jsonify({"error": "No eligible students could be assigned"}),
                 400,
@@ -300,14 +315,14 @@ def bulk_assign(user):
         log_action(
             "BULK_ENROLL_STUDENTS",
             str(user["_id"]),
-            details=f"Paper {paper_id}, students {updated_count}",
+            details=f"Paper {paper_id}, updated {updated_count}, already {already_enrolled}",
         )
         _clear_query_cache()
         return (
             jsonify(
                 {
-                    "message": "Students enrolled successfully",
-                    "updated_count": updated_count,
+                    "message": "Students enrolled successfully" if updated_count > 0 else "Students were already enrolled",
+                    "updated_count": updated_count + already_enrolled,
                     "assigned_paper_count": 1,
                 }
             ),
@@ -338,6 +353,7 @@ def bulk_assign(user):
             )
 
         updated_count = 0
+        already_enrolled = 0
         for sid in user_ids:
             uid, _ = _resolve_user_identity(sid)
             if not uid:
@@ -348,8 +364,10 @@ def bulk_assign(user):
             changed = enroll_in_papers(uid, valid_paper_ids)
             if changed > 0:
                 updated_count += 1
+            else:
+                already_enrolled += 1
 
-        if updated_count <= 0:
+        if updated_count <= 0 and already_enrolled <= 0:
             return (
                 jsonify({"error": "No eligible students could be assigned"}),
                 400,
@@ -358,14 +376,14 @@ def bulk_assign(user):
         log_action(
             "BULK_ENROLL_STUDENTS",
             str(user["_id"]),
-            details=f"Papers {len(valid_paper_ids)}, students {updated_count}",
+            details=f"Papers {len(valid_paper_ids)}, updated {updated_count}, already {already_enrolled}",
         )
         _clear_query_cache()
         return (
             jsonify(
                 {
-                    "message": "Students enrolled successfully",
-                    "updated_count": updated_count,
+                    "message": "Students enrolled successfully" if updated_count > 0 else "Students were already enrolled",
+                    "updated_count": updated_count + already_enrolled,
                     "assigned_paper_count": len(valid_paper_ids),
                 }
             ),

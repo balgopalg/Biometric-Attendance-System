@@ -135,29 +135,43 @@ export default function ManageLecturers() {
     }
   };
 
-  const handleResetPassword = async (id, name) => {
-    if (!window.confirm(`Reset password for ${name}?`)) return;
-    try {
-      const res = await api.post(`/admin/lecturers/${id}/reset-password`);
-      const tempPassword = res.data?.temp_password;
-      if (tempPassword) {
-        ctx.setCreatedCreds({ name, temp_password: tempPassword, isReset: true });
-        ctx.setShowCreds(true);
-      }
-      toast.success(res.data?.message || 'Password reset');
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to reset password');
-    }
+  const handleResetPassword = (id, name) => {
+    setConfirmAction({
+      title: 'Reset Password',
+      message: `Are you sure you want to reset the password for ${name}? A new temporary password will be generated.`,
+      confirmLabel: 'Reset',
+      onConfirm: async () => {
+        try {
+          const res = await api.post(`/admin/lecturers/${id}/reset-password`);
+          ctx.setCreatedCreds({
+            name,
+            email: res.data.email || '',
+            temp_password: res.data.new_password,
+            isReset: true
+          });
+          ctx.setShowCreds(true);
+          toast.success(res.data?.message || 'Password reset');
+        } catch (err) {
+          toast.error(err.response?.data?.error || 'Failed to reset password');
+        }
+      },
+    });
   };
 
-  const handleResetPin = async (id, name) => {
-    if (!window.confirm(`Reset PIN for ${name}?`)) return;
-    try {
-      const res = await api.post(`/admin/lecturers/${id}/reset-pin`);
-      toast.success(`New PIN for ${name}: ${res.data.pin}`);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to reset PIN');
-    }
+  const handleResetPin = (id, name) => {
+    setConfirmAction({
+      title: 'Reset PIN',
+      message: `Reset the security PIN for ${name}?`,
+      confirmLabel: 'Reset PIN',
+      onConfirm: async () => {
+        try {
+          const res = await api.post(`/admin/lecturers/${id}/reset-pin`);
+          toast.success(`New PIN for ${name}: ${res.data.pin}`);
+        } catch (err) {
+          toast.error(err.response?.data?.error || 'Failed to reset PIN');
+        }
+      },
+    });
   };
 
   const handleEnrollFace = (lecturer) => {
@@ -360,6 +374,16 @@ export default function ManageLecturers() {
 
       {/* ── Mobile filter/action toggles ─────────────────────────── */}
       <div className="mobile-filters-toggle-wrap lecturers-mobile-filters-toggle-wrap">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={ctx.showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={ctx.showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={ctx.showMobileFilters}
+          onClick={() => ctx.setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
         <button className="icon-btn mobile-filters-icon-btn" type="button" title="Quick actions" aria-label="Quick actions" onClick={() => ctx.setShowMobileOperations(true)}>
           <HiOutlineDotsHorizontal size={18} />
         </button>

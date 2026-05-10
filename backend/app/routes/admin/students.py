@@ -11,7 +11,7 @@ from ._helpers import *
 @role_required("super_admin", "department_admin")
 def list_students(user):
     page = max(1, _to_int(request.args.get("page", 1), 1))
-    per_page = max(1, min(_to_int(request.args.get("per_page", 20), 20), 100))
+    per_page = max(1, min(_to_int(request.args.get("per_page", 20), 20), 2000))
     skip = (page - 1) * per_page
 
     # Scope courses to department for department admins

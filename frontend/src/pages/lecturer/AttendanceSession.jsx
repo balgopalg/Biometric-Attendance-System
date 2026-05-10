@@ -658,7 +658,7 @@ export default function AttendanceSession() {
             )}
           </div>
 
-          <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
+          <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20, alignItems: 'flex-start' }}>
             <WebcamFeed ref={videoRef} isActive={isActive} error={error} isAwaiting={scanning && !isActive} onFlipCamera={flipCamera} />
             <RecognizedList students={recognized} isLive={scanning && isActive} />
           </div>

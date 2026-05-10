@@ -623,6 +623,42 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   color: var(--text-primary);
 }
 
+/* ─── Sortable Table Headers ─── */
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+  transition: color 180ms ease, background 180ms ease;
+}
+
+.sortable-th:hover {
+  color: var(--text-primary) !important;
+  background: color-mix(in srgb, var(--bg-secondary) 90%, var(--accent-purple) 10%);
+}
+
+.sort-header-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sort-icon {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(1px);
+  transition: opacity 180ms ease, color 180ms ease;
+  color: var(--text-muted);
+}
+
+.sortable-th:hover .sort-icon {
+  opacity: 0.4;
+}
+
+.sort-icon--active {
+  opacity: 1 !important;
+  color: var(--accent-purple, #8b5cf6);
+}
+
 /* ─── Icon Buttons ─── */
 .icon-btn {
   width: 32px;
@@ -1364,6 +1400,7 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
+  table-layout: fixed; /* Enforce uniform column widths */
 }
 
 /* Outer border on the container card */
@@ -1380,11 +1417,12 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   padding: 10px 10px;
   border-bottom: 2px solid var(--border-glass);
   border-right: 1px solid var(--border-glass);
-  white-space: nowrap;
+  white-space: normal; /* Allow time labels to wrap if needed */
   text-align: center;
   position: sticky;
   top: 0;
   z-index: 2;
+  width: 140px; /* Standard width for time slots */
 }
 .timetable-sketch-table th:first-child {
   text-align: left;
@@ -1392,7 +1430,7 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   left: 0;
   z-index: 3;
   background: var(--bg-secondary);
-  min-width: 100px;
+  width: 90px; /* Consistent width for Day column */
 }
 
 .timetable-sketch-table td {
@@ -1441,8 +1479,13 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   border: 0;
   border-radius: 0;
   background: transparent;
-  min-height: 74px;
-  padding: 8px 10px;
+  min-height: 100px; /* Increased and fixed minimum height */
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  text-align: left;
+  word-break: break-word; /* Ensure long names don't overflow */
 }
 
 /* Today column highlight */
@@ -1469,7 +1512,7 @@ input[type="date"]:invalid::-webkit-datetime-edit {
 
 /* ── recess ── */
 .timetable-recess-header {
-  min-width: 64px;
+  width: 70px;
   text-align: center;
   background: color-mix(in srgb, var(--bg-secondary) 80%, var(--accent-amber) 20%) !important;
   color: var(--accent-amber) !important;
@@ -1738,16 +1781,16 @@ input[type="date"]:invalid::-webkit-datetime-edit {
     margin-bottom: 8px;
   }
 
-  .lecturers-mobile-filters-toggle-wrap {
+  .lecturers-mobile-filters-toggle-wrap,
+  .papers-mobile-filters-toggle-wrap,
+  .exam-eligibility-mobile-filters-toggle-wrap,
+  .students-mobile-filters-toggle-wrap {
     justify-content: space-between;
   }
 
-  .papers-mobile-filters-toggle-wrap {
-    justify-content: space-between;
-  }
-
-  .exam-eligibility-mobile-filters-toggle-wrap {
-    justify-content: space-between;
+  .courses-mobile-filters-toggle-wrap,
+  .timetable-mobile-filters-toggle-wrap {
+    justify-content: flex-end;
   }
 
   .exam-eligibility-inline-actions {
@@ -1804,6 +1847,18 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   .exam-eligibility-filter-grid > :not(:first-child),
   .timetable-filter-grid > :not(:first-child) {
     display: block;
+  }
+
+  /* Hide filter grids on mobile unless toggled open */
+  .lecturers-filter-grid:not(.is-mobile-open),
+  .students-filter-grid:not(.is-mobile-open),
+  .courses-filter-grid:not(.is-mobile-open),
+  .papers-filter-grid:not(.is-mobile-open),
+  .timetable-filter-grid:not(.is-mobile-open),
+  .exam-eligibility-filter-grid:not(.is-mobile-open),
+  .audit-trail-filter-grid:not(.is-mobile-open),
+  .attendance-matrix-filter-grid:not(.is-mobile-open) {
+    display: none !important;
   }
 
   .students-toolbar-actions {
@@ -2613,4 +2668,18 @@ input[type="date"]:invalid::-webkit-datetime-edit {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+/* -- custom scrollbar -- */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
 }

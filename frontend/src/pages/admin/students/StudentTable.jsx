@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatCourseName } from '../../../utils/courseDisplay';
 import SoftLockWrapper from '../../../components/ui/SoftLockWrapper';
@@ -12,6 +12,8 @@ import {
   HiOutlinePencil,
   HiOutlineSparkles,
   HiX,
+  HiArrowUp,
+  HiArrowDown,
 } from 'react-icons/hi';
 
 import { useStudentContext } from './StudentContext';
@@ -23,10 +25,66 @@ export default function StudentTable() {
     trainingStudentId, page, totalStudents, fetchStudents,
     handleTrainFace, handleManageStudentPapers, openEdit,
     handleResetPassword, handleFaceEnroll, handleDelete,
-    PAGE_SIZE,
+    pageSize, setPageSize,
   } = useStudentContext();
 
   const [previewImage, setPreviewImage] = useState(null);
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedFiltered = useMemo(() => {
+    if (!sortKey) return filtered;
+    return [...filtered].sort((a, b) => {
+      let aVal, bVal;
+      if (sortKey === 'enrolled_papers_count') {
+        aVal = (a.enrolled_papers || []).length;
+        bVal = (b.enrolled_papers || []).length;
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      if (sortKey === 'current_semester') {
+        aVal = Number(a.current_semester) || 0;
+        bVal = Number(b.current_semester) || 0;
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      if (sortKey === 'has_face') {
+        aVal = a.has_face ? 1 : 0;
+        bVal = b.has_face ? 1 : 0;
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      aVal = String(a[sortKey] ?? '').toLowerCase();
+      bVal = String(b[sortKey] ?? '').toLowerCase();
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filtered, sortKey, sortDir]);
+
+  const SortHeader = ({ label, field, align }) => (
+    <th
+      className="sortable-th"
+      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
+      onClick={() => handleSort(field)}
+      title={`Sort by ${label}`}
+    >
+      <span className="sort-header-inner">
+        {label}
+        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
+          {sortKey === field
+            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
+            : <HiArrowUp size={12} />}
+        </span>
+      </span>
+    </th>
+  );
 
   return (
     <>
@@ -61,19 +119,19 @@ export default function StudentTable() {
                   }}
                 />
               </th>
-              <th>Reg No.</th>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Mobile</th>
-              <th>Current Sem</th>
-              <th>Course / Session</th>
-              <th>Papers</th>
-              <th>Status</th>
+              <SortHeader label="Reg No." field="reg_number" />
+              <SortHeader label="Name" field="name" />
+              <SortHeader label="Email" field="email" />
+              <SortHeader label="Mobile" field="mobile_no" />
+              <SortHeader label="Current Sem" field="current_semester" />
+              <SortHeader label="Course / Session" field="course_name" />
+              <SortHeader label="Papers" field="enrolled_papers_count" />
+              <SortHeader label="Status" field="has_face" align="center" />
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s) => (
+            {sortedFiltered.map((s) => (
               <tr key={s._id} className={s.is_course_inactive ? 'faded-entity' : ''}>
                 <td>
                   <input
@@ -159,7 +217,27 @@ export default function StudentTable() {
         ) : null}
       </div>
 
-      <Pagination page={page} total={totalStudents} perPage={PAGE_SIZE} onPageChange={fetchStudents} />
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginTop: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          <span>Show</span>
+          <select 
+            value={pageSize} 
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              fetchStudents(1); // Reset to page 1 when page size changes
+            }}
+            className="input-field"
+            style={{ padding: '2px 8px', width: 'auto', height: 'auto', minHeight: 'unset' }}
+          >
+            <option value={10}>10 records</option>
+            <option value={20}>20 records</option>
+            <option value={50}>50 records</option>
+          </select>
+        </div>
+        <div style={{ marginTop: -16 }}>
+          <Pagination page={page} total={totalStudents} perPage={pageSize} onPageChange={fetchStudents} />
+        </div>
+      </div>
 
       <AnimatePresence>
         {previewImage && (

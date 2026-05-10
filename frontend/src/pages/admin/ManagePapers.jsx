@@ -9,7 +9,7 @@ import Pagination from '../../components/ui/Pagination';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal, HiOutlineUpload } from 'react-icons/hi';
+import { HiOutlinePlus, HiOutlineSearch, HiOutlineTrash, HiOutlinePencil, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal, HiOutlineUpload, HiArrowUp, HiArrowDown } from 'react-icons/hi';
 import { useAuth } from '../../hooks/useAuth';
 
 const EMPTY_FORM = { name: '', code: '', department_id: '', course_id: '', lecturer_id: '', semester: '' };
@@ -43,6 +43,8 @@ export default function ManagePapers() {
   const [exportingPapers, setExportingPapers] = useState(false);
   const [importingPapers, setImportingPapers] = useState(false);
   const [importFile, setImportFile] = useState(null);
+  const [sortKey, setSortKey] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
 
   // Fetch departments for Super Admin
   const fetchDepartments = () => {
@@ -156,9 +158,57 @@ export default function ManagePapers() {
 
   const effectiveShowInactiveRows = showInactiveRows || isInactiveCourseSelected;
 
-  const filtered = useMemo(
+  const filteredUnsorted = useMemo(
     () => (effectiveShowInactiveRows ? papers : papers.filter((p) => !p.is_course_inactive)),
     [papers, effectiveShowInactiveRows]
+  );
+
+  const filtered = useMemo(() => {
+    if (!sortKey) return filteredUnsorted;
+    const sorted = [...filteredUnsorted].sort((a, b) => {
+      let aVal = a[sortKey] ?? '';
+      let bVal = b[sortKey] ?? '';
+      // Numeric columns
+      if (sortKey === 'semester' || sortKey === 'total_classes') {
+        aVal = Number(aVal) || 0;
+        bVal = Number(bVal) || 0;
+        return sortDir === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+      // String columns
+      aVal = String(aVal).toLowerCase();
+      bVal = String(bVal).toLowerCase();
+      if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [filteredUnsorted, sortKey, sortDir]);
+
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortHeader = ({ label, field, align }) => (
+    <th
+      className="sortable-th"
+      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
+      onClick={() => handleSort(field)}
+      title={`Sort by ${label}`}
+    >
+      <span className="sort-header-inner">
+        {label}
+        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
+          {sortKey === field
+            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
+            : <HiArrowUp size={12} />}
+        </span>
+      </span>
+    </th>
   );
 
   const filteredLecturers = useMemo(() => {
@@ -443,6 +493,7 @@ export default function ManagePapers() {
             course_id: course._id,
             semester,
             lecturer_id: lecturerId || '',
+            department_id: course.department_id || '',
           });
           created += 1;
         } catch (err) {
@@ -679,12 +730,12 @@ export default function ManagePapers() {
         <table className="data-table">
           <thead>
             <tr>
-              <th>Code</th>
-              <th>Name</th>
-              <th>Course</th>
-              <th>Lecturer</th>
-              <th>Semester</th>
-              <th>Classes Held</th>
+              <SortHeader label="Code" field="code" />
+              <SortHeader label="Name" field="name" />
+              <SortHeader label="Course" field="course_name" />
+              <SortHeader label="Lecturer" field="lecturer_name" />
+              <SortHeader label="Semester" field="semester" />
+              <SortHeader label="Classes Held" field="total_classes" />
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>

@@ -365,7 +365,7 @@ export default function ManageCourses() {
         </div>
       </div>
 
-      <div className="mobile-admin-action-strip">
+      <div className="mobile-filters-toggle-wrap courses-mobile-filters-toggle-wrap">
         <button
           className="icon-btn mobile-filters-icon-btn"
           type="button"

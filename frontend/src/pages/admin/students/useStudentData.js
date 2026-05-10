@@ -13,7 +13,7 @@ const EMPTY_FORM = {
   mobile_no: '',
   reg_number: '',
 };
-const PAGE_SIZE = 10;
+// pageSize is now dynamic and managed via state/preference
 
 const extractItems = (data) => (Array.isArray(data?.items) ? data.items : (Array.isArray(data) ? data : []));
 
@@ -77,9 +77,10 @@ export default function useStudentData() {
   const debouncedFilters = useDebouncedValue(filters, 250);
 
   const [form, setForm] = useState(EMPTY_FORM);
-  const [bulkForm, setBulkForm] = useState({ course_id: '', semester: '', paper_id: '', user_ids: [] });
+  const [bulkForm, setBulkForm] = useState({ department_id: '', course_id: '', academic_session: '', semester: '', paper_id: '', user_ids: [] });
   const [bulkAssignAllPapers, setBulkAssignAllPapers] = useState(false);
   const [bulkSemesters, setBulkSemesters] = useState([]);
+  const [bulkSessions, setBulkSessions] = useState([]);
   const [bulkPapers, setBulkPapers] = useState([]);
   const [bulkStudents, setBulkStudents] = useState([]);
   const [excelForm, setExcelForm] = useState({ course_id: '', semester: '' });
@@ -109,6 +110,7 @@ export default function useStudentData() {
   const [loadingStudentPapers, setLoadingStudentPapers] = useState(false);
   const [savingStudentPapers, setSavingStudentPapers] = useState(false);
   const [exportingStudents, setExportingStudents] = useState(false);
+  const [pageSize, setPageSize] = useAdminPreference('students_page_size', 10);
   const fetchStudentsRef = useRef(null);
   const hasFetchedStudentsRef = useRef(false);
   const previousStudentsQueryRef = useRef({
@@ -138,7 +140,7 @@ export default function useStudentData() {
     setStudentsError('');
     const params = {};
     params.page = nextPage;
-    params.per_page = PAGE_SIZE;
+    params.per_page = pageSize;
     if (debouncedSearch) params.q = debouncedSearch;
     // Use department_id only; backend handles scoping by ID.
     if (debouncedFilters.department_id) {
@@ -151,7 +153,7 @@ export default function useStudentData() {
     api.get('/admin/students', { params, signal }).then((r) => {
       const items = Array.isArray(r.data?.items) ? r.data.items : (Array.isArray(r.data) ? r.data : []);
       const resolvedTotal = Number(r.data?.total || items.length || 0);
-      const maxPage = Math.max(1, Math.ceil(resolvedTotal / PAGE_SIZE));
+      const maxPage = Math.max(1, Math.ceil(resolvedTotal / pageSize));
       if (resolvedTotal > 0 && nextPage > maxPage) {
         fetchStudents(maxPage, options);
         return;
@@ -324,7 +326,7 @@ export default function useStudentData() {
     hasFetchedStudentsRef.current = true;
 
     return () => controller.abort();
-  }, [debouncedFilters, debouncedSearch, showInactiveRows, isDepartmentAdmin]);
+  }, [debouncedFilters, debouncedSearch, showInactiveRows, isDepartmentAdmin, pageSize]);
 
   useEffect(() => {
     let cancelled = false;
@@ -350,11 +352,9 @@ export default function useStudentData() {
 
   useEffect(() => {
     let cancelled = false;
-    if (!showBulk) return () => {
-      cancelled = true;
-    };
-    if (!bulkForm.course_id) {
+    if (!showBulk || !bulkForm.course_id) {
       setBulkSemesters([]);
+      setBulkSessions([]);
       return () => {
         cancelled = true;
       };
@@ -366,6 +366,14 @@ export default function useStudentData() {
       })
       .catch(() => {
         if (!cancelled) setBulkSemesters([]);
+      });
+
+    api.get(`/admin/courses/${bulkForm.course_id}/sessions`)
+      .then((r) => {
+        if (!cancelled) setBulkSessions(r.data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setBulkSessions([]);
       });
 
     return () => {
@@ -397,8 +405,11 @@ export default function useStudentData() {
 
     api.get('/admin/students', {
       params: {
+        per_page: 2000,
         course_id: bulkForm.course_id,
         semester: bulkForm.semester,
+        ...(bulkForm.department_id ? { department_id: bulkForm.department_id } : {}),
+        ...(bulkForm.academic_session ? { academic_session: bulkForm.academic_session } : {}),
         ...(showInactiveRows ? { include_inactive: true } : {}),
       },
     })
@@ -412,7 +423,7 @@ export default function useStudentData() {
     return () => {
       cancelled = true;
     };
-  }, [showBulk, bulkForm.course_id, bulkForm.semester, showInactiveRows]);
+  }, [showBulk, bulkForm.course_id, bulkForm.department_id, bulkForm.academic_session, bulkForm.semester, showInactiveRows]);
 
   const filtered = useMemo(
     () => (showInactiveRows ? students : students.filter((s) => !s.is_course_inactive)),
@@ -436,14 +447,28 @@ export default function useStudentData() {
     }
 
     if (bulkForm.course_id && !activeCourses.some((course) => course._id === bulkForm.course_id)) {
-      setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [] });
+      setBulkForm({ course_id: '', semester: '', paper_id: '', user_ids: [], department_id: '', academic_session: '' });
     }
   }, [activeCourses, bulkForm.course_id, filters.course_id, showInactiveRows]);
 
-  const eligibleBulkStudents = useMemo(
-    () => bulkStudents.filter((s) => !s.is_course_inactive),
-    [bulkStudents]
-  );
+  const eligibleBulkStudents = useMemo(() => {
+    return bulkStudents.filter((s) => {
+      if (s.is_course_inactive) return false;
+      
+      const enrolledPapers = s.enrolled_papers || [];
+      const papersToAssign = bulkAssignAllPapers 
+        ? bulkPapers.map(p => p._id)
+        : (bulkForm.paper_id ? [bulkForm.paper_id] : []);
+        
+      // If no papers selected yet, show all active students in the filtered view
+      if (papersToAssign.length === 0) return true;
+
+      // A student is eligible if they are missing at least one of the papers we are trying to assign
+      const missingPapers = papersToAssign.filter(pid => !enrolledPapers.includes(pid));
+      
+      return missingPapers.length > 0;
+    });
+  }, [bulkStudents, bulkAssignAllPapers, bulkPapers, bulkForm.paper_id]);
 
   useEffect(() => {
     if (!showExcelImport) return;
@@ -559,7 +584,7 @@ export default function useStudentData() {
     enrollingStudent, setEnrollingStudent, paperStudent, setPaperStudent,
     search, setSearch, filters, setFilters, showInactiveRows, setShowInactiveRows,
     form, setForm, bulkForm, setBulkForm,
-    bulkAssignAllPapers, setBulkAssignAllPapers, bulkSemesters, bulkPapers, bulkStudents,
+    bulkAssignAllPapers, setBulkAssignAllPapers, bulkSemesters, bulkSessions, bulkPapers, bulkStudents,
     excelForm, setExcelForm, excelSemesters, excelFile, setExcelFile,
     excelImporting, setExcelImporting, excelResults, setExcelResults, excelFileInputRef,
     promoteSemester, setPromoteSemester, promoteSemesterOptions, setPromoteSemesterOptions,
@@ -575,6 +600,6 @@ export default function useStudentData() {
     loadingStudentPapers, setLoadingStudentPapers, savingStudentPapers, setSavingStudentPapers,
     exportingStudents, setExportingStudents,
     fetchStudents, fetchAllStudentsForExport, buildTempPassword,
-    EMPTY_FORM, PAGE_SIZE
+    EMPTY_FORM, pageSize, setPageSize
   };
 }
