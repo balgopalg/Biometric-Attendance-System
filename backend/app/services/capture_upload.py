@@ -6,6 +6,7 @@ import time
 import uuid
 
 import cv2
+from app.services.face_augmentation import augment_dataset_crops
 from app.utils.helpers import _as_uint8_image, save_jpeg_with_size_bounds
 from app.utils.timezone import india_timestamp_token
 from flask import current_app, has_app_context
@@ -237,9 +238,16 @@ def save_classroom_upload(image, uploads_dir="uploads"):
 
 
 def save_cropped_face_dataset(
-    user_name, face_crops, dataset_root="dataset", subfolder="", max_images=50
+    user_name, face_crops, dataset_root="dataset", subfolder="", max_images=50,
+    augment=True,
 ):
-    """Save cropped face copies to dataset/[subfolder]/<user_name>/<user_name>_<count>.jpg."""
+    """Save cropped face copies to dataset/[subfolder]/<user_name>/<user_name>_<count>.jpg.
+
+    When ``augment`` is True (default), the original crops are expanded with
+    brightness, contrast, flip, rotation, and histogram-equalized variants
+    before saving.  This produces a richer dataset for embedding training
+    without requiring the student to pose multiple times.
+    """
     safe_user_name = _safe_name(user_name)
     user_dir = (
         os.path.join(dataset_root, subfolder, safe_user_name)
@@ -248,8 +256,13 @@ def save_cropped_face_dataset(
     )
     _ensure_directory(user_dir)
 
+    # Augment crops if requested
+    crops_to_save = list(face_crops or [])
+    if augment and crops_to_save:
+        crops_to_save = augment_dataset_crops(crops_to_save, max_total=max_images)
+
     saved_paths = []
-    for idx, crop in enumerate((face_crops or [])[:max_images], start=1):
+    for idx, crop in enumerate(crops_to_save[:max_images], start=1):
         if crop is None:
             continue
 

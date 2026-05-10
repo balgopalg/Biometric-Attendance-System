@@ -22,7 +22,7 @@ from app.security.brute_force_protection import BruteForceProtector
 from app.security.rate_limiter import limiter
 from app.services.capture_upload import (build_session_upload_folder,
                                          save_classroom_upload_bundle)
-from app.services.face_detection import get_detector
+from app.services.face_detection import get_detector, get_group_detector
 from app.services.face_recognition import (find_best_match,
                                            find_best_match_cached,
                                            generate_embedding,
@@ -510,14 +510,21 @@ def _get_hog_detector():
     return _hog_detector
 
 
-def _extract_classroom_faces(img_rgb, img_bgr=None):
+def _extract_classroom_faces(img_rgb, img_bgr=None, group_photo=False):
     """Extract classroom face crops using FaceDetector (MediaPipe + Haar).
+
+    When ``group_photo`` is True, uses a permissive detector with lower
+    confidence thresholds optimised for uploaded group / classroom photos.
 
     Falls back to HOG people detection for group photos where face detection
     fails entirely — this is the only logic not in FaceDetector.
     """
-    detector = get_detector()
-    faces = detector.detect_faces(img_rgb) or []
+    if group_photo:
+        detector = get_group_detector()
+        faces = detector.detect_faces_group(img_rgb) or []
+    else:
+        detector = get_detector()
+        faces = detector.detect_faces(img_rgb) or []
 
     if faces:
         return faces
@@ -814,7 +821,7 @@ def recognize_image(user):
         )
         return jsonify({"error": "Failed to process image"}), 400
 
-    faces = _extract_classroom_faces(img, img_bgr=img_raw)
+    faces = _extract_classroom_faces(img, img_bgr=img_raw, group_photo=True)
 
     uploads_dir = current_app.config.get(
         "UPLOADS_ABSOLUTE_PATH"

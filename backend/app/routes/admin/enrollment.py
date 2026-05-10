@@ -132,10 +132,9 @@ def enroll_student_face(user):
 
     dataset_saved_count = 0
     dataset_warning = None
+    dataset_user_key = _as_text(resolved_user_id)
     if isinstance(dataset_photos, list) and dataset_photos:
         try:
-            dataset_user_key = _as_text(resolved_user_id)
-
             dataset_crops = []
             last_valid_crop = face_crop
             for frame_b64 in dataset_photos[:50]:
@@ -174,6 +173,31 @@ def enroll_student_face(user):
         except Exception as exc:
             current_app.logger.exception(
                 "Dataset save failed during face enrollment"
+            )
+            dataset_warning = f"Dataset save failed: {exc}"
+    else:
+        # Single photo upload — save the detected face crop to dataset with augmentation
+        current_app.logger.info(
+            "Single-photo enrollment: saving face crop to dataset for user_key=%s",
+            dataset_user_key,
+        )
+        try:
+            saved_paths = save_cropped_face_dataset(
+                dataset_user_key,
+                [face_crop],
+                dataset_root="dataset",
+                subfolder="students",
+                max_images=50,
+            )
+            dataset_saved_count = len(saved_paths)
+            current_app.logger.info(
+                "Dataset saved %d images for user_key=%s",
+                dataset_saved_count,
+                dataset_user_key,
+            )
+        except Exception as exc:
+            current_app.logger.exception(
+                "Dataset save failed during student single-photo enrollment"
             )
             dataset_warning = f"Dataset save failed: {exc}"
 
