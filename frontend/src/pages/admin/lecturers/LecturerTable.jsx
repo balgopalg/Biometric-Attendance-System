@@ -16,6 +16,27 @@ import {
 /**
  * Table body rendering lecturers with row actions. Clicking department badges opens modal with assigned papers.
  */
+
+function SortHeader({ label, field, align, sortKey, sortDir, onSort }) {
+  return (
+    <th
+      className="sortable-th"
+      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
+      onClick={() => onSort(field)}
+      title={`Sort by ${label}`}
+    >
+      <span className="sort-header-inner">
+        {label}
+        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
+          {sortKey === field
+            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
+            : <HiArrowUp size={12} />}
+        </span>
+      </span>
+    </th>
+  );
+}
+
 export default function LecturerTable({
   lecturers,
   getLecturerDepartmentGroups,
@@ -64,23 +85,6 @@ export default function LecturerTable({
     });
   }, [lecturers, sortKey, sortDir]);
 
-  const SortHeader = ({ label, field, align }) => (
-    <th
-      className="sortable-th"
-      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
-      onClick={() => handleSort(field)}
-      title={`Sort by ${label}`}
-    >
-      <span className="sort-header-inner">
-        {label}
-        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
-          {sortKey === field
-            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
-            : <HiArrowUp size={12} />}
-        </span>
-      </span>
-    </th>
-  );
 
   const handleViewPapers = (lecturer, departmentGroups) => {
     if (onViewPapers) {
@@ -93,10 +97,10 @@ export default function LecturerTable({
       <table className="data-table">
         <thead>
           <tr>
-            <SortHeader label="Name" field="name" />
-            <SortHeader label="Email" field="email" />
+            <SortHeader label="Name" field="name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+            <SortHeader label="Email" field="email" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
             <th>Department</th>
-            <SortHeader label="Status" field="has_face" align="center" />
+            <SortHeader label="Status" field="has_face" align="center" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
             <th style={{ textAlign: 'right' }}>Actions</th>
           </tr>
         </thead>

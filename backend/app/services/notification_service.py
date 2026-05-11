@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import os
+import threading
+from functools import lru_cache
 from datetime import datetime, timezone
+from typing import Any
 
+import redis
 from app.extensions import get_collection
+from app.utils.timezone import to_india_time
 from bson import ObjectId
+from flask import current_app
 
 
 def _utc_now():
@@ -14,6 +22,33 @@ def _utc_now():
 
 def _notifications_collection():
     return get_collection("auth", "notifications")
+
+
+def _notification_channel(user_id: Any) -> str:
+    return f"notifications:{str(user_id)}"
+
+
+@lru_cache(maxsize=4)
+def _redis_client_cached(url: str):
+    return redis.Redis.from_url(
+        url,
+        decode_responses=True,
+        socket_connect_timeout=2,
+        socket_keepalive=True,
+        socket_keepalive_options={},
+    )
+
+
+def _redis_client():
+    try:
+        url = current_app.config.get("TASK_QUEUE_REDIS_URL", "redis://localhost:6379/0")
+    except RuntimeError:
+        url = os.getenv("TASK_QUEUE_REDIS_URL", "redis://localhost:6379/0")
+
+    try:
+        return _redis_client_cached(url)
+    except Exception:
+        return None
 
 
 def _serialize_notification(notification):
@@ -49,6 +84,26 @@ def _serialize_notification(notification):
         "template_key": notification.get("template_key", ""),
         "metadata": notification.get("metadata", {}),
     }
+
+
+def _publish_notification(notification):
+    client = _redis_client()
+    if client is None:
+        return False
+
+    try:
+        client.publish(
+            _notification_channel(notification.get("user_id")),
+            json.dumps(
+                {
+                    "type": "notification.created",
+                    "notification": _serialize_notification(notification),
+                }
+            ),
+        )
+        return True
+    except Exception:
+        return False
 
 
 def _welcome_payload(role: str):
@@ -89,6 +144,7 @@ def create_notification(
     template_key="",
     metadata=None,
     is_read=False,
+    publish_realtime=True,
 ):
     doc = {
         "_id": ObjectId(),
@@ -104,7 +160,68 @@ def create_notification(
         "metadata": metadata or {},
     }
     _notifications_collection().insert_one(doc)
+
+    # Publish realtime notification in background thread to avoid blocking response
+    if publish_realtime:
+        thread = threading.Thread(
+            target=_publish_notification,
+            args=(doc,),
+            daemon=True,
+        )
+        thread.start()
+
     return doc
+
+
+def create_attendance_notification(
+    *,
+    user_id,
+    subject_name: str,
+    subject_code: str,
+    lecturer_name: str,
+    status: str,
+    committed_at=None,
+    publish_realtime=True,
+):
+    event_time = to_india_time(committed_at)
+    current_date = event_time.strftime("%d %b %Y")
+    current_time = event_time.strftime("%I:%M %p").lstrip("0") or event_time.strftime("%I:%M %p")
+    safe_subject_name = subject_name or "your subject"
+    safe_subject_code = subject_code or "N/A"
+    safe_lecturer_name = lecturer_name or "your lecturer"
+    safe_status = status or "Present"
+
+    if safe_status == "Absent":
+        body = (
+            f"[{current_date}, {current_time}] You're not present for "
+            f"{safe_subject_name} [{safe_subject_code}]. Please attend classes regularly."
+        )
+        title = f"Absent: {safe_subject_code}"
+    else:
+        body = (
+            f"[{current_date}, {current_time}] Today your attendance for "
+            f"{safe_subject_name} [{safe_subject_code}] has been marked {safe_status} "
+            f"and recorded successfully by {safe_lecturer_name}."
+        )
+        title = f"Attendance recorded for {safe_subject_code}"
+
+    return create_notification(
+        user_id=user_id,
+        title=title,
+        body=body,
+        category="academic",
+        priority="high" if safe_status == "Absent" else "high",
+        action_url="/student/attendance",
+        template_key="attendance_session_committed",
+        metadata={
+            "subject_name": safe_subject_name,
+            "subject_code": safe_subject_code,
+            "lecturer_name": safe_lecturer_name,
+            "status": safe_status,
+            "committed_at": event_time.isoformat(),
+        },
+        publish_realtime=publish_realtime,
+    )
 
 
 def ensure_welcome_notification(user):
@@ -137,6 +254,8 @@ def ensure_welcome_notification(user):
 
     # Return the document if it was inserted
     if result.upserted_id:
+        doc["_id"] = result.upserted_id
+        _publish_notification(doc)
         return doc
     return None
 
