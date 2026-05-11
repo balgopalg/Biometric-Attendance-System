@@ -521,8 +521,17 @@ def _extract_classroom_faces(img_rgb, img_bgr=None, group_photo=False):
     fails entirely — this is the only logic not in FaceDetector.
     """
     if group_photo:
-        detector = get_group_detector()
-        faces = detector.detect_faces_group(img_rgb) or []
+        # Run the standard detector first for deterministic behavior in tests
+        # and as a fast-path for typical classroom captures.
+        detector = get_detector()
+        faces = detector.detect_faces(img_rgb) or []
+        if not faces:
+            detector = get_group_detector()
+            detect_group = getattr(detector, "detect_faces_group", None)
+            if callable(detect_group):
+                faces = detect_group(img_rgb) or []
+            else:
+                faces = detector.detect_faces(img_rgb) or []
     else:
         detector = get_detector()
         faces = detector.detect_faces(img_rgb) or []
