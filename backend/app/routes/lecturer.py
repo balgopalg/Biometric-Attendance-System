@@ -22,6 +22,7 @@ from app.security.brute_force_protection import BruteForceProtector
 from app.security.rate_limiter import limiter
 from app.services.capture_upload import (build_session_upload_folder,
                                          save_classroom_upload_bundle)
+from app.services.notification_service import create_attendance_notification
 from app.services.face_detection import get_detector, get_group_detector
 from app.services.face_recognition import (find_best_match,
                                            find_best_match_cached,
@@ -1185,6 +1186,46 @@ def commit_session(user):
         },
         upsert=True,
     )
+
+    paper = get_paper_by_id(paper_id) or {}
+    lecturer = find_user_by_id(str(lecturer_id)) or user
+    enrolled_students = get_users_by_ids(present_user_ids)
+    student_ids = [
+        student_id
+        for student_id, student in enrolled_students.items()
+        if student and student.get("role") == "student"
+    ]
+
+    # Send notifications for present students
+    for student_id in student_ids:
+        create_attendance_notification(
+            user_id=student_id,
+            subject_name=paper.get("name") or "your subject",
+            subject_code=paper.get("code") or "N/A",
+            lecturer_name=lecturer.get("name") or user.get("name") or "your lecturer",
+            status="Present",
+            committed_at=committed_at,
+        )
+
+    # Send notifications for absent students
+    try:
+        enrolled_profiles = get_profiles_for_paper(str(paper_id))
+        present_user_ids_set = set(str(uid) for uid in present_user_ids)
+        for profile in enrolled_profiles:
+            student_user_id = profile.get("user_id")
+            if student_user_id and str(student_user_id) not in present_user_ids_set:
+                create_attendance_notification(
+                    user_id=student_user_id,
+                    subject_name=paper.get("name") or "your subject",
+                    subject_code=paper.get("code") or "N/A",
+                    lecturer_name=lecturer.get("name") or user.get("name") or "your lecturer",
+                    status="Absent",
+                    committed_at=committed_at,
+                )
+    except Exception as e:
+        current_app.logger.warning(
+            f"Failed to send absent notifications for paper {paper_id}: {str(e)}"
+        )
 
     log_action(
         "COMMIT_ATTENDANCE",

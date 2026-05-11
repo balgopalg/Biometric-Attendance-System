@@ -803,6 +803,19 @@ class LecturerFlowTests(BaseApiFlowTestCase):
         commit_payload = commit.get_json()
         self.assertEqual(commit_payload["students_marked"], 1)
 
+        self.login("alice@student.com", "student123")  # gitleaks:allow
+        inbox = self.client.get("/api/notifications")
+        self.assertEqual(inbox.status_code, 200, inbox.get_data(as_text=True))
+        inbox_payload = inbox.get_json()
+        attendance_notification = next(
+            (item for item in inbox_payload["items"] if item.get("template_key") == "attendance_session_committed"),
+            None,
+        )
+        self.assertIsNotNone(attendance_notification)
+        self.assertIn("Machine Learning [ML-501]", attendance_notification["body"])
+        self.assertIn("marked Present", attendance_notification["body"])
+        self.assertIn("Dr. Lecturer", attendance_notification["body"])
+
         review = self.client.get(f"/api/lecturer/session/{session_id}/review")
         self.assertEqual(review.status_code, 200)
         review_payload = review.get_json()

@@ -867,6 +867,7 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
   const profileRef = useRef(null);
+  const notificationStreamRef = useRef(null);
 
   const loadNotifications = useCallback(async ({ silent = false } = {}) => {
     if (!user) return;
@@ -982,6 +983,33 @@ export default function Topbar({ title, onToggleSidebar, isMobile, isSidebarColl
   useEffect(() => {
     loadNotifications({ silent: true });
   }, [loadNotifications]);
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined' || typeof EventSource === 'undefined') return undefined;
+
+    if (notificationStreamRef.current) {
+      notificationStreamRef.current.close();
+      notificationStreamRef.current = null;
+    }
+
+    const stream = new EventSource('/api/notifications/stream', { withCredentials: true });
+    notificationStreamRef.current = stream;
+
+    const refreshNotifications = () => {
+      loadNotifications({ silent: true });
+    };
+
+    stream.addEventListener('notification', refreshNotifications);
+    stream.onmessage = refreshNotifications;
+
+    return () => {
+      stream.removeEventListener('notification', refreshNotifications);
+      stream.close();
+      if (notificationStreamRef.current === stream) {
+        notificationStreamRef.current = null;
+      }
+    };
+  }, [loadNotifications, user]);
 
   useEffect(() => {
     if (notificationOpen) {

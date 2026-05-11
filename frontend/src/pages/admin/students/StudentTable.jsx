@@ -18,6 +18,26 @@ import {
 
 import { useStudentContext } from './StudentContext';
 
+function SortHeader({ label, field, align, sortKey, sortDir, onSort }) {
+  return (
+    <th
+      className="sortable-th"
+      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
+      onClick={() => onSort(field)}
+      title={`Sort by ${label}`}
+    >
+      <span className="sort-header-inner">
+        {label}
+        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
+          {sortKey === field
+            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
+            : <HiArrowUp size={12} />}
+        </span>
+      </span>
+    </th>
+  );
+}
+
 export default function StudentTable() {
   const {
     loadingStudents, studentsError, filtered, filters, setFilters,
@@ -68,23 +88,6 @@ export default function StudentTable() {
     });
   }, [filtered, sortKey, sortDir]);
 
-  const SortHeader = ({ label, field, align }) => (
-    <th
-      className="sortable-th"
-      style={{ cursor: 'pointer', userSelect: 'none', textAlign: align || 'left' }}
-      onClick={() => handleSort(field)}
-      title={`Sort by ${label}`}
-    >
-      <span className="sort-header-inner">
-        {label}
-        <span className={`sort-icon ${sortKey === field ? 'sort-icon--active' : ''}`}>
-          {sortKey === field
-            ? (sortDir === 'asc' ? <HiArrowUp size={12} /> : <HiArrowDown size={12} />)
-            : <HiArrowUp size={12} />}
-        </span>
-      </span>
-    </th>
-  );
 
   return (
     <>
@@ -119,14 +122,14 @@ export default function StudentTable() {
                   }}
                 />
               </th>
-              <SortHeader label="Reg No." field="reg_number" />
-              <SortHeader label="Name" field="name" />
-              <SortHeader label="Email" field="email" />
-              <SortHeader label="Mobile" field="mobile_no" />
-              <SortHeader label="Current Sem" field="current_semester" />
-              <SortHeader label="Course / Session" field="course_name" />
-              <SortHeader label="Papers" field="enrolled_papers_count" />
-              <SortHeader label="Status" field="has_face" align="center" />
+              <SortHeader label="Reg No." field="reg_number" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Name" field="name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Email" field="email" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Mobile" field="mobile_no" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Current Sem" field="current_semester" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Course / Session" field="course_name" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Papers" field="enrolled_papers_count" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
+              <SortHeader label="Status" field="has_face" align="center" sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
