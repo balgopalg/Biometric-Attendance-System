@@ -816,6 +816,9 @@ class LecturerFlowTests(BaseApiFlowTestCase):
         self.assertIn("marked Present", attendance_notification["body"])
         self.assertIn("Dr. Lecturer", attendance_notification["body"])
 
+        # Switch back to lecturer for lecturer-only review and adjustment endpoints.
+        self.login("lecturer@system.com", "lecturer123")  # gitleaks:allow
+
         review = self.client.get(f"/api/lecturer/session/{session_id}/review")
         self.assertEqual(review.status_code, 200)
         review_payload = review.get_json()
