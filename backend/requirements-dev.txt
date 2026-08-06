@@ -1,7 +1,7 @@
 # --- Development & Testing ───────────────────────────────────────────────────────
 # Testing Framework & Utilities
 pytest>=7.0.0                      # Test runner and framework
-pytest-cov>=4.0.0                  # Code coverage reporting
+pytest-cov>=7.1.0                  # Code coverage reporting
 pytest-flask>=1.2.0                # Flask testing utilities and fixtures
 pytest-mock>=3.10.0                # Enhanced mocking capabilities for pytest
 
