@@ -45,7 +45,7 @@ rq>=1.15.1                                 # Redis Queue library for background 
 
 # --- Observability, Logging & Production ──────────────────────────────────────────
 # Production Server & WSGI
-gunicorn>=23.0.0                           # Production-grade WSGI HTTP Server
+gunicorn>=26.0.0                           # Production-grade WSGI HTTP Server
 
 # Logging & Structured Output
 python-json-logger>=2.0.7                  # Formats logs in structured JSON for aggregation
