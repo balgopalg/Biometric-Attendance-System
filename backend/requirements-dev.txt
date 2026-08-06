@@ -18,8 +18,8 @@ safety>=2.3.0                       # Dependency vulnerability checker
 
 # Development Tools
 python-debugpy>=1.6.0              # Debugger for Python
-watchdog>=3.0.0                    # File system monitoring
-watchdog[watchmedo]>=3.0.0         # CLI tool for watchdog
+watchdog>=6.0.0                    # File system monitoring
+watchdog[watchmedo]>=6.0.0         # CLI tool for watchdog
 
 # Documentation
 sphinx>=6.0.0                       # Documentation generator
