@@ -26,7 +26,7 @@ sphinx>=6.0.0                       # Documentation generator
 sphinx-rtd-theme>=1.2.0            # ReadTheDocs theme for Sphinx
 
 # Performance & Profiling
-py-spy>=0.3.14                     # Sampling profiler for Python
+py-spy>=0.4.2                     # Sampling profiler for Python
 memory-profiler>=0.61.0            # Memory profiling tool
 
 # Utilities
