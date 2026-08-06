@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+instance/
+logs/
+backups/
+uploads/
+dataset/
+trainer/
+.pytest_cache/
+.mypy_cache/
+.git/
+.env

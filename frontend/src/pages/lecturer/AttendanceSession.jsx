@@ -1,30 +1,50 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+const RECOGNITION_DEBUG = false;
 import { useSearchParams } from 'react-router-dom';
 import api from '../../api/axios';
 import { useWebcam } from '../../hooks/useWebcam';
+import { useDrowsinessDetection } from '../../hooks/useDrowsinessDetection';
 import WebcamFeed from '../../components/recognition/WebcamFeed';
 import RecognizedList from '../../components/recognition/RecognizedList';
 import UploadClassroomImage from '../../components/recognition/UploadClassroomImage';
 import PinCommitModal from './PinCommitModal';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import { HiOutlinePlay, HiOutlinePause, HiOutlineStop, HiOutlineCheckCircle, HiOutlinePhotograph } from 'react-icons/hi';
+import { formatCourseName } from '../../utils/courseDisplay';
+import StatePanel from '../../components/ui/StatePanel';
+import { formatDateTimeIndia } from '../../utils/dateTime';
+
+const TIMESTAMP_WITHOUT_TZ_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+function normalizeUtcTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  return TIMESTAMP_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
+}
 
 function fmt(dt) {
-  if (!dt) return 'N/A';
-  try {
-    return new Date(dt).toLocaleString();
-  } catch {
-    return 'N/A';
-  }
+  return formatDateTimeIndia(normalizeUtcTimestamp(dt), { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function safeMatches(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 export default function AttendanceSession() {
   const [params] = useSearchParams();
   const paperIdFromQuery = params.get('paper_id');
 
-  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, captureFrame } = useWebcam();
+  const isMobile = useRef(
+    typeof window !== 'undefined'
+      ? /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768
+      : false
+  ).current;
+  const { videoRef, canvasRef, isActive, error, startCamera, stopCamera, flipCamera, captureFrame } = useWebcam({
+    facingMode: isMobile ? 'environment' : 'user'
+  });
   const [papers, setPapers] = useState([]);
+  const [loadingPapers, setLoadingPapers] = useState(true);
+  const [papersError, setPapersError] = useState('');
   const [selectedCourseId, setSelectedCourseId] = useState('');
   const [selectedPaperId, setSelectedPaperId] = useState(paperIdFromQuery || '');
 
@@ -37,6 +57,22 @@ export default function AttendanceSession() {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
 
+  useDrowsinessDetection(videoRef, scanning);
+
+  useEffect(() => {
+    const shouldBeActive = scanning && sessionId && !showUploadModal;
+
+    if (shouldBeActive) {
+      // Small buffer to allow hardware release from modal
+      const timer = setTimeout(() => {
+        if (!isActive) startCamera();
+      }, 400);
+      return () => clearTimeout(timer);
+    } else {
+      stopCamera();
+    }
+  }, [scanning, sessionId, showUploadModal, isActive, startCamera, stopCamera]);
+
   const [diag, setDiag] = useState({ faces_detected: 0, candidates_count: 0, best_similarity_seen: null, threshold: null });
   const [scanError, setScanError] = useState('');
   const [stopEndpointAvailable, setStopEndpointAvailable] = useState(null);
@@ -47,6 +83,9 @@ export default function AttendanceSession() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const intervalRef = useRef(null);
+  const scanInFlightRef = useRef(false);
+  const lastRecognitionToastAtRef = useRef(0);
+  const cameraWarningShownRef = useRef(false);
 
   const selectedPaper = useMemo(
     () => papers.find((p) => p._id === selectedPaperId) || null,
@@ -62,6 +101,8 @@ export default function AttendanceSession() {
           _id: p.course_id,
           name: p.course_name || 'N/A',
           code: p.course_code || '',
+          status: p.course_status,
+          isInactive: p.is_course_inactive,
         });
       }
     });
@@ -76,6 +117,8 @@ export default function AttendanceSession() {
   const currentAcademicSession = useMemo(() => String(new Date().getFullYear()), []);
 
   const fetchPapers = () => {
+    setLoadingPapers(true);
+    setPapersError('');
     api.get('/lecturer/papers').then((r) => {
       const list = r.data || [];
       setPapers(list);
@@ -95,7 +138,12 @@ export default function AttendanceSession() {
         const firstPaperInCourse = list.find((p) => p.course_id === firstCourseId);
         setSelectedPaperId(firstPaperInCourse?._id || '');
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      setPapers([]);
+      setPapersError(err.response?.data?.error || 'Unable to load assigned papers.');
+    }).finally(() => {
+      setLoadingPapers(false);
+    });
   };
 
   useEffect(() => {
@@ -117,25 +165,24 @@ export default function AttendanceSession() {
   useEffect(() => {
     let cancelled = false;
 
-    const probeStopEndpoint = async () => {
+    const fetchCapabilities = async () => {
       try {
-        // Probes endpoint availability; 400/401/403 still means route exists.
-        await api.post('/lecturer/session/stop', {});
-        if (!cancelled) setStopEndpointAvailable(true);
+        const res = await api.get('/lecturer/capabilities');
+        if (!cancelled) setStopEndpointAvailable(!!res.data.can_stop_session);
       } catch (err) {
         if (cancelled) return;
-        setStopEndpointAvailable(err.response?.status === 404 ? false : true);
+        setStopEndpointAvailable(false);
       }
     };
 
-    probeStopEndpoint();
+    fetchCapabilities();
     return () => {
       cancelled = true;
     };
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 60 * 1000);
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -144,26 +191,40 @@ export default function AttendanceSession() {
       toast.error('Please select a paper first');
       return;
     }
+    if (selectedPaper?.is_course_inactive) {
+      toast.error('This subject is locked because its course is inactive');
+      return;
+    }
+    let createdSessionId = null;
     try {
       const res = await api.post('/lecturer/session/start', { paper_id: selectedPaperId });
-      setSessionId(res.data.session_id);
+      createdSessionId = res.data.session_id;
+      setSessionId(createdSessionId);
       setSessionStartedAt(res.data.started_at || new Date().toISOString());
       setRecognized([]);
       setReview(null);
-      await startCamera();
+      setScanError('');
+      cameraWarningShownRef.current = false;
+
       setScanning(true);
       toast.success('Session started');
     } catch (err) {
+      if (createdSessionId) {
+        await api.post('/lecturer/session/stop', { session_id: createdSessionId }).catch(() => { });
+        setSessionId(null);
+      }
       toast.error(err.response?.data?.error || 'Failed to start session');
     }
   };
 
   const pauseSession = () => {
     setScanning(false);
+    stopCamera();
   };
 
   const resumeSession = () => {
     if (!sessionId) return;
+    setScanError('');
     setScanning(true);
   };
 
@@ -175,6 +236,7 @@ export default function AttendanceSession() {
     setRecognized([]);
     setScanError('');
     setDiag({ faces_detected: 0, candidates_count: 0, best_similarity_seen: null, threshold: null });
+    cameraWarningShownRef.current = false;
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
 
@@ -205,18 +267,47 @@ export default function AttendanceSession() {
     clearSessionLocally();
   };
 
+  const notifyRecognitionBatch = useCallback((matches, source = 'live') => {
+    const safe = Array.isArray(matches) ? matches : [];
+    if (safe.length === 0) return;
+
+    const now = Date.now();
+    if (now - lastRecognitionToastAtRef.current < 1200) return;
+    lastRecognitionToastAtRef.current = now;
+
+    if (safe.length === 1) {
+      const conf = Math.round((safe[0]?.confidence || safe[0]?.similarity || 0) * 100);
+      toast.success(`Recognized: ${String(safe[0]?.name || 'Unknown')} (${conf}%)`);
+      return;
+    }
+
+    const previewNames = safe
+      .slice(0, 3)
+      .map((m) => String(m?.name || 'Unknown'))
+      .join(', ');
+    const extra = safe.length > 3 ? ` +${safe.length - 3} more` : '';
+    const prefix = source === 'upload' ? 'Image recognition' : 'Live recognition';
+    toast.success(`${prefix}: ${safe.length} student(s) (${previewNames}${extra})`);
+  }, []);
+
   const scanFrame = useCallback(async () => {
     if (!sessionId) return;
+    if (scanInFlightRef.current) return;
+
     const frame = captureFrame();
     if (!frame) return;
 
-    console.debug('[Recognition] Sending frame', {
-      timestamp: new Date().toISOString(),
-      sessionId,
-      paperId: selectedPaperId,
-      framePrefix: frame.slice(0, 40),
-      approxBytes: Math.round((frame.length * 3) / 4),
-    });
+    scanInFlightRef.current = true;
+
+    if (RECOGNITION_DEBUG) {
+      console.debug('[Recognition] Sending frame', {
+        timestamp: new Date().toISOString(),
+        sessionId,
+        paperId: selectedPaperId,
+        framePrefix: frame.slice(0, 40),
+        approxBytes: Math.round((frame.length * 3) / 4),
+      });
+    }
 
     try {
       const res = await api.post('/lecturer/session/recognize', {
@@ -224,19 +315,24 @@ export default function AttendanceSession() {
         frame,
       });
 
-      console.debug('[Recognition] Response', {
-        timestamp: new Date().toISOString(),
-        faces_detected: res.data.faces_detected,
-        candidates_count: res.data.candidates_count,
-        best_similarity_seen: res.data.best_similarity_seen,
-        threshold: res.data.threshold,
-        new_matches: res.data.new_matches,
-        total_recognized: res.data.total_recognized,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.debug('[Recognition] Response', {
+          timestamp: new Date().toISOString(),
+          faces_detected: res.data.faces_detected,
+          candidates_count: res.data.candidates_count,
+          best_similarity_seen: res.data.best_similarity_seen,
+          threshold: res.data.threshold,
+          new_matches: res.data.new_matches,
+          total_recognized: res.data.total_recognized,
+        });
+      }
 
-      if (res.data.new_matches?.length > 0) {
-        setRecognized((prev) => [...prev, ...res.data.new_matches]);
-        res.data.new_matches.forEach((m) => toast.success(`Recognized: ${m.name}`));
+      const newMatchesRaw = safeMatches(res.data?.new_matches);
+      const newMatches = newMatchesRaw.map((m) => ({ ...m, isDrowsy: !!m?.isDrowsy }));
+
+      if (newMatches.length > 0) {
+        setRecognized((prev) => [...prev, ...newMatches]);
+        notifyRecognitionBatch(newMatches, 'live');
       }
       setDiag({
         faces_detected: res.data.faces_detected || 0,
@@ -246,17 +342,21 @@ export default function AttendanceSession() {
       });
       setScanError('');
     } catch (err) {
-      console.error('[Recognition] Request failed', {
-        timestamp: new Date().toISOString(),
-        sessionId,
-        paperId: selectedPaperId,
-        error: err.response?.data || err.message,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.error('[Recognition] Request failed', {
+          timestamp: new Date().toISOString(),
+          sessionId,
+          paperId: selectedPaperId,
+          error: err.response?.data || err.message,
+        });
+      }
       setScanError(err.response?.data?.error || 'Frame recognition failed');
+    } finally {
+      scanInFlightRef.current = false;
     }
-  }, [sessionId, selectedPaperId, captureFrame]);
+  }, [sessionId, selectedPaperId, captureFrame, notifyRecognitionBatch]);
 
-  const handleUploadImage = async (imageBlob) => {
+  const handleUploadImage = async (imageBlobs) => {
     if (!selectedPaperId) {
       toast.error('Please select a paper first');
       return;
@@ -267,51 +367,76 @@ export default function AttendanceSession() {
       return;
     }
 
+    const resumeScan = scanning;
+    if (resumeScan) {
+      setScanning(false);
+    }
     setUploadLoading(true);
+    let totalDetected = 0;
+    let newMatchesList = [];
+    let candidatesCount = 0;
+    let threshold = 0;
+    let bestSimilaritySeen = 0;
+
     try {
-      const formData = new FormData();
-      formData.append('session_id', sessionId);
-      formData.append('image', imageBlob);
+      for (const imageBlob of imageBlobs) {
+        const formData = new FormData();
+        formData.append('session_id', sessionId);
+        formData.append('image', imageBlob);
+        const res = await api.post('/lecturer/session/recognize-image', formData);
 
-      console.debug('[Image Upload] FormData ready', {
-        sessionId,
-        fileName: imageBlob.name,
-        fileSize: imageBlob.size,
-        fileType: imageBlob.type,
-      });
+        totalDetected += (res.data.faces_detected || 0);
+        const newMatches = safeMatches(res.data?.new_matches);
+        if (newMatches.length > 0) {
+          newMatchesList.push(...newMatches);
+          notifyRecognitionBatch(newMatches, 'upload');
+        }
 
-      const res = await api.post('/lecturer/session/recognize-image', formData);
-      
-      console.debug('[Image Upload] Response received', {
-        facesDetected: res.data.faces_detected,
-        newMatches: res.data.new_matches?.length,
-      });
-
-      if (res.data.new_matches?.length > 0) {
-        setRecognized((prev) => [...prev, ...res.data.new_matches]);
-        res.data.new_matches.forEach((m) => toast.success(`Recognized: ${m.name}`));
-        toast.success(`Successfully recognized ${res.data.new_matches.length} student(s)`);
-      } else {
-        toast.success('No new students recognized in this image');
+        candidatesCount = res.data.candidates_count || candidatesCount;
+        threshold = res.data.threshold || threshold;
+        bestSimilaritySeen = Math.max(bestSimilaritySeen || 0, res.data.best_similarity_seen || 0);
       }
 
-      setDiag({
-        faces_detected: res.data.faces_detected || 0,
-        candidates_count: res.data.candidates_count || 0,
-        best_similarity_seen: res.data.best_similarity_seen,
-        threshold: res.data.threshold,
+      const uniqueNewMatchesMap = new Map();
+      newMatchesList.forEach(m => {
+        const id = m.id || m.user_id;
+        if (!uniqueNewMatchesMap.has(id)) {
+          uniqueNewMatchesMap.set(id, m);
+        }
       });
+      const uniqueNewMatches = Array.from(uniqueNewMatchesMap.values());
+
+      if (uniqueNewMatches.length > 0) {
+        setRecognized((prev) => {
+          const combined = [...prev, ...uniqueNewMatches];
+          const map = new Map();
+          combined.forEach(m => map.set(m.id || m.user_id, m));
+          return Array.from(map.values());
+        });
+        toast.success(`Successfully recognized ${uniqueNewMatches.length} student(s) from ${imageBlobs.length} image(s)`);
+      } else {
+        toast.success(`No new students recognized in the ${imageBlobs.length} image(s)`);
+      }
+
+      setDiag(prev => ({
+        ...prev,
+        faces_detected: prev.faces_detected + totalDetected,
+        candidates_count: candidatesCount || prev.candidates_count,
+        best_similarity_seen: bestSimilaritySeen || prev.best_similarity_seen,
+        threshold: threshold || prev.threshold,
+      }));
 
       setShowUploadModal(false);
     } catch (err) {
-      console.error('[Image Recognition] Failed', {
-        status: err.response?.status,
-        error: err.response?.data?.error,
-        message: err.message,
-      });
+      if (RECOGNITION_DEBUG) {
+        console.error('[Image Recognition] Failed', err);
+      }
       toast.error(err.response?.data?.error || err.message || 'Image recognition failed');
     } finally {
       setUploadLoading(false);
+      if (resumeScan) {
+        setScanning(true);
+      }
     }
   };
 
@@ -354,7 +479,7 @@ export default function AttendanceSession() {
     try {
       const res = await api.put(`/lecturer/session/${review.session_id}/adjust`, {
         pin,
-        student_ids: adjustIds,
+        user_ids: adjustIds,
       });
       setReview(res.data.review);
       setShowAdjustPin(false);
@@ -364,168 +489,287 @@ export default function AttendanceSession() {
     }
   };
 
-  const rollbackRemainingMins = useMemo(() => {
+  const rollbackRemainingMs = useMemo(() => {
     if (!review?.rollback_until) return null;
-    const diff = new Date(review.rollback_until).getTime() - nowMs;
-    return Math.max(0, Math.ceil(diff / 60000));
+    const normalizedRollbackUntil = normalizeUtcTimestamp(review.rollback_until);
+    const rollbackUntilMs = new Date(normalizedRollbackUntil).getTime();
+    if (Number.isNaN(rollbackUntilMs)) return null;
+    return Math.max(0, rollbackUntilMs - nowMs);
   }, [review, nowMs]);
 
+
+  const rollbackCountdown = useMemo(() => {
+    if (rollbackRemainingMs === null) return null;
+    if (rollbackRemainingMs <= 0) return '00:00';
+    const totalSecs = Math.floor(rollbackRemainingMs / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }, [rollbackRemainingMs]);
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)' } }} />
+    <div>
       <canvas ref={canvasRef} style={{ display: 'none' }} />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Take Attendance</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Select paper, verify recognition, then commit with your PIN.</p>
+      {/* ── Toolbar ── */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: isMobile ? 'flex-start' : 'center',
+        flexDirection: isMobile ? 'column' : 'row',
+        marginBottom: 20,
+        gap: 16,
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance Session</h2>
+              {sessionId && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em',
+                  textTransform: 'uppercase', padding: '3px 10px', borderRadius: 999,
+                  background: error ? 'rgba(244,63,94,0.12)' : (scanning && isActive ? 'rgba(16,185,129,0.12)' : 'rgba(251,191,36,0.12)'),
+                  color: error ? 'var(--accent-rose)' : (scanning && isActive ? 'var(--accent-emerald)' : 'var(--accent-amber)'),
+                  border: `1px solid ${error ? 'rgba(244,63,94,0.25)' : (scanning && isActive ? 'rgba(16,185,129,0.25)' : 'rgba(251,191,36,0.25)')}`,
+                }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: 'currentColor',
+                    animation: scanning && isActive ? 'pulse-glow 1.4s ease-in-out infinite' : 'none'
+                  }} />
+                  {error ? 'Camera Error' : (scanning && isActive ? 'Live' : (scanning && !isActive ? 'Awaiting Feed' : 'Paused'))}
+                </span>
+              )}
+            </div>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 2 }}>Select paper, verify recognition, then commit with your PIN.</p>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          width: isMobile ? '100%' : 'auto',
+          justifyContent: isMobile ? 'space-between' : 'flex-end'
+        }}>
           {!sessionId ? (
-            <button className="btn-primary" onClick={startSession}>
-              <HiOutlinePlay size={16} /> Start Session
+            <button className="btn-primary" onClick={startSession} disabled={selectedPaper?.is_course_inactive} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <HiOutlinePlay size={16} /> {selectedPaper?.is_course_inactive ? 'Course Locked' : 'Start Session'}
             </button>
           ) : (
             <>
               {scanning ? (
-                <button className="btn-secondary" onClick={pauseSession}>
+                <button className="btn-secondary" onClick={pauseSession} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <HiOutlinePause size={16} /> Pause
                 </button>
               ) : (
-                <button className="btn-primary" onClick={resumeSession}>
+                <button className="btn-primary" onClick={resumeSession} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <HiOutlinePlay size={16} /> Resume
                 </button>
               )}
-              <button className="btn-secondary" onClick={() => setShowUploadModal(true)}>
-                <HiOutlinePhotograph size={16} /> Upload Image
+              <button className="btn-secondary" onClick={() => setShowUploadModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <HiOutlinePhotograph size={16} /> Upload Photo
               </button>
-              <button className="btn-danger" onClick={stopSession}>
+              <button className="btn-secondary" onClick={stopSession} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-rose)', borderColor: 'rgba(244,63,94,0.3)' }}>
                 <HiOutlineStop size={16} /> Stop Session
               </button>
-              <button className="btn-primary" onClick={() => setShowPin(true)} disabled={recognized.length === 0}>
-                <HiOutlineCheckCircle size={16} /> Commit ({recognized.length})
+              <button className="btn-primary" onClick={() => setShowPin(true)} disabled={recognized.length === 0} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flex: isMobile ? 1 : 'none',
+                justifyContent: 'center',
+                padding: isMobile ? '10px 12px' : '10px 20px'
+              }}>
+                <HiOutlineCheckCircle size={16} /> {isMobile ? 'Commit' : `Commit (${recognized.length})`}
               </button>
             </>
           )}
         </div>
       </div>
 
-      <div className="glass-card" style={{ padding: 14, marginBottom: 14 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-          <select className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={scanning}>
-            <option value="">Select Course</option>
-            {courseOptions.map((c) => (
-              <option key={c._id} value={c._id}>{c.name} {c.code ? `(${c.code})` : ''}</option>
-            ))}
-          </select>
-          <select className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={scanning || !selectedCourseId}>
-            <option value="">{selectedCourseId ? 'Select Paper' : 'Select Course First'}</option>
-            {filteredPapers.map((p) => (
-              <option key={p._id} value={p._id}>{p.name} ({p.code})</option>
-            ))}
-          </select>
-          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Subject / Course</p>
-            <p style={{ fontWeight: 700 }}>{selectedPaper ? `${selectedPaper.name} · ${selectedPaper.course_name || 'N/A'}` : 'N/A'}</p>
-          </div>
-          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Academic Session</p>
-            <p style={{ fontWeight: 700 }}>{currentAcademicSession}</p>
-          </div>
-          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)', fontSize: '0.8rem' }}>
-            <p style={{ color: 'var(--text-muted)' }}>Session Time</p>
-            <p style={{ fontWeight: 700 }}>{sessionStartedAt ? fmt(sessionStartedAt) : 'Not started'}</p>
-          </div>
-        </div>
-      </div>
+      {loadingPapers ? (
+        <StatePanel variant="loading" title="Loading your assigned papers" description="Please wait while we prepare your attendance workspace." />
+      ) : null}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
-        <WebcamFeed ref={videoRef} isActive={isActive} error={error} />
-        <RecognizedList students={recognized} />
-      </div>
+      {!loadingPapers && papersError ? (
+        <StatePanel
+          variant="error"
+          title="Could not load papers"
+          description={papersError}
+          actionLabel="Try again"
+          onAction={fetchPapers}
+        />
+      ) : null}
 
-      {sessionId && (
-        <div className="glass-card" style={{ marginTop: 14, padding: 12 }}>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Status: <b>{scanning ? 'Scanning' : 'Paused'}</b> |{' '}
-            Faces detected: <b>{diag.faces_detected}</b> | Candidates in this paper: <b>{diag.candidates_count}</b>
-            {diag.best_similarity_seen !== null ? ` | Best similarity: ${diag.best_similarity_seen}` : ''}
-            {diag.threshold !== null ? ` | Threshold: ${diag.threshold}` : ''}
-          </p>
-          {scanError && <p style={{ marginTop: 6, fontSize: '0.8rem', color: 'var(--accent-rose)' }}>{scanError}</p>}
-        </div>
-      )}
+      {!loadingPapers && !papersError && papers.length === 0 ? (
+        <StatePanel
+          variant="empty"
+          title="No assigned papers yet"
+          description="You cannot start a session until an administrator assigns papers to your account."
+        />
+      ) : null}
 
-      {review && (
-        <div className="glass-card" style={{ marginTop: 14, padding: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <div>
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700 }}>Committed Attendance Review</h3>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                Committed: {fmt(review.committed_at)} | Rollback until: {fmt(review.rollback_until)}
-                {rollbackRemainingMins !== null ? ` (${rollbackRemainingMins} min left)` : ''}
-              </p>
+      {!loadingPapers && !papersError && papers.length > 0 ? (
+        <>
+          {/* ── Session config card ── */}
+          <div className="glass-card" style={{ padding: 16, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              {/* Course selector */}
+              <div>
+                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Course</label>
+                <select aria-label="Select course" className="input-field" value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} disabled={!!sessionId}>
+                  <option value="">— Select Course —</option>
+                  {courseOptions.map((c) => (
+                    <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status, isInactive: c.isInactive })} {c.code ? `(${c.code})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Paper selector */}
+              <div>
+                <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>Paper / Subject</label>
+                <select aria-label="Select paper" className="input-field" value={selectedPaperId} onChange={(e) => setSelectedPaperId(e.target.value)} disabled={!!sessionId || !selectedCourseId}>
+                  <option value="">{selectedCourseId ? '— Select Paper —' : '— Select Course First —'}</option>
+                  {filteredPapers.map((p) => (
+                    <option key={p._id} value={p._id} disabled={p.is_course_inactive}>{p.name} ({p.code}){p.is_course_inactive ? ' · Locked' : ''}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Info pills */}
+              {[{
+                label: 'Academic Year', value: currentAcademicSession,
+              }, {
+                label: 'Session Started', value: sessionStartedAt ? fmt(sessionStartedAt) : '—',
+              }, {
+                label: 'Enrolled Students', value: selectedPaper?.total_enrolled_students ?? '—',
+              }].map(({ label, value }) => (
+                <div key={label} style={{ padding: '10px 14px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+                  <p style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</p>
+                  <p style={{ fontSize: '0.9rem', fontWeight: 700 }}>{value}</p>
+                </div>
+              ))}
             </div>
-            <button className="btn-primary" disabled={!review.editable} onClick={() => setShowAdjustPin(true)}>
-              Re-commit Adjustments
-            </button>
+            {selectedPaper?.is_course_inactive && (
+              <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', fontSize: '0.8rem', color: 'var(--accent-amber)' }}>
+                ⚠️ This course is inactive — attendance sessions are locked.
+              </div>
+            )}
           </div>
 
-          {!review.editable && (
-            <p style={{ fontSize: '0.8rem', color: 'var(--accent-rose)', marginBottom: 10 }}>
-              Rollback window expired. This attendance is finalized and cannot be modified.
-            </p>
+          <div className="session-feed-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20, alignItems: 'flex-start' }}>
+            <WebcamFeed ref={videoRef} isActive={isActive} error={error} isAwaiting={scanning && !isActive} onFlipCamera={flipCamera} />
+            <RecognizedList students={recognized} isLive={scanning && isActive} />
+          </div>
+
+          {sessionId && (
+            <div className="glass-card" style={{ marginTop: 14, padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+              {[{
+                label: 'Faces Detected', value: diag.faces_detected,
+              }, {
+                label: 'Recognized', value: recognized.length, accent: 'var(--accent-emerald)',
+              }, {
+                label: 'Best Match', value: diag.best_similarity_seen !== null ? `${(diag.best_similarity_seen * 100).toFixed(1)}%` : '—',
+              }, {
+                label: 'Threshold', value: diag.threshold !== null ? `${(diag.threshold * 100).toFixed(0)}%` : '—',
+              }].map(({ label, value, accent }) => (
+                <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+                  <span style={{ fontSize: '0.92rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</span>
+                </div>
+              ))}
+              {scanError && (
+                <p role="alert" style={{ width: '100%', marginTop: 2, fontSize: '0.78rem', color: 'var(--accent-rose)', background: 'rgba(244,63,94,0.06)', padding: '6px 10px', borderRadius: 'var(--radius)', border: '1px solid rgba(244,63,94,0.15)' }}>{scanError}</p>
+              )}
+            </div>
           )}
 
-          <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8 }}>
-            {(review.candidates || []).map((s) => {
-              const checked = adjustIds.includes(s.user_id);
-              return (
-                <label key={s.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', fontSize: '0.82rem', cursor: review.editable ? 'pointer' : 'default' }}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={!review.editable}
-                    onChange={(e) => {
-                      const next = e.target.checked
-                        ? [...adjustIds, s.user_id]
-                        : adjustIds.filter((id) => id !== s.user_id);
-                      setAdjustIds(next);
-                    }}
-                  />
-                  {s.name} ({s.email})
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
+          {review && (
+            <div className="glass-card" style={{ marginTop: 16, padding: 18 }}>
+              {/* Review header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: 4 }}>Committed Attendance</h3>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Committed: <b style={{ color: 'var(--text-secondary)' }}>{fmt(review.committed_at)}</b></span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Rollback window:{' '}
+                      {rollbackCountdown !== null ? (
+                        <b style={{
+                          color: rollbackRemainingMs === 0 ? 'var(--accent-rose)' : rollbackRemainingMs < 300000 ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                          fontVariantNumeric: 'tabular-nums',
+                          letterSpacing: '0.04em',
+                        }}>
+                          {rollbackCountdown} remaining
+                        </b>
+                      ) : fmt(review.rollback_until)}
+                    </span>
+                  </div>
+                </div>
+                <button className="btn-primary" disabled={!review.editable} onClick={() => setShowAdjustPin(true)} style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+                  <HiOutlineCheckCircle size={15} /> Re-commit Adjustments
+                </button>
+              </div>
+              {!review.editable && (
+                <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 'var(--radius)', background: 'rgba(244,63,94,0.06)', border: '1px solid rgba(244,63,94,0.15)', fontSize: '0.8rem', color: 'var(--accent-rose)' }}>
+                  Rollback window expired — this record is finalized.
+                </div>
+              )}
+              {/* Candidate checklist */}
+              <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {(review.candidates || []).map((s) => {
+                  const checked = adjustIds.includes(s.user_id);
+                  return (
+                    <label key={s.user_id} style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 12px', borderRadius: 'var(--radius)',
+                      background: checked ? 'rgba(16,185,129,0.06)' : 'var(--bg-glass)',
+                      border: `1px solid ${checked ? 'rgba(16,185,129,0.18)' : 'var(--border-glass)'}`,
+                      cursor: review.editable ? 'pointer' : 'default',
+                      transition: 'background 0.15s, border-color 0.15s',
+                      fontSize: '0.82rem',
+                    }}>
+                      <input type="checkbox" checked={checked} disabled={!review.editable}
+                        onChange={(e) => setAdjustIds(e.target.checked ? [...adjustIds, s.user_id] : adjustIds.filter(id => id !== s.user_id))}
+                      />
+                      <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.74rem' }}>{s.email}</span>
+                      {checked && <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>Present</span>}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-      <PinCommitModal
-        isOpen={showPin}
-        onClose={() => setShowPin(false)}
-        onCommit={handleCommit}
-        studentsCount={recognized.length}
-      />
+          <PinCommitModal
+            isOpen={showPin}
+            onClose={() => setShowPin(false)}
+            onCommit={handleCommit}
+            studentsCount={recognized.length}
+          />
 
-      <PinCommitModal
-        isOpen={showAdjustPin}
-        onClose={() => setShowAdjustPin(false)}
-        onCommit={handleAdjustSave}
-        studentsCount={adjustIds.length}
-        title="Re-Commit Attendance Adjustments"
-        subtitle="Enter your 4-digit PIN to re-commit corrected records within the rollback window."
-        confirmLabel="Confirm Re-Commit"
-        loadingLabel="Re-committing..."
-      />
+          <PinCommitModal
+            isOpen={showAdjustPin}
+            onClose={() => setShowAdjustPin(false)}
+            onCommit={handleAdjustSave}
+            studentsCount={adjustIds.length}
+            title="Re-Commit Attendance Adjustments"
+            subtitle="Enter your 4-digit PIN to re-commit corrected records within the rollback window."
+            confirmLabel="Confirm Re-Commit"
+            loadingLabel="Re-committing..."
+          />
 
-      {showUploadModal && (
-        <UploadClassroomImage
-          onUpload={handleUploadImage}
-          onClose={() => setShowUploadModal(false)}
-          isLoading={uploadLoading}
-        />
-      )}
-    </motion.div>
+          {showUploadModal && (
+            <UploadClassroomImage
+              onUpload={handleUploadImage}
+              onClose={() => setShowUploadModal(false)}
+              isLoading={uploadLoading}
+            />
+          )}
+        </>
+      ) : null}
+    </div>
   );
 }

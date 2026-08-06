@@ -2,15 +2,38 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
+  withCredentials: true,
 });
 
-// Attach JWT token to every request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+let isRedirectingOnUnauthorized = false;
+
+function getUserStorage() {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
   }
-  
+}
+
+function getCookie(name) {
+  const cookies = document.cookie ? document.cookie.split('; ') : [];
+  for (const cookie of cookies) {
+    const [key, ...parts] = cookie.split('=');
+    if (key === name) return decodeURIComponent(parts.join('='));
+  }
+  return null;
+}
+
+// Attach CSRF token header for unsafe methods when cookie-CSRF protection is enabled.
+api.interceptors.request.use((config) => {
+  const method = (config.method || 'get').toLowerCase();
+  if (['post', 'put', 'patch', 'delete'].includes(method)) {
+    const csrf = getCookie('csrf_access_token');
+    if (csrf) {
+      config.headers['X-CSRF-TOKEN'] = csrf;
+    }
+  }
+
   // Only set JSON content-type if it's not FormData
   if (!(config.data instanceof FormData)) {
     config.headers['Content-Type'] = 'application/json';
@@ -27,9 +50,26 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      const requestUrl = String(error.config?.url || '');
+      const isAuthBootstrapCall =
+        requestUrl.includes('/auth/me') ||
+        requestUrl.includes('/auth/login') ||
+        requestUrl.includes('/auth/logout') ||
+        requestUrl.includes('/auth/change-password');
+      const alreadyOnLogin = window.location.pathname === '/login';
+
+      const storage = getUserStorage();
+      if (storage) {
+        storage.removeItem('user');
+      }
+
+      // Avoid reload loops: /auth/me can naturally return 401 before login.
+      if (!isAuthBootstrapCall && !alreadyOnLogin && !isRedirectingOnUnauthorized) {
+        isRedirectingOnUnauthorized = true;
+        // Reset the guard after navigation so future 401s can trigger redirect
+        setTimeout(() => { isRedirectingOnUnauthorized = false; }, 3000);
+        window.location.assign('/login');
+      }
     }
     return Promise.reject(error);
   }

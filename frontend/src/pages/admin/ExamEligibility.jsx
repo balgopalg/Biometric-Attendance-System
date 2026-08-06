@@ -1,42 +1,86 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../../api/axios';
-import toast, { Toaster } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
-import { HiOutlineShieldCheck } from 'react-icons/hi';
+import { HiOutlineShieldCheck, HiOutlineDownload, HiOutlineFilter, HiOutlineDotsHorizontal } from 'react-icons/hi';
+import useDebouncedValue from '../../hooks/useDebouncedValue';
+import StatePanel from '../../components/ui/StatePanel';
+import Modal from '../../components/ui/Modal';
+import { formatCourseName } from '../../utils/courseDisplay';
+import { exportToExcel, exportToCSV } from '../../utils/excelExport';
+import { useAuth } from '../../hooks/useAuth';
 
 export default function ExamEligibility() {
+  const { isSuperAdmin, isDepartmentAdmin, departmentId, departmentName } = useAuth();
+
   const [courses, setCourses] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [eligibilityError, setEligibilityError] = useState('');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [exportingEligibility, setExportingEligibility] = useState(false);
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [search, setSearch] = useState('');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [showMobileOptions, setShowMobileOptions] = useState(false);
+  const [departments, setDepartments] = useState([]);
   const [filters, setFilters] = useState({
+    department_id: '',
     course_id: '',
     academic_session: '',
     semester: '',
     final_eligible: '',
   });
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const debouncedFilters = useDebouncedValue(filters, 250);
+
+  const activeCourses = useMemo(
+    () => courses.filter((c) => String(c.status || 'active').toLowerCase() === 'active'),
+    [courses]
+  );
 
   const fetchMeta = () => {
-    api.get('/admin/courses').then((r) => setCourses(r.data || [])).catch(() => setCourses([]));
+    if (isSuperAdmin) {
+      api.get('/admin/departments').then((r) => setDepartments(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    } else if (isDepartmentAdmin && departmentId && departmentName) {
+      setDepartments([{ _id: departmentId, name: departmentName }]);
+      setFilters((prev) => ({ ...prev, department_id: departmentId }));
+    }
   };
 
-  const fetchEligibility = () => {
+  useEffect(() => {
+    const params = {};
+    if (filters.department_id) params.department_id = filters.department_id;
+    api.get('/admin/courses', { params }).then((r) => setCourses(r.data || [])).catch(() => setCourses([]));
+  }, [filters.department_id]);
+
+  const fetchEligibility = (signal, activeFilters = filters, activeSearch = search) => {
+    // Only fetch once both department and course are selected to improve performance
+    if (!activeFilters.department_id || !activeFilters.course_id) {
+      setRows([]);
+      setEligibilityError('');
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    const params = { ...filters };
-    if (search) params.q = search;
+    setEligibilityError('');
+    const params = { ...activeFilters };
+    if (activeSearch) params.q = activeSearch;
     delete params.final_eligible;
 
     Object.keys(params).forEach((k) => {
       if (params[k] === '') delete params[k];
     });
 
-    api.get('/admin/exam-eligibility-summary', { params })
+    api.get('/admin/exam-eligibility-summary', { params, signal })
       .then((r) => {
         const payload = r.data || {};
         setRows(payload.items || []);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err?.code === 'ERR_CANCELED') return;
         setRows([]);
+        setEligibilityError(err.response?.data?.error || 'Failed to load exam eligibility data.');
       })
       .finally(() => setLoading(false));
   };
@@ -46,14 +90,16 @@ export default function ExamEligibility() {
   }, []);
 
   useEffect(() => {
-    fetchEligibility();
-  }, [filters.course_id, filters.academic_session, filters.semester, search]);
+    const controller = new AbortController();
+    fetchEligibility(controller.signal, debouncedFilters, debouncedSearch);
+    return () => controller.abort();
+  }, [debouncedFilters, debouncedSearch]);
 
   const uniqueRows = useMemo(() => {
     const byStudent = new Map();
 
     rows.forEach((row) => {
-      const key = String(row.student_id || '');
+      const key = String(row.user_id || '');
       if (!key) return;
 
       const existing = byStudent.get(key);
@@ -98,6 +144,21 @@ export default function ExamEligibility() {
     return uniqueRows.filter((row) => row.final_eligible === required);
   }, [uniqueRows, filters.final_eligible]);
 
+  const displayedStudentIds = useMemo(() => (
+    displayedRows
+      .map((row) => String(row.user_id || '').trim())
+      .filter(Boolean)
+  ), [displayedRows]);
+
+  const allDisplayedSelected = displayedStudentIds.length > 0
+    && displayedStudentIds.every((id) => selectedStudentIds.includes(id));
+
+  useEffect(() => {
+    if (selectedStudentIds.length === 0) return;
+    const visibleSet = new Set(displayedStudentIds);
+    setSelectedStudentIds((prev) => prev.filter((id) => visibleSet.has(id)));
+  }, [displayedStudentIds, selectedStudentIds.length]);
+
   const summary = useMemo(() => ({
     total: displayedRows.length,
     eligible_count: displayedRows.filter((x) => x.final_eligible === true).length,
@@ -138,6 +199,14 @@ export default function ExamEligibility() {
     }
   }, [semesterOptions, filters.semester]);
 
+  useEffect(() => {
+    if (!filters.course_id) return;
+    const stillActive = activeCourses.some((course) => course._id === filters.course_id);
+    if (!stillActive) {
+      setFilters((prev) => ({ ...prev, course_id: '', academic_session: '', semester: '' }));
+    }
+  }, [activeCourses, filters.course_id]);
+
   const handleOverride = async (row, overrideStatus) => {
     const targetPaperIds = Array.from(new Set((row.paper_ids || []).filter(Boolean)));
     if (targetPaperIds.length === 0) {
@@ -153,7 +222,7 @@ export default function ExamEligibility() {
 
     try {
       await Promise.all(targetPaperIds.map((paperId) => api.put('/admin/exam-eligibility-override', {
-        student_id: row.student_id,
+        user_id: row.user_id,
         paper_id: paperId,
         override_status: overrideStatus,
         reason,
@@ -165,9 +234,216 @@ export default function ExamEligibility() {
     }
   };
 
+  const toggleStudentSelection = (userId) => {
+    const key = String(userId || '').trim();
+    if (!key) return;
+    setSelectedStudentIds((prev) => (
+      prev.includes(key) ? prev.filter((id) => id !== key) : [...prev, key]
+    ));
+  };
+
+  const handleToggleSelectAllDisplayed = () => {
+    if (allDisplayedSelected) {
+      setSelectedStudentIds([]);
+      return;
+    }
+    setSelectedStudentIds(displayedStudentIds);
+  };
+
+  const handleBulkOverride = async (overrideStatus) => {
+    const targetRows = displayedRows.filter((row) => selectedStudentIds.includes(String(row.user_id || '').trim()));
+    if (targetRows.length === 0) {
+      toast.error(`Select at least one student to bulk ${overrideStatus ? 'allow' : 'block'}`);
+      return;
+    }
+
+    const reason = window.prompt(
+      `Reason for ${overrideStatus ? 'allowing' : 'blocking'} examination access for ${targetRows.length} student${targetRows.length > 1 ? 's' : ''}:`,
+      overrideStatus ? 'Admin bulk allow' : 'Admin bulk block'
+    );
+    if (reason === null) return;
+
+    const requests = [];
+    targetRows.forEach((row) => {
+      const userId = String(row.user_id || '').trim();
+      const paperIds = Array.from(new Set((row.paper_ids || []).filter(Boolean)));
+      paperIds.forEach((paperId) => {
+        const normalizedPaperId = String(paperId || '').trim();
+        if (!userId || !normalizedPaperId) return;
+        requests.push({
+          user_id: userId,
+          paper_id: normalizedPaperId,
+          override_status: overrideStatus,
+          reason,
+        });
+      });
+    });
+
+    if (requests.length === 0) {
+      toast.error('No eligible paper mappings found for selected students');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Bulk ${overrideStatus ? 'allow' : 'block'} examination for ${targetRows.length} student${targetRows.length > 1 ? 's' : ''} across ${requests.length} paper override${requests.length > 1 ? 's' : ''}?`
+    );
+    if (!confirmed) return;
+
+    setBulkUpdating(true);
+    try {
+      let updatedCount = requests.length;
+      try {
+        const response = await api.put('/admin/exam-eligibility-override/bulk', {
+          overrides: requests,
+        });
+        updatedCount = Number(response?.data?.updated || requests.length);
+      } catch (err) {
+        // Backward-compatible fallback for servers that do not yet expose the bulk endpoint.
+        if (err?.response?.status !== 404) {
+          throw err;
+        }
+        const fallbackResults = await Promise.allSettled(
+          requests.map((payload) => api.put('/admin/exam-eligibility-override', payload))
+        );
+        updatedCount = fallbackResults.filter((r) => r.status === 'fulfilled').length;
+        if (updatedCount === 0) {
+          const firstRejected = fallbackResults.find((r) => r.status === 'rejected');
+          throw firstRejected?.reason || err;
+        }
+      }
+      toast.success(`Bulk ${overrideStatus ? 'allow' : 'block'} applied (${targetRows.length} students, ${requests.length} overrides)`);
+      if (updatedCount < requests.length) {
+        toast(`Applied ${updatedCount}/${requests.length} override mappings.`);
+      }
+      setSelectedStudentIds([]);
+      fetchEligibility();
+    } catch (err) {
+      toast.error(err.response?.data?.error || `Bulk ${overrideStatus ? 'allow' : 'block'} failed`);
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
+  const handleBulkAllow = () => handleBulkOverride(true);
+  const handleBulkBlock = () => handleBulkOverride(false);
+
+  const handleExportEligibility = async () => {
+    if (displayedRows.length === 0) {
+      toast.error('No eligibility records to export');
+      return;
+    }
+
+    const exportData = displayedRows.map((row) => ({
+      student_name: row.student_name || '',
+      reg_number: row.reg_number || row.student_reg_no || row.username || '',
+      course: row.course_name || '',
+      session: row.academic_session || row.academic_year || '',
+      semester: row.student_semester || row.semester || '',
+      attendance: row.attendance_pct ?? row.attendance_percentage ?? '',
+      status: row.final_eligible ? 'Eligible' : 'Ineligible',
+      override: row.override_status === true ? 'Allowed' : row.override_status === false ? 'Blocked' : 'None',
+      override_reason: row.override_reason || '',
+    }));
+
+    const columns = [
+      { key: 'student_name', header: 'Student' },
+      { key: 'reg_number', header: 'Reg No' },
+      { key: 'course', header: 'Course' },
+      { key: 'session', header: 'Academic Session' },
+      { key: 'semester', header: 'Semester' },
+      { key: 'attendance', header: 'Overall Attendance (%)' },
+      { key: 'status', header: 'Status' },
+      { key: 'override', header: 'Override' },
+      { key: 'override_reason', header: 'Override Reason' },
+    ];
+
+    setExportingEligibility(true);
+    try {
+      try {
+        await exportToExcel({
+          data: exportData,
+          columns,
+          fileName: 'Exam_Eligibility',
+          sheetName: 'Eligibility',
+        });
+        toast.success(`Exported ${displayedRows.length} eligibility records to Excel`);
+      } catch (xlsxError) {
+        if (xlsxError.message.includes('xlsx')) {
+          exportToCSV({
+            data: exportData,
+            columns,
+            fileName: 'Exam_Eligibility',
+          });
+          toast.success(`Exported ${displayedRows.length} eligibility records to CSV`);
+        } else {
+          throw xlsxError;
+        }
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to export eligibility records');
+    } finally {
+      setExportingEligibility(false);
+    }
+  };
+
+  if (!loading && eligibilityError) {
+    return (
+      <div className="admin-page">
+        <StatePanel variant="error" title="Unable to load eligibility records" description={eligibilityError} actionLabel="Retry" onAction={() => fetchEligibility()} compact />
+      </div>
+    );
+  }
+
+  if (!loading && !eligibilityError && (!filters.department_id || !filters.course_id)) {
+    return (
+      <div className="admin-page">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+          <div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Exam Eligibility</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 3 }}>
+              Filter and manage exam eligibility overrides.
+            </p>
+          </div>
+        </div>
+
+        <div className="glass-card" style={{ padding: 18, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+            <select
+              className="input-field"
+              value={filters.department_id}
+              onChange={(e) => setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '', final_eligible: '' })}
+              disabled={isDepartmentAdmin}
+            >
+              <option value="">
+                {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+              </option>
+              {departments.map((d) => (
+                <option key={d._id} value={d._id}>{d.name}</option>
+              ))}
+            </select>
+            <select
+              className="input-field"
+              value={filters.course_id}
+              onChange={(e) => setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '', final_eligible: '' })}
+              disabled={!filters.department_id}
+            >
+              <option value="">Select Course...</option>
+              {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
+            </select>
+          </div>
+        </div>
+        <StatePanel 
+          variant="empty" 
+          title="Selection Required" 
+          description="Please select a department and course to view examination eligibility details." 
+          compact 
+        />
+      </div>
+    );
+  }
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: 'var(--bg-card)', color: 'var(--text-primary)', border: '1px solid var(--border-glass)' } }} />
+    <div className="admin-page">
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
         <div>
@@ -176,7 +452,10 @@ export default function ExamEligibility() {
             Filter and manage exam eligibility overrides.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'stretch' }}>
+          <button className="btn-secondary" onClick={handleExportEligibility} disabled={exportingEligibility || displayedRows.length === 0}>
+            <HiOutlineDownload size={16} /> {exportingEligibility ? 'Exporting...' : 'Export'}
+          </button>
           <div className="glass-card" style={{ padding: '10px 14px' }}>
             <p style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Total</p>
             <p style={{ fontSize: '1rem', fontWeight: 700 }}>{summary.total}</p>
@@ -192,8 +471,51 @@ export default function ExamEligibility() {
         </div>
       </div>
 
+      <div className="mobile-filters-toggle-wrap exam-eligibility-mobile-filters-toggle-wrap">
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-label={showMobileFilters ? 'Hide filters' : 'Show filters'}
+          aria-expanded={showMobileFilters}
+          onClick={() => setShowMobileFilters((prev) => !prev)}
+        >
+          <HiOutlineFilter size={18} />
+        </button>
+        <button
+          className="icon-btn mobile-filters-icon-btn"
+          type="button"
+          title="Options"
+          aria-label="Options"
+          onClick={() => setShowMobileOptions(true)}
+        >
+          <HiOutlineDotsHorizontal size={18} />
+        </button>
+      </div>
+
+      <div className="exam-eligibility-select-strip">
+        <label className="exam-eligibility-select-all-toggle">
+          <input
+            type="checkbox"
+            checked={allDisplayedSelected}
+            onChange={handleToggleSelectAllDisplayed}
+            disabled={displayedStudentIds.length === 0}
+            aria-label="Select all shown students"
+          />
+          <span>Select all shown</span>
+        </label>
+        <button
+          className="btn-secondary"
+          style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+          onClick={() => setSelectedStudentIds([])}
+          disabled={selectedStudentIds.length === 0}
+        >
+          Clear
+        </button>
+      </div>
+
       <div className="glass-card" style={{ padding: 18, marginBottom: 12 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+        <div className={`exam-eligibility-filter-grid ${showMobileFilters ? 'is-mobile-open' : ''}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
           <input
             className="input-field"
             placeholder="Search student, reg no, subject..."
@@ -203,16 +525,29 @@ export default function ExamEligibility() {
 
           <select
             className="input-field"
+            value={filters.department_id}
+            onChange={(e) => setFilters({ department_id: e.target.value, course_id: '', academic_session: '', semester: '', final_eligible: '' })}
+            disabled={isDepartmentAdmin}
+          >
+            <option value="">
+              {isDepartmentAdmin ? (departmentName || 'Department') : 'All Departments'}
+            </option>
+            {departments.map((d) => (
+              <option key={d._id} value={d._id}>{d.name}</option>
+            ))}
+          </select>
+
+          <select
+            className="input-field"
             value={filters.course_id}
-            onChange={(e) => setFilters({
-              ...filters,
-              course_id: e.target.value,
-              academic_session: '',
-              semester: '',
-            })}
+            onChange={(e) => {
+              setFilters({ ...filters, course_id: e.target.value, academic_session: '', semester: '' });
+              setSelectedStudentIds([]);
+            }}
+            disabled={!filters.department_id}
           >
             <option value="">All Courses</option>
-            {courses.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+            {activeCourses.map((c) => <option key={c._id} value={c._id}>{formatCourseName(c.name, { status: c.status })}</option>)}
           </select>
 
           <select className="input-field" value={filters.academic_session} onChange={(e) => setFilters({ ...filters, academic_session: e.target.value })}>
@@ -231,12 +566,57 @@ export default function ExamEligibility() {
             <option value="false">Ineligible</option>
           </select>
         </div>
+
+        <div className="exam-eligibility-inline-actions" style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Selected: {selectedStudentIds.length} / {displayedStudentIds.length}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn-primary"
+              style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+              onClick={handleBulkAllow}
+              disabled={bulkUpdating || selectedStudentIds.length === 0}
+            >
+              {bulkUpdating ? 'Applying...' : 'Bulk Allow for Examination'}
+            </button>
+            <button
+              className="btn-secondary"
+              style={{ padding: '6px 10px', fontSize: '0.72rem' }}
+              onClick={handleBulkBlock}
+              disabled={bulkUpdating || selectedStudentIds.length === 0}
+            >
+              {bulkUpdating ? 'Applying...' : 'Bulk Block for Examination'}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="glass-card table-desktop" style={{ overflowX: 'auto' }}>
+        {loading ? (
+          <StatePanel variant="loading" title="Loading eligibility records" description="Analyzing attendance and override status." compact />
+        ) : null}
+
+        {!loading && eligibilityError ? (
+          <StatePanel variant="error" title="Unable to load eligibility records" description={eligibilityError} actionLabel="Retry" onAction={() => fetchEligibility()} compact />
+        ) : null}
+
+        {!loading && !eligibilityError && displayedRows.length === 0 ? (
+          <StatePanel variant="empty" title="No eligibility records found" description="Try changing course, session, or semester filters." compact />
+        ) : null}
+
+        {!loading && !eligibilityError && displayedRows.length > 0 ? (
         <table className="data-table">
           <thead>
             <tr>
+              <th style={{ width: 36, textAlign: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={allDisplayedSelected}
+                  onChange={handleToggleSelectAllDisplayed}
+                  aria-label="Select all students"
+                />
+              </th>
               <th>Student</th>
               <th>Reg No</th>
               <th>Course / Session / Semester</th>
@@ -247,7 +627,15 @@ export default function ExamEligibility() {
           </thead>
           <tbody>
             {displayedRows.map((row) => (
-              <tr key={row.student_id}>
+              <tr key={row.user_id}>
+                <td style={{ textAlign: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedStudentIds.includes(String(row.user_id || '').trim())}
+                    onChange={() => toggleStudentSelection(row.user_id)}
+                    aria-label={`Select ${row.student_name || 'student'}`}
+                  />
+                </td>
                 <td>
                   <div>
                     <p style={{ fontWeight: 600, fontSize: '0.82rem' }}>{row.student_name}</p>
@@ -256,7 +644,7 @@ export default function ExamEligibility() {
                 </td>
                 <td>{row.reg_number || 'N/A'}</td>
                 <td>
-                  {(row.course_name || 'N/A')} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
+                  {formatCourseName(row.course_name || 'N/A', { isInactive: row.is_course_inactive, status: row.course_status })} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
                 </td>
                 <td>
                   {(row.overall_attendance_percentage ?? row.attendance_percentage ?? 0)}% ({row.overall_attended_classes ?? row.attended_classes ?? 0}/{row.overall_total_classes ?? row.classes_happened ?? 0})
@@ -283,15 +671,9 @@ export default function ExamEligibility() {
                 </td>
               </tr>
             ))}
-            {displayedRows.length === 0 && (
-              <tr>
-                <td colSpan="6" style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
-                  {loading ? 'Loading eligibility records...' : 'No eligibility records found.'}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+        ) : null}
       </div>
 
       <div className="mobile-card-list" style={{ marginTop: 10 }}>
@@ -300,7 +682,18 @@ export default function ExamEligibility() {
           const attended = row.overall_attended_classes ?? row.attended_classes ?? 0;
           const totalClasses = row.overall_total_classes ?? row.classes_happened ?? 0;
           return (
-            <div key={row.student_id} className="glass-card mobile-card">
+            <div key={row.user_id} className="glass-card mobile-card">
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedStudentIds.includes(String(row.user_id || '').trim())}
+                    onChange={() => toggleStudentSelection(row.user_id)}
+                    aria-label={`Select ${row.student_name || 'student'}`}
+                  />
+                  Select
+                </label>
+              </div>
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Student</span>
                 <div style={{ textAlign: 'right' }}>
@@ -315,7 +708,7 @@ export default function ExamEligibility() {
               <div className="mobile-card-row">
                 <span className="mobile-card-label">Course/Session/Sem</span>
                 <span style={{ fontSize: '0.8rem', textAlign: 'right' }}>
-                  {(row.course_name || 'N/A')} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
+                  {formatCourseName(row.course_name || 'N/A', { isInactive: row.is_course_inactive, status: row.course_status })} / {(row.academic_session || row.academic_year || 'N/A')} / {(row.student_semester || row.semester) ? `Semester ${row.student_semester || row.semester}` : 'N/A'}
                 </span>
               </div>
               <div className="mobile-card-row">
@@ -350,6 +743,44 @@ export default function ExamEligibility() {
           </div>
         )}
       </div>
-    </motion.div>
+
+      <Modal isOpen={showMobileOptions} onClose={() => setShowMobileOptions(false)} title="Options" width={420}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            className="btn-primary"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setShowMobileOptions(false);
+              handleBulkAllow();
+            }}
+            disabled={bulkUpdating || selectedStudentIds.length === 0}
+          >
+            {bulkUpdating ? 'Applying...' : 'Bulk Allow'}
+          </button>
+          <button
+            className="btn-secondary"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setShowMobileOptions(false);
+              handleBulkBlock();
+            }}
+            disabled={bulkUpdating || selectedStudentIds.length === 0}
+          >
+            {bulkUpdating ? 'Applying...' : 'Bulk Block'}
+          </button>
+          <button
+            className="btn-secondary"
+            style={{ justifyContent: 'flex-start' }}
+            onClick={() => {
+              setShowMobileOptions(false);
+              handleExportEligibility();
+            }}
+            disabled={exportingEligibility || displayedRows.length === 0}
+          >
+            <HiOutlineDownload size={16} /> {exportingEligibility ? 'Exporting...' : 'Export'}
+          </button>
+        </div>
+      </Modal>
+    </div>
   );
 }

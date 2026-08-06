@@ -1,0 +1,17 @@
+# Gitleaks ignore file
+# --------------------
+# We prefer using inline '# gitleaks:allow' comments for specific false positives (like test passwords).
+# Use this file only for path-level ignores or when inline comments are not possible.
+
+# Ignore common documentation files that contain placeholder keys
+README.md
+docs/**/*.md
+
+# Ignore test fixtures and scripts
+backend/tests/__init__.py
+backend/perf/run_performance_validation.py
+
+# Ignore local environment files (even if they are in .gitignore)
+**/.env
+**/.env.*
+!**/.env.example

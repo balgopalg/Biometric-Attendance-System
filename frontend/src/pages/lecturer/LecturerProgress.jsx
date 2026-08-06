@@ -4,15 +4,27 @@ import { motion } from 'framer-motion';
 import StatsCard from '../../components/ui/StatsCard';
 import { HiOutlineCalendar, HiOutlineChartBar, HiOutlineUsers } from 'react-icons/hi';
 import Modal from '../../components/ui/Modal';
+import StatePanel from '../../components/ui/StatePanel';
 import PinCommitModal from './PinCommitModal';
+import { formatCourseName } from '../../utils/courseDisplay';
+import { formatDateTimeIndia, getIndiaTimezoneOffsetMinutes } from '../../utils/dateTime';
+
+const TIMESTAMP_WITHOUT_TZ_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+function normalizeUtcTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  return TIMESTAMP_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
+}
 
 function formatDateTime(value) {
-  if (!value) return 'N/A';
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return 'N/A';
-  }
+  return formatDateTimeIndia(normalizeUtcTimestamp(value), { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function isRollbackOpenByTime(value) {
+  if (!value) return false;
+  const ms = new Date(normalizeUtcTimestamp(value)).getTime();
+  if (Number.isNaN(ms)) return false;
+  return ms > Date.now();
 }
 
 export default function LecturerProgress() {
@@ -23,16 +35,31 @@ export default function LecturerProgress() {
   const [showHistory, setShowHistory] = useState(false);
   const [showRecommitPin, setShowRecommitPin] = useState(false);
   const [adjustIds, setAdjustIds] = useState([]);
+  const [loadingProgress, setLoadingProgress] = useState(false);
+  const [progressError, setProgressError] = useState('');
 
   const fetchProgress = () => {
+    if (filters.from_date && filters.to_date && filters.from_date > filters.to_date) {
+      setData({ summary: {}, papers: [], per_paper: [], sessions: [] });
+      setProgressError('From date must be before or equal to To date.');
+      setLoadingProgress(false);
+      return;
+    }
+    setLoadingProgress(true);
+    setProgressError('');
     const params = {};
     if (filters.paper_id) params.paper_id = filters.paper_id;
     if (filters.from_date) params.from_date = filters.from_date;
     if (filters.to_date) params.to_date = filters.to_date;
+    params.tz_offset_minutes = getIndiaTimezoneOffsetMinutes();
 
     api.get('/lecturer/progress', { params })
       .then((r) => setData(r.data || { summary: {}, papers: [], per_paper: [], sessions: [] }))
-      .catch(() => setData({ summary: {}, papers: [], per_paper: [], sessions: [] }));
+      .catch((err) => {
+        setData({ summary: {}, papers: [], per_paper: [], sessions: [] });
+        setProgressError(err.response?.data?.error || 'Failed to load lecturer progress.');
+      })
+      .finally(() => setLoadingProgress(false));
   };
 
   useEffect(() => {
@@ -59,7 +86,7 @@ export default function LecturerProgress() {
     if (!sessionReview?.session_id) return;
     const res = await api.put(`/lecturer/session/${sessionReview.session_id}/adjust`, {
       pin,
-      student_ids: adjustIds,
+      user_ids: adjustIds,
     });
     setSessionReview(res.data.review);
     setShowRecommitPin(false);
@@ -72,8 +99,36 @@ export default function LecturerProgress() {
     return (sessionReview.candidates || []).filter((x) => !present.has(x.user_id));
   }, [sessionReview]);
 
+  if (loadingProgress) {
+    return (
+      <div className="lecturer-page">
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
+            Track classes taken and attendance per class within a selected date range.
+          </p>
+        </div>
+        <StatePanel variant="loading" title="Loading attendance history" description="Collecting subject summaries and class sessions." compact />
+      </div>
+    );
+  }
+
+  if (progressError) {
+    return (
+      <div className="lecturer-page">
+        <div style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
+            Track classes taken and attendance per class within a selected date range.
+          </p>
+        </div>
+        <StatePanel variant="error" title="Unable to load attendance history" description={progressError} actionLabel="Retry" onAction={fetchProgress} compact />
+      </div>
+    );
+  }
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div className="lecturer-page">
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Attendance History</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 3 }}>
@@ -81,15 +136,25 @@ export default function LecturerProgress() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-        <select className="input-field" value={filters.paper_id} onChange={(e) => setFilters({ ...filters, paper_id: e.target.value })}>
-          <option value="">All Papers</option>
-          {(data.papers || []).map((p) => (
-            <option key={p._id} value={p._id}>{p.name} ({p.code})</option>
-          ))}
-        </select>
-        <input className="input-field" type="date" value={filters.from_date} onChange={(e) => setFilters({ ...filters, from_date: e.target.value })} />
-        <input className="input-field" type="date" value={filters.to_date} onChange={(e) => setFilters({ ...filters, to_date: e.target.value })} />
+      {/* Filter Bar */}
+      <div className="glass-card" style={{ padding: 14, marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        <div>
+          <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>Paper</label>
+          <select className="input-field" value={filters.paper_id} onChange={(e) => setFilters({ ...filters, paper_id: e.target.value })}>
+            <option value="">All Papers</option>
+            {(data.papers || []).map((p) => (
+              <option key={p._id} value={p._id}>{p.name} ({p.code})</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>From Date</label>
+          <input className="input-field" type="date" value={filters.from_date} max={filters.to_date || undefined} onChange={(e) => setFilters({ ...filters, from_date: e.target.value })} />
+        </div>
+        <div>
+          <label style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 }}>To Date</label>
+          <input className="input-field" type="date" value={filters.to_date} min={filters.from_date || undefined} onChange={(e) => setFilters({ ...filters, to_date: e.target.value })} />
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 22 }}>
@@ -99,135 +164,142 @@ export default function LecturerProgress() {
       </div>
 
       <div className="glass-card" style={{ padding: 18, marginBottom: 16 }}>
-        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 10 }}>Per Subject Summary</h3>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Subject</th>
-                <th>Course</th>
-                <th>Year</th>
-                <th>Classes</th>
-                <th>Attendance Marks</th>
-                <th>Avg/Class</th>
-              </tr>
-            </thead>
-            <tbody>
-              {perPaperSorted.map((p) => (
-                <tr key={p.paper_id}>
-                  <td><span className="badge badge-info">{p.paper_code}</span> {p.paper_name}</td>
-                  <td>{p.course_name || 'N/A'}</td>
-                  <td>{p.academic_year || 'N/A'}</td>
-                  <td>{p.classes_taken}</td>
-                  <td>{p.attendance_marks}</td>
-                  <td>{p.avg_attendance_per_class}</td>
-                </tr>
-              ))}
-              {perPaperSorted.length === 0 && <tr><td colSpan="6" style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>No class data in selected filters.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 14 }}>Per Subject Summary</h3>
+        {perPaperSorted.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {perPaperSorted.map((p) => {
+              const total = p.attendance_marks || 0;
+              const classes = p.classes_taken || 0;
+              const avg = p.avg_attendance_per_class || 0;
+              const maxAvg = Math.max(...perPaperSorted.map(x => x.avg_attendance_per_class || 0), 1);
+              const barPct = maxAvg > 0 ? (avg / maxAvg) * 100 : 0;
+              return (
+                <div key={p.paper_id} style={{ padding: '12px 14px', borderRadius: 'var(--radius)', border: '1px solid var(--border-glass)', background: 'var(--bg-glass)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="badge badge-info">{p.paper_code}</span>
+                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{p.paper_name}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                      <span><b style={{ color: 'var(--text-primary)' }}>{classes}</b> classes</span>
+                      <span><b style={{ color: 'var(--accent-emerald)' }}>{total}</b> marks</span>
+                      <span>avg <b style={{ color: 'var(--text-primary)' }}>{avg}</b>/class</span>
+                    </div>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-card)', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${barPct}%`, borderRadius: 999, background: 'linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))', transition: 'width 0.4s ease' }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center', padding: 20 }}>No subject data in selected filters.</p>
+        )}
       </div>
 
       <div className="glass-card" style={{ padding: 18 }}>
-        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 10 }}>Class-wise Attendance</h3>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Class Time</th>
-                <th>Subject</th>
-                <th>Course</th>
-                <th>Year</th>
-                <th>Students (Attended/Total)</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data.sessions || []).map((s) => (
-                <tr key={`${s.session_id}-${s.paper_id}`}>
-                  <td>{formatDateTime(s.timestamp)}</td>
-                  <td><span className="badge badge-purple">{s.paper_code}</span> {s.paper_name}</td>
-                  <td>{s.course_name || 'N/A'}</td>
-                  <td>{s.academic_year || 'N/A'}</td>
-                  <td>{s.students_count} / {s.total_students ?? 0}</td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                      <button className="btn-secondary" style={{ padding: '6px 10px', fontSize: '0.72rem' }} onClick={() => openHistory(s)}>
-                        {s.editable ? 'Modify / View' : 'View History'}
-                      </button>
-                      {s.editable ? <span className="badge badge-warning">Rollback Open</span> : <span className="badge">Finalized</span>}
+        <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 14 }}>Class-wise Attendance</h3>
+        {(data.sessions || []).length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(data.sessions || []).map((s) => {
+              const rollbackOpen = isRollbackOpenByTime(s.rollback_until);
+              const attended = s.students_count || 0;
+              const total = s.total_students || 0;
+              const pct = total > 0 ? Math.round((attended / total) * 100) : 0;
+              return (
+                <div key={`${s.session_id}-${s.paper_id}`} style={{ padding: '12px 14px', borderRadius: 'var(--radius)', border: `1px solid ${rollbackOpen ? 'rgba(251,191,36,0.25)' : 'var(--border-glass)'}`, background: rollbackOpen ? 'rgba(251,191,36,0.04)' : 'var(--bg-glass)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <span className="badge badge-purple">{s.paper_code}</span>
+                      <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{s.paper_name}</span>
+                      {rollbackOpen ? <span className="badge badge-warning" style={{ fontSize: '0.65rem' }}>Rollback Open</span> : <span className="badge" style={{ fontSize: '0.65rem' }}>Finalized</span>}
                     </div>
-                  </td>
-                </tr>
-              ))}
-              {(data.sessions || []).length === 0 && <tr><td colSpan="6" style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>No class sessions found in selected date range.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+                    <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                      <span>{formatDateTime(s.timestamp)}</span>
+                      <span>·</span>
+                      <span>{formatCourseName(s.course_name || 'N/A', { isInactive: s.is_course_inactive, status: s.course_status })}</span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '1rem', fontWeight: 700, color: pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)' }}>{attended} / {total}</div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{pct}% attended</div>
+                    </div>
+                    <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.75rem', whiteSpace: 'nowrap' }} onClick={() => openHistory(s)}>
+                      {rollbackOpen ? 'Modify / View' : 'View'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center', padding: 24 }}>No sessions found in selected date range.</p>
+        )}
       </div>
 
-      <Modal isOpen={showHistory} onClose={() => setShowHistory(false)} title="Session Attendance History" width={760}>
+      <Modal isOpen={showHistory} onClose={() => setShowHistory(false)} title="Session Attendance" width={700}>
         {!sessionReview ? (
-          <p style={{ color: 'var(--text-muted)' }}>Loading attendance history...</p>
-        ) : (
-          <>
-            <div style={{ marginBottom: 10 }}>
-              <p style={{ fontSize: '0.82rem' }}><b>Subject:</b> {sessionReview.paper?.name || selectedSession?.paper_name} ({sessionReview.paper?.code || selectedSession?.paper_code})</p>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Rollback until: {formatDateTime(sessionReview.rollback_until)}
-                {sessionReview.editable ? ' (open)' : ' (closed)'}
-              </p>
-            </div>
+          <StatePanel variant="loading" title="Loading session" description="Fetching attendance records..." compact />
+        ) : (() => {
+          const rollbackOpen = isRollbackOpenByTime(sessionReview.rollback_until);
+          const presentCount = adjustIds.length;
+          const totalCount = (sessionReview.candidates || []).length;
+          return (
+            <>
+              <div style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
+                {[{ label: 'Subject', value: `${sessionReview.paper?.name || selectedSession?.paper_name} (${sessionReview.paper?.code || selectedSession?.paper_code})` },
+                  { label: 'Present', value: `${presentCount} / ${totalCount}`, accent: 'var(--accent-emerald)' },
+                  { label: 'Rollback', value: rollbackOpen ? 'Open' : 'Closed', accent: rollbackOpen ? 'var(--accent-amber)' : 'var(--accent-rose)' }].map(({ label, value, accent }) => (
+                  <div key={label}>
+                    <div style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{label}</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="glass-card" style={{ padding: 12 }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 8 }}>Present</h4>
-                <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8 }}>
-                  {(sessionReview.candidates || []).map((s) => {
-                    const checked = adjustIds.includes(s.user_id);
-                    return (
-                      <label key={s.user_id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', fontSize: '0.82rem' }}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={!sessionReview.editable}
-                          onChange={(e) => {
-                            const next = e.target.checked
-                              ? [...adjustIds, s.user_id]
-                              : adjustIds.filter((id) => id !== s.user_id);
-                            setAdjustIds(next);
-                          }}
-                        />
-                        {s.name} ({s.email})
-                      </label>
-                    );
-                  })}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                <div className="glass-card" style={{ padding: 12 }}>
+                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-emerald)', display: 'inline-block' }} /> Present ({presentCount})
+                  </h4>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {(sessionReview.candidates || []).map((s) => {
+                      const checked = adjustIds.includes(s.user_id);
+                      return (
+                        <label key={s.user_id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 'var(--radius)', background: checked ? 'rgba(16,185,129,0.06)' : 'transparent', fontSize: '0.8rem', cursor: rollbackOpen ? 'pointer' : 'default' }}>
+                          <input type="checkbox" checked={checked} disabled={!rollbackOpen}
+                            onChange={(e) => setAdjustIds(e.target.checked ? [...adjustIds, s.user_id] : adjustIds.filter((id) => id !== s.user_id))}
+                          />
+                          <span style={{ flex: 1 }}>{s.name}</span>
+                          {checked && <span className="badge badge-success" style={{ fontSize: '0.62rem' }}>✓</span>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="glass-card" style={{ padding: 12 }}>
+                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-rose)', display: 'inline-block' }} /> Absent ({absentStudents.length})
+                  </h4>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {absentStudents.length === 0 ? (
+                      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: 10 }}>No absentees 🎉</p>
+                    ) : absentStudents.map((s) => (
+                      <div key={s.user_id} style={{ padding: '6px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', borderRadius: 'var(--radius)' }}>{s.name}</div>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="glass-card" style={{ padding: 12 }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: 8 }}>Absent</h4>
-                <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid var(--border-glass)', borderRadius: 'var(--radius)', padding: 8 }}>
-                  {absentStudents.length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>No absentees.</p>
-                  ) : absentStudents.map((s) => (
-                    <div key={s.user_id} style={{ padding: '6px 4px', fontSize: '0.82rem' }}>
-                      {s.name} ({s.email})
-                    </div>
-                  ))}
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button className="btn-secondary" onClick={() => setShowHistory(false)}>Close</button>
+                <button className="btn-primary" disabled={!rollbackOpen} onClick={() => setShowRecommitPin(true)}>Modify &amp; Re-Commit</button>
               </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 12 }}>
-              <button className="btn-secondary" onClick={() => setShowHistory(false)}>Close</button>
-              <button className="btn-primary" disabled={!sessionReview.editable} onClick={() => setShowRecommitPin(true)}>
-                Modify & Re-Commit
-              </button>
-            </div>
-          </>
-        )}
+            </>
+          );
+        })()}
       </Modal>
 
       <PinCommitModal
@@ -240,6 +312,6 @@ export default function LecturerProgress() {
         confirmLabel="Confirm Re-Commit"
         loadingLabel="Re-committing..."
       />
-    </motion.div>
+    </div>
   );
 }

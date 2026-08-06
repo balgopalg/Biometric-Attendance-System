@@ -1,14 +1,60 @@
-Flask==3.1.0
-Flask-PyMongo==2.3.0
-Flask-JWT-Extended==4.7.1
-Flask-CORS==5.0.1
-pymongo==4.11.3
-bcrypt==4.2.1
-python-dotenv==1.0.1
-Pillow==11.1.0
-numpy==1.26.4
-scipy==1.14.1
-mediapipe==0.10.21
-keras-facenet==0.3.2
-tensorflow==2.16.2
-gunicorn==23.0.0
+# --- Web Framework & Core ────────────────────────────────────────────────────────
+# Web Framework
+Flask>=3.1.3                                # Core web server framework for API endpoints
+python-dotenv>=1.2.2                       # Loads environment variables from .env files
+
+# --- Database Integration ─────────────────────────────────────────────────────────
+# MongoDB Integration
+Flask-PyMongo>=2.3.0                       # Flask wrapper for MongoDB connection handling
+pymongo>=4.11.3                            # Core MongoDB driver for Python
+
+# --- Security & Authentication ────────────────────────────────────────────────────
+# Authentication & Authorization
+Flask-JWT-Extended>=4.7.1                  # JWT token generation, parsing, and management
+bcrypt>=4.2.1                              # Cryptographic hashing for securely storing passwords
+Flask-Limiter>=3.5.0                       # Rate limiting to prevent brute-force and DDoS attacks
+cryptography>=46.0.7                       # Encryption/decryption for securing biometric data
+
+# --- API Utilities ────────────────────────────────────────────────────────────────
+# HTTP & CORS
+Flask-CORS>=6.0.0                          # Cross-Origin Resource Sharing (CORS) for frontend communication
+
+# --- Computer Vision & Machine Learning ───────────────────────────────────────────
+# Image Processing
+opencv-python-headless>=4.11.0.86          # Core image processing library (headless version)
+numpy>=1.26.4                              # High-performance matrix math for CV operations
+scipy>=1.14.1                              # Scientific computing for advanced array operations
+imutils>=0.5.4                             # Convenience functions for image processing
+
+# Deep Learning & Face Recognition
+mediapipe>=0.10.21                         # Fast primary face detection via MediaPipe
+keras-facenet>=0.3.2                       # Pre-trained models for 512D face embeddings
+tensorflow>=2.16.2                         # Machine learning backend for keras-facenet
+
+# --- Document & File Processing ───────────────────────────────────────────────────
+# Image & Document Handling
+Pillow>=12.2.0                             # Standard Python image library for manipulations
+pytesseract>=0.3.13                        # Optical Character Recognition (OCR) utilities
+openpyxl>=3.1.5                            # Read/write Excel (.xlsx) files for data exports
+reportlab>=4.4.10                          # PDF generation for academic reports
+
+# --- Background Jobs & Caching ────────────────────────────────────────────────────
+# In-Memory Data Store
+redis>=5.2.1                               # In-memory data store for caching and queue management
+rq>=1.15.1                                 # Redis Queue library for background job processing
+
+# --- Observability, Logging & Production ──────────────────────────────────────────
+# Production Server & WSGI
+gunicorn>=23.0.0                           # Production-grade WSGI HTTP Server
+
+# Logging & Structured Output
+python-json-logger>=2.0.7                  # Formats logs in structured JSON for aggregation
+
+# Monitoring & Metrics
+prometheus-client>=0.19.0                  # Exposes application metrics for Prometheus scraping
+sentry-sdk>=2.8.0                          # Application error tracking and crash reporting
+
+# --- Communications ───────────────────────────────────────────────────────────────
+# Email Services
+yagmail>=0.15.293                          # Email client for OTPs, password recovery, notifications
+

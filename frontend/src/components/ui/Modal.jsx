@@ -30,6 +30,7 @@ export default function Modal({ isOpen, onClose, title, children, width = 500 })
           >
             {/* Panel */}
             <motion.div
+              className="modal-panel-mobile"
               initial={{ opacity: 0, scale: 0.92, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.92, y: 20 }}
@@ -38,7 +39,9 @@ export default function Modal({ isOpen, onClose, title, children, width = 500 })
                 width,
                 maxWidth: '90vw',
                 maxHeight: '85vh',
-                overflow: 'auto',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border-glass)',
                 borderRadius: 'var(--radius-lg)',
@@ -46,7 +49,7 @@ export default function Modal({ isOpen, onClose, title, children, width = 500 })
                 pointerEvents: 'auto',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexShrink: 0 }}>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>{title}</h3>
                 <button
                   onClick={onClose}
@@ -60,7 +63,9 @@ export default function Modal({ isOpen, onClose, title, children, width = 500 })
                   <HiX size={16} />
                 </button>
               </div>
-              {children}
+              <div style={{ overflowY: 'auto', minHeight: 0, paddingRight: 4 }}>
+                {children}
+              </div>
             </motion.div>
           </div>
         </>

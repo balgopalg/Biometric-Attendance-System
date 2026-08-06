@@ -1,9 +1,18 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, '.', '')
+  const apiProxyTarget = env.VITE_API_PROXY_URL
+
+  if (mode === 'development' && !apiProxyTarget) {
+    throw new Error('VITE_API_PROXY_URL must be set when running the dev server.')
+  }
+
+  return {
+    plugins: [react(), tailwindcss(), basicSsl()],
   build: {
     rollupOptions: {
       output: {
@@ -22,9 +31,10 @@ export default defineConfig({
       },
     },
   },
-  server: {
+  server: apiProxyTarget ? {
     proxy: {
-      '/api': 'http://localhost:5000',
+      '/api': apiProxyTarget,
     },
-  },
+  } : {},
+  }
 })

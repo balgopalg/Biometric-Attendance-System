@@ -1,69 +1,111 @@
-import { createContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../api/axios';
 
 const AuthContext = createContext(null);
 
+const getCachedUser = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const cached = window.sessionStorage.getItem('user');
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+};
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user');
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [token, setToken] = useState(() => localStorage.getItem('token'));
+  const [user, setUser] = useState(getCachedUser);
   const [loading, setLoading] = useState(true);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
+  const persistUser = useCallback((u) => {
+    setUser(u);
+    try {
+      if (u) {
+        // Cache non-sensitive display data + role to prevent redirect flash.
+        // Full user (including department_id) is always re-fetched from
+        // /auth/me on page load and validated server-side via JWT.
+        const safeCache = { name: u.name, email: u.email, role: u.role };
+        window.sessionStorage.setItem('user', JSON.stringify(safeCache));
+      } else {
+        window.sessionStorage.removeItem('user');
+      }
+    } catch {
+      // sessionStorage unavailable
+    }
   }, []);
 
   useEffect(() => {
-    if (token) {
-      api.get('/auth/me')
-        .then((res) => {
-          setUser(res.data);
-          localStorage.setItem('user', JSON.stringify(res.data));
-        })
-        .catch(() => {
-          logout();
-        })
-        .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
-  }, [token, logout]);
+    api
+      .get('/auth/me')
+      .then((res) => {
+        persistUser(res.data);
+      })
+      .catch(() => {
+        persistUser(null);
+      })
+      .finally(() => setLoading(false));
+  }, [persistUser]);
 
-  const login = async (email, password) => {
-    const res = await api.post('/auth/login', { email, password });
-    const { token: jwt, user: userData } = res.data;
-    localStorage.setItem('token', jwt);
-    localStorage.setItem('user', JSON.stringify(userData));
-    setToken(jwt);
-    setUser(userData);
-    return userData;
-  };
-
-  const clearMustChangePassword = () => {
-    setUser((prev) => {
-      if (!prev) return prev;
-      const updated = { ...prev, must_change_password: false };
-      localStorage.setItem('user', JSON.stringify(updated));
-      return updated;
-    });
-  };
-
-  const isAuthenticated = !!token && !!user;
-  const mustChangePassword = user?.must_change_password || false;
-
-  return (
-    <AuthContext.Provider value={{
-      user, token, loading, login, logout, isAuthenticated,
-      mustChangePassword, clearMustChangePassword,
-    }}>
-      {children}
-    </AuthContext.Provider>
+  const login = useCallback(
+    async (email, password) => {
+      const res = await api.post('/auth/login', { email, password });
+      persistUser(res.data.user);
+      return res.data.user;
+    },
+    [persistUser]
   );
+
+  const logout = useCallback(async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // ignore
+    }
+    persistUser(null);
+  }, [persistUser]);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const res = await api.get('/auth/me');
+      persistUser(res.data);
+      return res.data;
+    } catch {
+      persistUser(null);
+      return null;
+    }
+  }, [persistUser]);
+
+  // ── Role helpers ──────────────────────────────────────────────────────
+  // Normalize legacy "admin" → "super_admin" for backward compatibility
+  const normalizedRole = user?.role === 'admin' ? 'super_admin' : user?.role;
+  const isSuperAdmin = normalizedRole === 'super_admin';
+  const isDepartmentAdmin = normalizedRole === 'department_admin';
+  const isAnyAdmin = isSuperAdmin || isDepartmentAdmin;
+  const isLecturer = normalizedRole === 'lecturer';
+  const isStudent = normalizedRole === 'student';
+  const departmentId = user?.department_id || null;
+  const departmentName = user?.department_name || user?.department || '';
+
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      login,
+      logout,
+      refreshUser,
+      // Role helpers
+      isSuperAdmin,
+      isDepartmentAdmin,
+      isAnyAdmin,
+      isLecturer,
+      isStudent,
+      departmentId,
+      departmentName,
+    }),
+    [user, loading, login, logout, refreshUser, isSuperAdmin, isDepartmentAdmin, isAnyAdmin, isLecturer, isStudent, departmentId, departmentName]
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export default AuthContext;

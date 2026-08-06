@@ -1,0 +1,706 @@
+openapi: 3.0.3
+info:
+  title: Biometric Face Attendance API
+  version: 1.1.0
+  description: |
+    API specification for the Biometric Face Attendance Management System.
+    This specification focuses on the highest-impact operational workflows
+    used by Admin, Lecturer, Student, and Operations users.
+  x-last-reviewed: 2026-04-14
+
+servers:
+  - url: http://localhost:5000
+    description: Local backend server
+
+tags:
+  - name: Auth
+  - name: Admin
+  - name: Lecturer
+  - name: Student
+  - name: Recognition
+
+components:
+  securitySchemes:
+    jwtCookie:
+      type: apiKey
+      in: cookie
+      name: access_token_cookie
+      description: JWT access token issued by /api/auth/login
+    csrfHeader:
+      type: apiKey
+      in: header
+      name: X-CSRF-TOKEN
+      description: Required on mutation endpoints when CSRF protection is enabled
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required: [email, password]
+      example:
+        email: admin@system.com
+        password: admin123
+
+    UserSummary:
+      type: object
+      properties:
+        _id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [admin, lecturer, student]
+        department:
+          type: string
+        must_change_password:
+          type: boolean
+
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/UserSummary'
+
+    ChangePasswordRequest:
+      type: object
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+          description: At least 12 chars, uppercase, lowercase, number, special char
+        confirm_password:
+          type: string
+      required: [current_password, new_password, confirm_password]
+      example:
+        current_password: admin123
+        new_password: NewSecurePass123!
+        confirm_password: NewSecurePass123!
+
+    CreateStudentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        course_id:
+          type: string
+        department:
+          type: string
+        mobile_no:
+          type: string
+        reg_number:
+          type: string
+        enrolled_papers:
+          type: array
+          items:
+            type: string
+      required: [name, email, course_id]
+      example:
+        name: Alice Student
+        email: alice@student.com
+        course_id: 69da6f26cd4bb4ef527e972b
+        department: Computing
+
+    BulkPromoteRequest:
+      type: object
+      properties:
+        student_ids:
+          type: array
+          items:
+            type: string
+        from_semester:
+          type: integer
+          minimum: 1
+      required: [student_ids]
+      example:
+        student_ids:
+          - 69da6f37cd4bb4ef527e972d
+        from_semester: 1
+
+    FaceEnrollRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+        photo:
+          type: string
+          description: Base64 image payload (data URL)
+        dataset_photos:
+          type: array
+          items:
+            type: string
+            description: Base64 image payload (data URL)
+      required: [user_id, photo]
+
+    StartSessionRequest:
+      type: object
+      properties:
+        paper_id:
+          type: string
+      required: [paper_id]
+
+    RecognizeFrameRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        frame:
+          type: string
+          description: Base64 frame payload (data URL)
+      required: [session_id, frame]
+
+    CommitSessionRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+      required: [session_id, pin]
+
+    AdjustSessionRequest:
+      type: object
+      properties:
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+        student_ids:
+          type: array
+          items:
+            type: string
+      required: [pin, student_ids]
+
+security:
+  - jwtCookie: []
+
+paths:
+  /api/auth/health:
+    get:
+      tags: [Auth]
+      summary: Health and index check
+      security: []
+      responses:
+        '200':
+          description: Health response
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate user and issue JWT cookie
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Invalid email format or missing fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Invalid credentials
+        '429':
+          description: Rate limit or lockout triggered
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Clear JWT cookie
+      responses:
+        '200':
+          description: Logged out
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSummary'
+
+  /api/auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change current user password
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password changed
+        '400':
+          description: Validation failure
+        '429':
+          description: Rate limited
+
+  /api/admin/students:
+    get:
+      tags: [Admin]
+      summary: List students (filterable, paginated)
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: course_id
+          schema:
+            type: string
+        - in: query
+          name: paper_id
+          schema:
+            type: string
+        - in: query
+          name: academic_session
+          schema:
+            type: string
+        - in: query
+          name: semester
+          schema:
+            type: string
+        - in: query
+          name: include_inactive
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Student list
+    post:
+      tags: [Admin]
+      summary: Create student and profile
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStudentRequest'
+      responses:
+        '201':
+          description: Student created
+        '400':
+          description: Missing required fields
+        '404':
+          description: Course not found
+        '409':
+          description: Duplicate email or inactive course
+
+  /api/admin/students/bulk-promote:
+    post:
+      tags: [Admin]
+      summary: Promote selected students to next semester
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkPromoteRequest'
+      responses:
+        '200':
+          description: Promotion summary
+        '400':
+          description: student_ids missing
+
+  /api/admin/students/enroll:
+    post:
+      tags: [Admin]
+      summary: Enroll student face embedding from base64 photo
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FaceEnrollRequest'
+      responses:
+        '200':
+          description: Enrollment successful
+        '400':
+          description: Missing fields or no face detected
+        '404':
+          description: Student not found
+
+  /api/admin/papers/bulk-assign:
+    post:
+      tags: [Admin]
+      summary: Assign one paper to many students
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                paper_id:
+                  type: string
+                student_ids:
+                  type: array
+                  items:
+                    type: string
+              required: [paper_id, student_ids]
+              example:
+                paper_id: 69da7292cd4bb4ef527e9735
+                student_ids:
+                  - 69da6f37cd4bb4ef527e972d
+      responses:
+        '200':
+          description: Assignment completed
+
+  /api/admin/attendance-matrix:
+    get:
+      tags: [Admin]
+      summary: Get attendance matrix for filtered cohort
+      parameters:
+        - in: query
+          name: course_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: academic_session
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: semester
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Matrix payload
+
+  /api/admin/attendance-matrix/export:
+    get:
+      tags: [Admin]
+      summary: Export attendance matrix as XLSX
+      responses:
+        '200':
+          description: XLSX binary
+
+  /api/admin/attendance-matrix/export-csv:
+    get:
+      tags: [Admin]
+      summary: Export attendance matrix as CSV
+      responses:
+        '200':
+          description: CSV binary
+
+  /api/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Get audit trail entries
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Paginated audit logs
+
+  /api/admin/audit-logs/{log_id}/rollback:
+    post:
+      tags: [Admin]
+      summary: Execute rollback for rollback-eligible audit action
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: log_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rollback completed
+        '400':
+          description: Not rollback-eligible
+        '404':
+          description: Log not found
+
+  /api/admin/jobs/metrics:
+    get:
+      tags: [Admin]
+      summary: Queue depth and dead-letter metrics
+      responses:
+        '200':
+          description: Queue metrics
+
+  /api/admin/jobs/dead-letter:
+    get:
+      tags: [Admin]
+      summary: List dead-letter jobs
+      responses:
+        '200':
+          description: Dead-letter jobs list
+
+  /api/admin/jobs/{job_id}/replay:
+    post:
+      tags: [Admin]
+      summary: Replay one dead-letter job
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Replay queued
+
+  /api/lecturer/session/start:
+    post:
+      tags: [Lecturer]
+      summary: Start attendance session for assigned paper
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartSessionRequest'
+      responses:
+        '200':
+          description: Session started
+        '403':
+          description: Lecturer not assigned to paper
+        '409':
+          description: Paper course inactive
+
+  /api/lecturer/session/recognize:
+    post:
+      tags: [Lecturer]
+      summary: Recognize faces from a live frame payload
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecognizeFrameRequest'
+      responses:
+        '200':
+          description: Recognition result
+
+  /api/lecturer/session/recognize-image:
+    post:
+      tags: [Lecturer]
+      summary: Recognize faces from uploaded classroom image
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                image:
+                  type: string
+                  format: binary
+              required: [session_id, image]
+      responses:
+        '200':
+          description: Recognition result
+
+  /api/lecturer/session/commit:
+    post:
+      tags: [Lecturer]
+      summary: Commit attendance with PIN confirmation
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitSessionRequest'
+      responses:
+        '200':
+          description: Attendance committed
+        '403':
+          description: Invalid PIN
+
+  /api/lecturer/session/{session_id}/review:
+    get:
+      tags: [Lecturer]
+      summary: Review committed session during rollback window
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session review payload
+
+  /api/lecturer/session/{session_id}/adjust:
+    put:
+      tags: [Lecturer]
+      summary: Re-commit corrected attendance within rollback window
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdjustSessionRequest'
+      responses:
+        '200':
+          description: Attendance adjusted and committed
+
+  /api/lecturer/session/stop:
+    post:
+      tags: [Lecturer]
+      summary: Stop active session without commit
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+              required: [session_id]
+      responses:
+        '200':
+          description: Session stopped
+
+  /api/student/profile:
+    get:
+      tags: [Student]
+      summary: Get student profile, course, and subject assignments
+      responses:
+        '200':
+          description: Student profile payload
+
+  /api/student/attendance:
+    get:
+      tags: [Student]
+      summary: Attendance summary per paper
+      responses:
+        '200':
+          description: Attendance summaries
+
+  /api/student/predictions:
+    get:
+      tags: [Student]
+      summary: Classes needed and safe bunks prediction
+      responses:
+        '200':
+          description: Prediction summaries
+
+  /api/student/exam-eligibility:
+    get:
+      tags: [Student]
+      summary: Eligibility status per paper
+      responses:
+        '200':
+          description: Eligibility summaries
+
+  /api/recognition/detect:
+    post:
+      tags: [Recognition]
+      summary: Face detection utility endpoint
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: Face detection response
+
+  /api/recognition/identify:
+    post:
+      tags: [Recognition]
+      summary: Face identification utility endpoint
+      security:
+        - jwtCookie: []
+          csrfHeader: []
+      responses:
+        '200':
+          description: Identification response

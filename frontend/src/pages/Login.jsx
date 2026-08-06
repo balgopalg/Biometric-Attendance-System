@@ -1,28 +1,66 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useTheme } from '../context/ThemeContext';
 import { motion } from 'framer-motion';
-import toast, { Toaster } from 'react-hot-toast';
-import { HiOutlineLockClosed, HiOutlineMail } from 'react-icons/hi';
+import toast from 'react-hot-toast';
+import { HiOutlineLockClosed, HiOutlineMail, HiOutlineEye, HiOutlineEyeOff, HiOutlineSun, HiOutlineMoon } from 'react-icons/hi';
+import { formatDateTimeIndia } from '../utils/dateTime';
+
+const LOCKOUT_WITHOUT_TZ_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/;
+
+function normalizeUtcLockoutTimestamp(value) {
+  if (typeof value !== 'string') return value;
+  return LOCKOUT_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
+}
+
+function formatRemainingLockoutTime(lockoutUntil) {
+  const expiry = new Date(lockoutUntil);
+  if (Number.isNaN(expiry.getTime())) return '';
+  const remainingMs = expiry.getTime() - Date.now();
+  if (remainingMs <= 0) return 'a few moments';
+
+  const totalMinutes = Math.ceil(remainingMs / 60000);
+  if (totalMinutes < 60) return `${totalMinutes} minute${totalMinutes === 1 ? '' : 's'}`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours} hour${hours === 1 ? '' : 's'}`;
+  return `${hours} hour${hours === 1 ? '' : 's'} ${minutes} minute${minutes === 1 ? '' : 's'}`;
+}
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     if (!email || !password) return toast.error('Please fill in all fields');
     setLoading(true);
     try {
       const user = await login(email, password);
-      toast.success(`Welcome, ${user.name}!`);
-      const dest = user.role === 'admin' ? '/admin' : user.role === 'lecturer' ? '/lecturer' : '/student';
-      navigate(dest);
+      if (user.must_change_password) {
+        navigate('/change-password', { replace: true });
+        return;
+      }
+      const dest = ['admin', 'super_admin', 'department_admin'].includes(user.role) ? '/admin' : user.role === 'lecturer' ? '/lecturer' : '/student';
+      navigate(dest, {
+        replace: true,
+        state: { showWelcome: true, welcomeToken: `${Date.now()}-${Math.random().toString(36).slice(2)}` },
+      });
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Login failed');
+      const lockoutUntil = err.response?.data?.lockout_until;
+      const normalizedLockoutUntil = normalizeUtcLockoutTimestamp(lockoutUntil);
+      const message = lockoutUntil
+        ? `Your account is locked until ${formatDateTimeIndia(normalizedLockoutUntil, { dateStyle: 'short', timeStyle: 'medium' })} local time. You can login in ${formatRemainingLockoutTime(normalizedLockoutUntil)}.`
+        : err.response?.data?.error || 'Login failed';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -33,9 +71,33 @@ export default function Login() {
       minHeight: '100vh',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'var(--bg-primary)',
+      padding: '20px 16px',
       position: 'relative', overflow: 'hidden',
     }}>
-      <Toaster position="top-right" toastOptions={{ style: { background: '#1e293b', color: '#f1f5f9', border: '1px solid rgba(255,255,255,0.08)' } }} />
+      <button
+        type="button"
+        onClick={toggleTheme}
+        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        style={{
+          position: 'absolute',
+          top: 18,
+          right: 18,
+          width: 40,
+          height: 40,
+          borderRadius: '50%',
+          background: 'var(--bg-glass)',
+          border: '1px solid var(--border-glass)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          color: 'var(--text-secondary)',
+          zIndex: 2,
+        }}
+      >
+        {theme === 'dark' ? <HiOutlineSun size={18} /> : <HiOutlineMoon size={18} />}
+      </button>
 
       {/* Background gradient orbs */}
       <div style={{
@@ -49,12 +111,10 @@ export default function Login() {
         bottom: -80, left: -80, pointerEvents: 'none',
       }} />
 
-      <motion.div
-        initial={{ opacity: 0, y: 30 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
+      <div
+        className="login-card"
         style={{
-          width: 420, padding: 40,
+          width: '100%', maxWidth: 420, padding: '40px 36px',
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-glass)',
           borderRadius: 'var(--radius-xl)',
@@ -63,18 +123,54 @@ export default function Login() {
       >
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 16,
-            background: 'var(--gradient-primary)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            marginBottom: 16,
-          }}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-              <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
-              <circle cx="12" cy="10" r="3" />
-              <path d="M7 16.5c0-1.4 2.2-2.5 5-2.5s5 1.1 5 2.5" />
-            </svg>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.85, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.45, delay: 0.05, ease: 'easeOut' }}
+            style={{
+              position: 'relative',
+              width: 70,
+              height: 70,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16,
+            }}
+          >
+            <motion.div
+              animate={{ scale: [1, 1.08, 1], opacity: [0.45, 0.22, 0.45] }}
+              transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: 20,
+                background: 'radial-gradient(circle at 30% 30%, rgba(139,92,246,0.45), rgba(6,182,212,0.18) 60%, transparent 85%)',
+                filter: 'blur(2px)',
+              }}
+            />
+
+            <div style={{
+              width: 58,
+              height: 58,
+              borderRadius: 18,
+              background: 'linear-gradient(145deg, rgba(139,92,246,0.95), rgba(6,182,212,0.95))',
+              border: '1px solid rgba(255,255,255,0.35)',
+              boxShadow: '0 12px 28px rgba(6,182,212,0.25), inset 0 1px 0 rgba(255,255,255,0.25)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              zIndex: 1,
+            }}>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="5" />
+                <circle cx="12" cy="10" r="2.7" />
+                <path d="M7.6 16.4c1-1.8 2.6-2.8 4.4-2.8s3.4 1 4.4 2.8" />
+                <path d="M8.2 7.4h.01M15.8 7.4h.01" />
+              </svg>
+            </div>
+          </motion.div>
+
           <h1 style={{ fontSize: '1.5rem', fontWeight: 800 }} className="gradient-text">FaceAttend</h1>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 6 }}>
             Biometric Attendance Management System
@@ -83,7 +179,7 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Email</label>
+            <label htmlFor="login-email" style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Email</label>
             <div style={{ position: 'relative' }}>
               <HiOutlineMail size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
@@ -98,32 +194,79 @@ export default function Login() {
             </div>
           </div>
           <div>
-            <label style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Password</label>
+            <label htmlFor="login-password" style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6, display: 'block' }}>Password</label>
             <div style={{ position: 'relative' }}>
               <HiOutlineLockClosed size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="input-field"
-                style={{ paddingLeft: 36 }}
+                style={{ paddingLeft: 36, paddingRight: 44 }}
                 id="login-password"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                style={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 28,
+                  height: 28,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                {showPassword ? <HiOutlineEyeOff size={18} /> : <HiOutlineEye size={18} />}
+              </button>
             </div>
           </div>
-          <button type="submit" className="btn-primary" disabled={loading}
-            style={{ width: '100%', justifyContent: 'center', padding: '12px 24px', marginTop: 8 }}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: -4 }}>
+            <button
+              type="button"
+              onClick={() => navigate('/forgot-password')}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--accent-cyan)',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Forgot password?
+            </button>
+          </div>
+          <button type="submit" disabled={loading}
+            style={{
+              width: '100%',
+              padding: '11px 16px',
+              marginTop: 8,
+              borderRadius: 10,
+              border: '1px solid rgba(59,130,246,0.5)',
+              background: '#2563eb',
+              color: '#ffffff',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.7 : 1,
+            }}
             id="login-submit"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
-
-        <p style={{ textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 24 }}>
-          Default admin: admin@system.com / admin123
-        </p>
-      </motion.div>
+      </div>
     </div>
   );
 }

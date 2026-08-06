@@ -1,0 +1,122 @@
+services:
+  mongo:
+    image: mongo:7.0
+    pull_policy: if_not_present
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:?MONGO_PASS must be set}
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    pull_policy: if_not_present
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    image: finalbhaiauhebani-backend:latest
+    pull_policy: if_not_present
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${BACKEND_ENV_FILE:-./backend/.env.example}
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "0"
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:?MONGO_PASS must be set}@mongo:27017/biometric_attendance?authSource=admin
+      # Database isolation for specific features
+      MONGO_DB_AUTH: biometric_auth
+      MONGO_DB_ACADEMIC: biometric_academic
+      MONGO_DB_ATTENDANCE: biometric_attendance_ops
+      MONGO_DB_AUDIT: biometric_audit
+      # Distributed Rate Limiting
+      RATELIMIT_ENABLED: "1"
+      RATELIMIT_STORAGE_URI: redis://redis:6379/1
+      # Distributed Job Queue
+      TASK_QUEUE_ENABLED: "1"
+      TASK_QUEUE_REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    ports:
+      - "5000:5000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_dataset:/app/dataset
+      - backend_trainer:/app/trainer
+      - backend_backups:/app/backups
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/auth/health', timeout=5)"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    image: finalbhaiauhebani-backend:latest
+    pull_policy: if_not_present
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    env_file:
+      - ${BACKEND_ENV_FILE:-./backend/.env.example}
+    environment:
+      FLASK_ENV: production
+      FLASK_DEBUG: "0"
+      MONGO_URI: mongodb://${MONGO_USER:-admin}:${MONGO_PASS:?MONGO_PASS must be set}@mongo:27017/biometric_attendance?authSource=admin
+      MONGO_DB_AUTH: biometric_auth
+      MONGO_DB_ACADEMIC: biometric_academic
+      MONGO_DB_ATTENDANCE: biometric_attendance_ops
+      MONGO_DB_AUDIT: biometric_audit
+      TASK_QUEUE_ENABLED: "1"
+      TASK_QUEUE_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_dataset:/app/dataset
+      - backend_trainer:/app/trainer
+      - backend_backups:/app/backups
+
+  frontend:
+    image: finalbhaiauhebani-frontend:latest
+    pull_policy: if_not_present
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  backend_uploads:
+  backend_dataset:
+  backend_trainer:
+  backend_backups:
