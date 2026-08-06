@@ -31,4 +31,4 @@ memory-profiler>=0.61.0            # Memory profiling tool
 
 # Utilities
 ipython>=8.0.0                     # Enhanced interactive shell
-jupyter>=1.0.0                     # Jupyter notebook support
+jupyter>=1.1.1                     # Jupyter notebook support
