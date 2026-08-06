@@ -30,5 +30,5 @@ py-spy>=0.3.14                     # Sampling profiler for Python
 memory-profiler>=0.61.0            # Memory profiling tool
 
 # Utilities
-ipython>=8.0.0                     # Enhanced interactive shell
+ipython>=9.16.1                     # Enhanced interactive shell
 jupyter>=1.0.0                     # Jupyter notebook support
