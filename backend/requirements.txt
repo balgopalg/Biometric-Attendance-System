@@ -17,7 +17,7 @@ cryptography>=46.0.7                       # Encryption/decryption for securing 
 
 # --- API Utilities ────────────────────────────────────────────────────────────────
 # HTTP & CORS
-Flask-CORS>=6.0.0                          # Cross-Origin Resource Sharing (CORS) for frontend communication
+Flask-CORS>=6.0.5                          # Cross-Origin Resource Sharing (CORS) for frontend communication
 
 # --- Computer Vision & Machine Learning ───────────────────────────────────────────
 # Image Processing
