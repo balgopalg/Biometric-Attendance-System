@@ -6,7 +6,7 @@ python-dotenv>=1.2.2                       # Loads environment variables from .e
 # --- Database Integration ─────────────────────────────────────────────────────────
 # MongoDB Integration
 Flask-PyMongo>=2.3.0                       # Flask wrapper for MongoDB connection handling
-pymongo>=4.11.3                            # Core MongoDB driver for Python
+pymongo>=4.17.0                            # Core MongoDB driver for Python
 
 # --- Security & Authentication ────────────────────────────────────────────────────
 # Authentication & Authorization
