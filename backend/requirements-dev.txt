@@ -23,7 +23,7 @@ watchdog[watchmedo]>=3.0.0         # CLI tool for watchdog
 
 # Documentation
 sphinx>=6.0.0                       # Documentation generator
-sphinx-rtd-theme>=1.2.0            # ReadTheDocs theme for Sphinx
+sphinx-rtd-theme>=3.1.0            # ReadTheDocs theme for Sphinx
 
 # Performance & Profiling
 py-spy>=0.3.14                     # Sampling profiler for Python
