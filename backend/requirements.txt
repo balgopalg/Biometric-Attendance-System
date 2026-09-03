@@ -41,7 +41,7 @@ reportlab>=4.4.10                          # PDF generation for academic reports
 # --- Background Jobs & Caching ────────────────────────────────────────────────────
 # In-Memory Data Store
 redis>=5.2.1                               # In-memory data store for caching and queue management
-rq>=1.15.1                                 # Redis Queue library for background job processing
+rq>=2.12.0                                 # Redis Queue library for background job processing
 
 # --- Observability, Logging & Production ──────────────────────────────────────────
 # Production Server & WSGI
