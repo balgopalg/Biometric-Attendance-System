@@ -3,9 +3,9 @@ import api from '../../api/axios';
 import { useAuth } from '../../hooks/useAuth';
 import StatePanel from '../../components/ui/StatePanel';
 import toast from 'react-hot-toast';
-import { motion } from 'framer-motion';
 import { HiOutlineUserGroup, HiOutlinePlus, HiOutlinePencil, HiOutlineTrash, HiOutlineKey } from 'react-icons/hi';
 import Modal from '../../components/ui/Modal';
+import CredentialsModal from './students/CredentialsModal';
 
 export default function ManageDepartmentAdmins() {
   const { isSuperAdmin } = useAuth();
@@ -17,7 +17,8 @@ export default function ManageDepartmentAdmins() {
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ name: '', email: '', department_id: '', initial_password: '' });
   const [submitting, setSubmitting] = useState(false);
-  const [tempPassInfo, setTempPassInfo] = useState(null);
+  const [showCreds, setShowCreds] = useState(false);
+  const [createdCreds, setCreatedCreds] = useState(null);
 
   const fetchData = () => {
     setLoading(true);
@@ -40,7 +41,6 @@ export default function ManageDepartmentAdmins() {
     setForm({ name: '', email: '', department_id: '', initial_password: '' });
     setEditId(null);
     setShowForm(false);
-    setTempPassInfo(null);
   };
 
   const handleEdit = (admin) => {
@@ -73,10 +73,14 @@ export default function ManageDepartmentAdmins() {
         }
         const res = await api.post('/admin/department-admins', form);
         toast.success('Department admin created');
-        setTempPassInfo({
+        setCreatedCreds({
+          entityLabel: 'Department Admin',
+          identityLabel: 'Name:',
+          identityValue: form.name,
           email: form.email,
-          password: res.data?.temp_password || form.initial_password || '(auto-generated)',
+          temp_password: res.data?.temp_password || form.initial_password || '(auto-generated)',
         });
+        setShowCreds(true);
         setForm({ name: '', email: '', department_id: '', initial_password: '' });
         setEditId(null);
         setShowForm(false);
@@ -104,7 +108,15 @@ export default function ManageDepartmentAdmins() {
     if (!window.confirm(`Reset password for ${admin.email}?`)) return;
     try {
       const res = await api.post(`/admin/department-admins/${admin._id}/reset-password`);
-      setTempPassInfo({ email: admin.email, password: res.data?.temp_password || '(generated)' });
+      setCreatedCreds({
+        entityLabel: 'Department Admin',
+        isReset: true,
+        identityLabel: 'Name:',
+        identityValue: admin.name,
+        email: admin.email,
+        temp_password: res.data?.temp_password || '(generated)',
+      });
+      setShowCreds(true);
       toast.success('Password reset');
     } catch (err) {
       toast.error(err.response?.data?.error || 'Reset failed');
@@ -136,18 +148,6 @@ export default function ManageDepartmentAdmins() {
           <HiOutlinePlus size={16} /> New Dept. Admin
         </button>
       </div>
-
-      {/* Temp Password Banner */}
-      {tempPassInfo && (
-        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ padding: 16, marginBottom: 16, borderLeft: '4px solid var(--accent-cyan)' }}>
-          <p style={{ fontSize: '0.82rem', fontWeight: 600, marginBottom: 6 }}>🔑 Temporary Credentials</p>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Email: <strong>{tempPassInfo.email}</strong>&nbsp;&nbsp;|&nbsp;&nbsp;
-            Password: <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: 4 }}>{tempPassInfo.password}</code>
-          </p>
-          <button className="btn-secondary" style={{ marginTop: 8, padding: '4px 12px', fontSize: '0.75rem' }} onClick={() => setTempPassInfo(null)}>Dismiss</button>
-        </motion.div>
-      )}
 
       {/* Create / Edit Form */}
       <Modal isOpen={showForm} onClose={resetForm} title={editId ? 'Edit Department Admin' : 'New Department Admin'} width={500}>
@@ -230,6 +230,18 @@ export default function ManageDepartmentAdmins() {
           </table>
         </div>
       )}
+
+      <CredentialsModal
+        isOpen={showCreds}
+        onClose={() => setShowCreds(false)}
+        createdCreds={createdCreds}
+        onCopy={() => {
+          if (!createdCreds) return;
+          const text = `${createdCreds.identityLabel || 'Name:'} ${createdCreds.identityValue || createdCreds.name || 'N/A'}\n${createdCreds.email ? `Email: ${createdCreds.email}\n` : ''}Temp Password: ${createdCreds.temp_password}`;
+          navigator.clipboard.writeText(text);
+          toast.success('Credentials copied');
+        }}
+      />
     </div>
   );
 }

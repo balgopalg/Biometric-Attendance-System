@@ -3,11 +3,12 @@ import api from '../../api/axios';
 import StatePanel from '../../components/ui/StatePanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HiOutlineChevronDown, HiOutlineChevronUp, HiOutlineCheckCircle, HiOutlineXCircle, HiOutlineClock } from 'react-icons/hi';
-import { formatDateTimeIndia } from '../../utils/dateTime';
-
 function formatSessionDateTime(session) {
-  const value = session?.timestamp || session?.date_time || session?.date;
-  return formatDateTimeIndia(value, { dateStyle: 'medium', timeStyle: 'short' });
+  const candidates = [session?.date_time, session?.date, session?.timestamp];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '—';
 }
 
 function AttendanceRing({ pct, hasLectures, size = 72 }) {
@@ -80,6 +81,7 @@ export default function AttendanceSummary() {
             const isExpanded = expandedPaperId === a.paper_id;
             const statusLabel = !hasLectures ? 'No Lectures' : pct >= 75 ? 'On Track ✓' : pct >= 50 ? 'Warning' : 'Critical';
             const statusClass = !hasLectures ? 'badge-info' : pct >= 75 ? 'badge-success' : pct >= 50 ? 'badge-warning' : 'badge-danger';
+            const latestSession = (a.sessions || [])[0];
 
             return (
               <Fragment key={a.paper_id}>
@@ -104,6 +106,11 @@ export default function AttendanceSummary() {
                         <span style={{ fontSize: '0.75rem', fontWeight: 700, color, minWidth: 40 }}>{hasLectures ? `${Math.round(pct)}%` : '—'}</span>
                       </div>
                       <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>{a.attended} attended · {a.total_classes} total classes</p>
+                      {latestSession && (
+                        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                          Latest session: {formatSessionDateTime(latestSession)}
+                        </p>
+                      )}
                     </div>
                     <div style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
                       {isExpanded ? <HiOutlineChevronUp size={18} /> : <HiOutlineChevronDown size={18} />}

@@ -138,7 +138,11 @@ def get_approved_leave_dates(user_id: str, paper_ids: list) -> dict:
 
 def session_date_str(session_doc) -> Optional[str]:
     """Extract YYYY-MM-DD from a session document correctly adjusted for IST."""
-    raw = session_doc.get("committed_at") or session_doc.get("last_updated_at")
+    raw = (
+        session_doc.get("committed_at")
+        or session_doc.get("last_updated_at")
+        or session_doc.get("created_at")
+    )
     if not raw:
         return None
     # Adjust UTC timestamp to India Standard Time before string conversion

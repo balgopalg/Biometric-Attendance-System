@@ -182,6 +182,7 @@ def attendance_summary(user):
 
     uid = str(user["_id"])
     sessions_col = get_collection("attendance", "attendance_sessions")
+    logs_col = get_collection("attendance", "attendance_logs")
     enrolled = profile.get("enrolled_papers", [])
 
     # Feature flag: Should approved leaves be excluded from attendance denominator?
@@ -230,9 +231,23 @@ def attendance_summary(user):
             else:
                 status = "Absent"
 
-            raw_date = session_doc.get("committed_at") or session_doc.get(
-                "last_updated_at"
+            raw_date = (
+                session_doc.get("committed_at")
+                or session_doc.get("last_updated_at")
+                or session_doc.get("created_at")
             )
+            if not raw_date and session_doc.get("session_id"):
+                first_log = (
+                    logs_col.find(
+                        {"session_id": str(session_doc.get("session_id"))},
+                        {"timestamp": 1},
+                    )
+                    .sort("timestamp", 1)
+                    .limit(1)
+                )
+                first_log = next(first_log, None)
+                if first_log:
+                    raw_date = first_log.get("timestamp")
             date_label = _format_datetime_india(raw_date, with_time=False)
             date_time_label = _format_datetime_india(raw_date, with_time=True)
 

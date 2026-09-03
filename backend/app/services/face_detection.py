@@ -1,14 +1,29 @@
-"""Face detection service using MediaPipe."""
+"""Face detection service using MediaPipe Tasks."""
 
+from pathlib import Path
 import threading
 
 import cv2
 import mediapipe as mp
 import numpy as np
+from mediapipe.tasks.python.core import base_options as base_options_module
+from mediapipe.tasks.python.vision import face_detector as face_detector_module
+from mediapipe.tasks.python.vision.core import image as image_module
+
+from .mediapipe_assets import ensure_asset
 
 # Minimum face bounding-box dimension (in pixels) to accept.
 # Faces smaller than this produce noisy embeddings and hurt recognition accuracy.
 _MIN_FACE_SIZE = 30
+_FACE_DETECTOR_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/face_detector/"
+    "blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
+)
+_FACE_DETECTOR_MODEL_FILE = "blaze_face_short_range.tflite"
+
+
+def _load_detector_model() -> Path:
+    return ensure_asset(_FACE_DETECTOR_MODEL_FILE, _FACE_DETECTOR_MODEL_URL)
 
 
 class FaceDetector:
@@ -46,9 +61,15 @@ class FaceDetector:
         )
 
     def __init__(self, min_confidence=0.5, fallback_min_faces=4):
-        self.mp_face = mp.solutions.face_detection
-        self.detector = self.mp_face.FaceDetection(
-            model_selection=1, min_detection_confidence=min_confidence
+        model_path = _load_detector_model()
+        options = face_detector_module.FaceDetectorOptions(
+            base_options=base_options_module.BaseOptions(
+                model_asset_path=str(model_path)
+            ),
+            min_detection_confidence=min_confidence,
+        )
+        self.detector = face_detector_module.FaceDetector.create_from_options(
+            options
         )
         self.fallback_min_faces = max(1, int(fallback_min_faces))
         self.haar = cv2.CascadeClassifier(
@@ -115,24 +136,34 @@ class FaceDetector:
         return inter_area / union
 
     def _detect_mediapipe(self, image_rgb: np.ndarray):
-        results = self.detector.process(image_rgb)
+        if image_rgb is None or not hasattr(image_rgb, "shape"):
+            return []
+
+        mp_image = image_module.Image(
+            image_module.ImageFormat.SRGB, np.ascontiguousarray(image_rgb)
+        )
+        results = self.detector.detect(mp_image)
         faces = []
         if not results.detections:
             return faces
 
-        h, w, _ = image_rgb.shape
         for detection in results.detections:
-            bb = detection.location_data.relative_bounding_box
-            x = max(int(bb.xmin * w), 0)
-            y = max(int(bb.ymin * h), 0)
-            bw = int(bb.width * w)
-            bh = int(bb.height * h)
+            bb = detection.bounding_box
+            x = int(bb.origin_x)
+            y = int(bb.origin_y)
+            bw = int(bb.width)
+            bh = int(bb.height)
 
             if bw <= 0 or bh <= 0:
                 continue
 
+            confidence = (
+                float(detection.categories[0].score)
+                if detection.categories
+                else 0.0
+            )
             face = self._build_face_record(
-                image_rgb, x, y, bw, bh, detection.score[0]
+                image_rgb, x, y, bw, bh, confidence
             )
             if face is not None:
                 faces.append(face)

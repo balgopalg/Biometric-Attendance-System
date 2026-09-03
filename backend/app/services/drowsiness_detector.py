@@ -1,20 +1,41 @@
+from pathlib import Path
 import threading
 
 import mediapipe as mp
 import numpy as np
 from scipy.spatial import distance as dist
+from mediapipe.tasks.python.core import base_options as base_options_module
+from mediapipe.tasks.python.vision import face_landmarker as face_landmarker_module
+from mediapipe.tasks.python.vision.core import image as image_module
+
+from .mediapipe_assets import ensure_asset
 
 
 class DrowsinessDetector:
     """Service to detect drowsiness (eyes closed or yawning) from an RGB frame."""
 
+    _FACE_LANDMARKER_MODEL_URL = (
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
+        "face_landmarker/float16/1/face_landmarker.task"
+    )
+    _FACE_LANDMARKER_MODEL_FILE = "face_landmarker.task"
+
     def __init__(self, ear_threshold=0.25, mar_threshold=0.6):
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
+        model_path = ensure_asset(
+            self._FACE_LANDMARKER_MODEL_FILE,
+            self._FACE_LANDMARKER_MODEL_URL,
+        )
+        options = face_landmarker_module.FaceLandmarkerOptions(
+            base_options=base_options_module.BaseOptions(
+                model_asset_path=str(model_path)
+            ),
+            num_faces=1,
+            min_face_detection_confidence=0.5,
+            output_face_blendshapes=False,
+            output_facial_transformation_matrixes=False,
+        )
+        self.face_landmarker = (
+            face_landmarker_module.FaceLandmarker.create_from_options(options)
         )
         self.ear_threshold = ear_threshold
         self.mar_threshold = mar_threshold
@@ -43,11 +64,17 @@ class DrowsinessDetector:
         return v / h if h > 0 else 0
 
     def analyze_frame(self, frame_rgb: np.ndarray):
-        results = self.face_mesh.process(frame_rgb)
-        if not results.multi_face_landmarks:
+        if frame_rgb is None or not hasattr(frame_rgb, "shape"):
             return {"status": "no_face"}
 
-        landmarks = results.multi_face_landmarks[0].landmark
+        mp_image = image_module.Image(
+            image_module.ImageFormat.SRGB, np.ascontiguousarray(frame_rgb)
+        )
+        results = self.face_landmarker.detect(mp_image)
+        if not results.face_landmarks:
+            return {"status": "no_face"}
+
+        landmarks = results.face_landmarks[0]
         h, w, _ = frame_rgb.shape
 
         # Convert landmarks to pixel coordinates
@@ -76,7 +103,7 @@ class DrowsinessDetector:
         }
 
     def close(self):
-        self.face_mesh.close()
+        self.face_landmarker.close()
 
 
 # Module-level singleton to prevent heavy reloading

@@ -63,7 +63,14 @@ export default function ManageLecturers() {
       ctx.setShowAdd(false);
       ctx.setForm({ ...ctx.EMPTY_FORM, department: ctx.isDepartmentAdmin && ctx.departmentName ? ctx.departmentName : '' });
       if (data?.temp_password) {
-        ctx.setCreatedCreds({ name: data.name, email: data.email, temp_password: data.temp_password });
+        ctx.setCreatedCreds({
+          entityLabel: 'Lecturer',
+          identityLabel: 'Name:',
+          identityValue: data.name,
+          name: data.name,
+          email: data.email,
+          temp_password: data.temp_password,
+        });
         ctx.setShowCreds(true);
       }
       toast.success(data?.message || 'Lecturer created');
@@ -144,9 +151,12 @@ export default function ManageLecturers() {
         try {
           const res = await api.post(`/admin/lecturers/${id}/reset-password`);
           ctx.setCreatedCreds({
+            entityLabel: 'Lecturer',
+            identityLabel: 'Name:',
+            identityValue: name,
             name,
             email: res.data.email || '',
-            temp_password: res.data.new_password,
+            temp_password: res.data.temp_password || res.data.new_password || '',
             isReset: true
           });
           ctx.setShowCreds(true);

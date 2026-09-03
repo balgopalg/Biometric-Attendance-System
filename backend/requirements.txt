@@ -27,7 +27,7 @@ scipy>=1.14.1                              # Scientific computing for advanced a
 imutils>=0.5.4                             # Convenience functions for image processing
 
 # Deep Learning & Face Recognition
-mediapipe>=0.10.21                         # Fast primary face detection via MediaPipe
+mediapipe>=1.0.1                           # Fast primary face detection via MediaPipe Tasks
 keras-facenet>=0.3.2                       # Pre-trained models for 512D face embeddings
 tensorflow>=2.16.2                         # Machine learning backend for keras-facenet
 
