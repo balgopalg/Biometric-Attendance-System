@@ -15,6 +15,10 @@ from .mediapipe_assets import ensure_asset
 # Minimum face bounding-box dimension (in pixels) to accept.
 # Faces smaller than this produce noisy embeddings and hurt recognition accuracy.
 _MIN_FACE_SIZE = 30
+# Smaller overlapping tiles make distant faces large enough for the
+# short-range detector while retaining their coordinates in the source image.
+_GROUP_TILE_SIZE = 640
+_GROUP_TILE_STRIDE = 320
 _FACE_DETECTOR_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_detector/"
     "blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
@@ -170,6 +174,44 @@ class FaceDetector:
 
         return faces
 
+    def _detect_mediapipe_group_tiled(self, image_rgb: np.ndarray):
+        """Detect faces in overlapping tiles for high-resolution group photos."""
+        if image_rgb is None or not hasattr(image_rgb, "shape"):
+            return []
+
+        height, width = image_rgb.shape[:2]
+        if max(height, width) <= _GROUP_TILE_SIZE:
+            return []
+
+        tile_size = min(_GROUP_TILE_SIZE, height, width)
+        stride = min(_GROUP_TILE_STRIDE, tile_size)
+        y_positions = list(range(0, max(1, height - tile_size + 1), stride))
+        x_positions = list(range(0, max(1, width - tile_size + 1), stride))
+        y_positions.append(max(0, height - tile_size))
+        x_positions.append(max(0, width - tile_size))
+
+        faces = []
+        for y in sorted(set(y_positions)):
+            for x in sorted(set(x_positions)):
+                tile = image_rgb[y : y + tile_size, x : x + tile_size]
+                for face in self._detect_mediapipe(tile):
+                    face_x, face_y, face_w, face_h = face["bbox"]
+                    absolute_bbox = (
+                        face_x + x,
+                        face_y + y,
+                        face_w,
+                        face_h,
+                    )
+                    absolute_face = self._build_face_record(
+                        image_rgb,
+                        *absolute_bbox,
+                        face["confidence"],
+                    )
+                    if absolute_face is not None:
+                        faces.append(absolute_face)
+
+        return faces
+
     def _detect_haar_fallback(self, image_rgb: np.ndarray):
         return self._detect_haar(image_rgb, group_mode=False)
 
@@ -273,6 +315,8 @@ class FaceDetector:
         """
         # Always run both detectors and merge for maximum face count
         primary_faces = self._detect_mediapipe(image_rgb)
+        tiled_faces = self._detect_mediapipe_group_tiled(image_rgb)
+        primary_faces = self._merge_faces(primary_faces, tiled_faces)
         fallback_faces = self._detect_haar_group(image_rgb)
         return self._merge_faces(primary_faces, fallback_faces)
 

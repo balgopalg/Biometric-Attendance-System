@@ -493,73 +493,29 @@ def _clear_cached_session_candidates(session_id):
         _SESSION_CANDIDATES_CACHE.pop(sid, None)
 
 
-# Reusable HOG people detector — avoid re-creating on every fallback call.
-_hog_detector = None
-_hog_detector_lock = Lock()
-
-
-def _get_hog_detector():
-    global _hog_detector
-    if _hog_detector is None:
-        with _hog_detector_lock:
-            if _hog_detector is None:
-                hog = cv2.HOGDescriptor()
-                hog.setSVMDetector(
-                    cv2.HOGDescriptor_getDefaultPeopleDetector()
-                )
-                _hog_detector = hog
-    return _hog_detector
-
-
-def _extract_classroom_faces(img_rgb, img_bgr=None, group_photo=False):
+def _extract_classroom_faces(img_rgb, group_photo=False):
     """Extract classroom face crops using FaceDetector (MediaPipe + Haar).
 
     When ``group_photo`` is True, uses a permissive detector with lower
     confidence thresholds optimised for uploaded group / classroom photos.
 
-    Falls back to HOG people detection for group photos where face detection
-    fails entirely — this is the only logic not in FaceDetector.
+    Returns only face-detector crops. Full-body HOG regions are not suitable
+    inputs for FaceNet and must never be used for recognition.
     """
     if group_photo:
-        # Run the standard detector first for deterministic behavior in tests
-        # and as a fast-path for typical classroom captures.
-        detector = get_detector()
-        faces = detector.detect_faces(img_rgb) or []
-        if not faces:
-            detector = get_group_detector()
-            detect_group = getattr(detector, "detect_faces_group", None)
-            if callable(detect_group):
-                faces = detect_group(img_rgb) or []
-            else:
-                faces = detector.detect_faces(img_rgb) or []
+        # Group photos must use tiled detection even when the standard pass
+        # finds one face; otherwise a non-empty standard result skips recall.
+        detector = get_group_detector()
+        detect_group = getattr(detector, "detect_faces_group", None)
+        if callable(detect_group):
+            faces = detect_group(img_rgb) or []
+        else:
+            faces = detector.detect_faces(img_rgb) or []
     else:
         detector = get_detector()
         faces = detector.detect_faces(img_rgb) or []
 
-    if faces:
-        return faces
-
-    # Final fallback: detect people regions so the bundle still contains per-person crops.
-    if img_bgr is None:
-        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-
-    hog = _get_hog_detector()
-    boxes, _ = hog.detectMultiScale(
-        img_bgr,
-        winStride=(8, 8),
-        padding=(8, 8),
-        scale=1.05,
-    )
-
-    people_faces = []
-    for x, y, w, h in boxes:
-        face = detector._build_face_record(
-            img_rgb, int(x), int(y), int(w), int(h), 0.5
-        )
-        if face is not None:
-            people_faces.append(face)
-
-    return people_faces
+    return faces
 
 
 @lecturer_bp.route("/papers", methods=["GET"])
@@ -831,7 +787,7 @@ def recognize_image(user):
         )
         return jsonify({"error": "Failed to process image"}), 400
 
-    faces = _extract_classroom_faces(img, img_bgr=img_raw, group_photo=True)
+    faces = _extract_classroom_faces(img, group_photo=True)
 
     uploads_dir = current_app.config.get(
         "UPLOADS_ABSOLUTE_PATH"
