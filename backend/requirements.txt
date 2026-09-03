@@ -1,7 +1,7 @@
 # --- Web Framework & Core ────────────────────────────────────────────────────────
 # Web Framework
 Flask>=3.1.3                                # Core web server framework for API endpoints
-python-dotenv>=1.2.2                       # Loads environment variables from .env files
+python-dotenv>=1.2.3                       # Loads environment variables from .env files
 
 # --- Database Integration ─────────────────────────────────────────────────────────
 # MongoDB Integration
