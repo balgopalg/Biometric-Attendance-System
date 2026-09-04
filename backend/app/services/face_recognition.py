@@ -19,6 +19,14 @@ _VECTORS_CACHE = None
 _VECTORS_CACHE_LOCK = threading.Lock()
 
 
+def initialize_face_recognition():
+    """Load FaceNet and complete one inference before serving requests."""
+    model = _load_model()
+    if _model_is_stub:
+        return
+    model.embeddings(np.zeros((1, 160, 160, 3), dtype=np.uint8))
+
+
 def _init_vectors_cache():
     global _VECTORS_CACHE
     if _VECTORS_CACHE is None:
@@ -109,17 +117,6 @@ def _load_model():
 
             _model = FaceNet()
             _model_is_stub = False
-
-            # Pre-warm model cache in background to prevent first-call latency
-            def _warmup():
-                try:
-                    _model.embeddings(
-                        np.zeros((1, 160, 160, 3), dtype=np.uint8)
-                    )
-                except Exception:
-                    pass
-
-            threading.Thread(target=_warmup, daemon=True).start()
 
         except Exception as exc:
             env = _current_env()

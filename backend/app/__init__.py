@@ -179,6 +179,10 @@ def create_app(config_class=Config, seed_default_admin=False):
         _bootstrap_isolated_databases(mongo, app.config)
         _ensure_indexes(mongo, app.config)
         _run_startup_health_checks(app)
+        if not app.config.get("TESTING", False):
+            from .services.face_recognition import initialize_face_recognition
+
+            initialize_face_recognition()
         if seed_default_admin and app.config.get(
             "ENABLE_DEFAULT_ADMIN_SEED", False
         ):
