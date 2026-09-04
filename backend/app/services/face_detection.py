@@ -4,7 +4,6 @@ from pathlib import Path
 import threading
 
 import cv2
-import mediapipe as mp
 import numpy as np
 from mediapipe.tasks.python.core import base_options as base_options_module
 from mediapipe.tasks.python.vision import face_detector as face_detector_module
@@ -15,8 +14,8 @@ from .mediapipe_assets import ensure_asset
 # Minimum face bounding-box dimension (in pixels) to accept.
 # Faces smaller than this produce noisy embeddings and hurt recognition accuracy.
 _MIN_FACE_SIZE = 30
-_MIN_VERIFIED_CONFIDENCE = 0.5
-_MIN_VERIFIED_SIZE = 50
+_MIN_VERIFIED_CONFIDENCE = 0.65
+_MIN_VERIFIED_SIZE = 60
 # Smaller overlapping tiles make distant faces large enough for the
 # short-range detector while retaining their coordinates in the source image.
 _GROUP_TILE_SIZE = 640
@@ -217,12 +216,23 @@ class FaceDetector:
     def _is_verified_face_crop(self, crop: np.ndarray):
         """Reject detector artifacts before they reach FaceNet or storage."""
         verified = self._detect_mediapipe(crop)
-        return any(
-            face["confidence"] >= _MIN_VERIFIED_CONFIDENCE
-            and min(face["bbox"][2], face["bbox"][3])
-            >= _MIN_VERIFIED_SIZE
-            for face in verified
-        )
+        crop_height, crop_width = crop.shape[:2]
+        crop_area = crop_width * crop_height
+        for face in verified:
+            x, y, width, height = face["bbox"]
+            if face["confidence"] < _MIN_VERIFIED_CONFIDENCE:
+                continue
+            # A real face should occupy the candidate crop, not only a
+            # padded edge or background region.
+            center_x = x + (width / 2.0)
+            center_y = y + (height / 2.0)
+            if not (0.2 * crop_width <= center_x <= 0.8 * crop_width):
+                continue
+            if not (0.2 * crop_height <= center_y <= 0.8 * crop_height):
+                continue
+            return True
+
+        return False
 
     def _detect_haar_fallback(self, image_rgb: np.ndarray):
         return self._detect_haar(image_rgb, group_mode=False)
@@ -291,7 +301,7 @@ class FaceDetector:
             bbox = face["bbox"]
             duplicate = False
             for existing in merged:
-                if self._iou(existing["bbox"], bbox) >= 0.35:
+                if self._iou(existing["bbox"], bbox) >= 0.25:
                     duplicate = True
                     break
             if not duplicate:
@@ -299,6 +309,24 @@ class FaceDetector:
 
         merged.sort(key=lambda f: f["confidence"], reverse=True)
         return merged
+
+    @staticmethod
+    def _nms(faces, iou_threshold=0.3):
+        """Non-maximum suppression: keep highest-confidence face per overlap cluster."""
+        if not faces:
+            return faces
+        # Already sorted by confidence descending by callers, but ensure it.
+        faces = sorted(faces, key=lambda f: f["confidence"], reverse=True)
+        keep = []
+        for face in faces:
+            dominated = False
+            for kept in keep:
+                if FaceDetector._iou(kept["bbox"], face["bbox"]) >= iou_threshold:
+                    dominated = True
+                    break
+            if not dominated:
+                keep.append(face)
+        return keep
 
     def detect_faces(self, image_rgb: np.ndarray):
         """
@@ -323,9 +351,11 @@ class FaceDetector:
         primary_faces = self._detect_mediapipe(image_rgb)
         tiled_faces = self._detect_mediapipe_group_tiled(image_rgb)
         candidates = self._merge_faces(primary_faces, tiled_faces)
-        return [
+        verified = [
             face for face in candidates if self._is_verified_face_crop(face["crop"])
         ]
+        # Final NMS pass to suppress overlapping detections from tiled merging
+        return self._nms(verified, iou_threshold=0.3)
 
     def close(self):
         self.detector.close()

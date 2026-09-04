@@ -312,12 +312,20 @@ def build_session_upload_folder(
 def save_classroom_upload_bundle(
     subject_label,
     image,
-    face_crops,
+    face_crops=None,
     uploads_dir="uploads",
     folder_path=None,
     session_started_at=None,
+    detected_crops=None,
+    recognized_crops=None,
 ):
-    """Save classroom original and face crops into a session folder in grayscale."""
+    """Save classroom original and face crops into a session folder in grayscale.
+
+    When ``detected_crops`` and ``recognized_crops`` are provided they are saved
+    into ``detected/`` and ``recognized/`` sub-folders respectively.  The legacy
+    ``face_crops`` parameter is still supported and saves directly into the
+    session folder for backwards compatibility.
+    """
     if image is None:
         raise ValueError("image is required")
 
@@ -343,37 +351,89 @@ def save_classroom_upload_bundle(
             f"Failed to save original classroom image: {original_path}"
         ) from exc
 
-    saved_faces = []
-    for idx, crop in enumerate(face_crops or [], start=1):
-        if crop is None:
-            continue
+    def _save_crops_to_folder(crops, subfolder, prefix):
+        if not crops:
+            return []
+        target_dir = os.path.join(folder_path, subfolder)
+        _ensure_directory(target_dir)
+        saved = []
+        for idx, item in enumerate(crops, start=1):
+            if item is None:
+                continue
+            
+            # Handle both plain ndarray crops and dicts with metadata
+            if isinstance(item, dict):
+                crop_img = item["crop"]
+                reg_num = item.get("reg_number")
+                # Format: rec_ROLLNUM_timestamp_idx.jpg or rec_timestamp_idx.jpg
+                if reg_num:
+                    file_prefix = f"{prefix}_{reg_num}_{upload_token}"
+                else:
+                    file_prefix = f"{prefix}_{upload_token}"
+            else:
+                crop_img = item
+                file_prefix = f"{prefix}_{upload_token}"
 
-        # Convert face crops to grayscale for consistent storage and to avoid color artifacts
-        crop_to_save = crop
-        if hasattr(crop_to_save, "shape") and len(crop_to_save.shape) == 3:
-            # If detector returned RGB convert to BGR then to gray; if already BGR, convert directly
+            if crop_img is None:
+                continue
+
+            crop_to_save = crop_img
+            if hasattr(crop_to_save, "shape") and len(crop_to_save.shape) == 3:
+                try:
+                    gray = cv2.cvtColor(crop_to_save, cv2.COLOR_RGB2GRAY)
+                except Exception:
+                    gray = cv2.cvtColor(crop_to_save, cv2.COLOR_BGR2GRAY)
+                crop_to_save = gray
+            face_path = os.path.join(
+                target_dir, f"{file_prefix}_{idx:02d}.jpg"
+            )
             try:
-                # Try converting assuming RGB first, fall back to BGR conversion if needed
-                gray = cv2.cvtColor(crop_to_save, cv2.COLOR_RGB2GRAY)
-            except Exception:
-                gray = cv2.cvtColor(crop_to_save, cv2.COLOR_BGR2GRAY)
-            crop_to_save = gray
+                _save_fixed_jpeg(face_path, crop_to_save, size=160, quality=85)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to save face crop: {face_path}"
+                ) from exc
+            saved.append(face_path)
+        return saved
 
-        # Prefer saving a compact 160x160 face crop for storage efficiency
-        face_path = os.path.join(
-            folder_path, f"face_{upload_token}_{idx:02d}.jpg"
+    saved_detected = []
+    saved_recognized = []
+
+    if detected_crops is not None or recognized_crops is not None:
+        saved_detected = _save_crops_to_folder(
+            detected_crops, "detected", "det"
         )
-        try:
-            _save_fixed_jpeg(face_path, crop_to_save, size=160, quality=85)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to save classroom face crop: {face_path}"
-            ) from exc
-
-        saved_faces.append(face_path)
+        saved_recognized = _save_crops_to_folder(
+            recognized_crops, "recognized", "rec"
+        )
+    else:
+        # Legacy path: save face_crops directly into session folder
+        for idx, crop in enumerate(face_crops or [], start=1):
+            if crop is None:
+                continue
+            crop_to_save = crop
+            if hasattr(crop_to_save, "shape") and len(crop_to_save.shape) == 3:
+                try:
+                    gray = cv2.cvtColor(crop_to_save, cv2.COLOR_RGB2GRAY)
+                except Exception:
+                    gray = cv2.cvtColor(crop_to_save, cv2.COLOR_BGR2GRAY)
+                crop_to_save = gray
+            face_path = os.path.join(
+                folder_path, f"face_{upload_token}_{idx:02d}.jpg"
+            )
+            try:
+                _save_fixed_jpeg(face_path, crop_to_save, size=160, quality=85)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to save classroom face crop: {face_path}"
+                ) from exc
+            saved_detected.append(face_path)
 
     return {
         "folder_path": folder_path,
         "original_path": original_path,
-        "face_paths": saved_faces,
+        "face_paths": saved_detected,
+        "detected_paths": saved_detected,
+        "recognized_paths": saved_recognized,
     }
+

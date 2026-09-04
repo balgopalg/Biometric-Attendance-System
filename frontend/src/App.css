@@ -182,3 +182,55 @@
     border-right-color: var(--border);
   }
 }
+
+/* ── Lecturer Progress: mobile responsive ── */
+.session-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.session-card-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.session-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .session-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .session-card-stats {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .session-review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .session-review-actions {
+    flex-direction: column;
+  }
+
+  .session-review-actions button {
+    width: 100%;
+  }
+}

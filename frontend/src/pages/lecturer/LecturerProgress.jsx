@@ -16,6 +16,37 @@ function normalizeUtcTimestamp(value) {
   return TIMESTAMP_WITHOUT_TZ_PATTERN.test(value) ? `${value}Z` : value;
 }
 
+function RollbackTimerText({ rollbackUntil, type = 'badge' }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const ms = new Date(normalizeUtcTimestamp(rollbackUntil)).getTime() - Date.now();
+    if (ms <= 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [rollbackUntil]);
+
+  const ms = new Date(normalizeUtcTimestamp(rollbackUntil)).getTime() - now;
+  const isOpen = ms > 0;
+
+  const formatTime = (ms) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  if (type === 'badge') {
+    if (!isOpen) return <span className="badge" style={{ fontSize: '0.65rem' }}>Finalized</span>;
+    return <span className="badge badge-warning" style={{ fontSize: '0.65rem' }}>Rollback Open ({formatTime(ms)})</span>;
+  }
+  
+  if (!isOpen) return 'Closed';
+  return `Open (${formatTime(ms)} left)`;
+}
+
 function formatDateTime(value) {
   return formatDateTimeIndia(normalizeUtcTimestamp(value), { dateStyle: 'short', timeStyle: 'medium' });
 }
@@ -208,12 +239,12 @@ export default function LecturerProgress() {
               const total = s.total_students || 0;
               const pct = total > 0 ? Math.round((attended / total) * 100) : 0;
               return (
-                <div key={`${s.session_id}-${s.paper_id}`} style={{ padding: '12px 14px', borderRadius: 'var(--radius)', border: `1px solid ${rollbackOpen ? 'rgba(251,191,36,0.25)' : 'var(--border-glass)'}`, background: rollbackOpen ? 'rgba(251,191,36,0.04)' : 'var(--bg-glass)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                <div key={`${s.session_id}-${s.paper_id}`} className="session-card" style={{ padding: '12px 14px', borderRadius: 'var(--radius)', border: `1px solid ${rollbackOpen ? 'rgba(251,191,36,0.25)' : 'var(--border-glass)'}`, background: rollbackOpen ? 'rgba(251,191,36,0.04)' : 'var(--bg-glass)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                       <span className="badge badge-purple">{s.paper_code}</span>
                       <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>{s.paper_name}</span>
-                      {rollbackOpen ? <span className="badge badge-warning" style={{ fontSize: '0.65rem' }}>Rollback Open</span> : <span className="badge" style={{ fontSize: '0.65rem' }}>Finalized</span>}
+                      <RollbackTimerText rollbackUntil={s.rollback_until} type="badge" />
                     </div>
                     <div style={{ display: 'flex', gap: 12, fontSize: '0.75rem', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
                       <span>{formatDateTime(s.timestamp)}</span>
@@ -221,7 +252,7 @@ export default function LecturerProgress() {
                       <span>{formatCourseName(s.course_name || 'N/A', { isInactive: s.is_course_inactive, status: s.course_status })}</span>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div className="session-card-stats">
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: '1rem', fontWeight: 700, color: pct >= 75 ? 'var(--accent-emerald)' : pct >= 50 ? 'var(--accent-amber)' : 'var(--accent-rose)' }}>{attended} / {total}</div>
                       <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>{pct}% attended</div>
@@ -251,7 +282,7 @@ export default function LecturerProgress() {
               <div style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
                 {[{ label: 'Subject', value: `${sessionReview.paper?.name || selectedSession?.paper_name} (${sessionReview.paper?.code || selectedSession?.paper_code})` },
                   { label: 'Present', value: `${presentCount} / ${totalCount}`, accent: 'var(--accent-emerald)' },
-                  { label: 'Rollback', value: rollbackOpen ? 'Open' : 'Closed', accent: rollbackOpen ? 'var(--accent-amber)' : 'var(--accent-rose)' }].map(({ label, value, accent }) => (
+                  { label: 'Rollback', value: <RollbackTimerText rollbackUntil={sessionReview.rollback_until} type="text" />, accent: rollbackOpen ? 'var(--accent-amber)' : 'var(--accent-rose)' }].map(({ label, value, accent }) => (
                   <div key={label}>
                     <div style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{label}</div>
                     <div style={{ fontSize: '0.9rem', fontWeight: 700, color: accent || 'var(--text-primary)' }}>{value}</div>
@@ -259,7 +290,7 @@ export default function LecturerProgress() {
                 ))}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+              <div className="session-review-grid">
                 <div className="glass-card" style={{ padding: 12 }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-emerald)', display: 'inline-block' }} /> Present ({presentCount})
@@ -267,14 +298,19 @@ export default function LecturerProgress() {
                   <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {(sessionReview.candidates || []).map((s) => {
                       const checked = adjustIds.includes(s.user_id);
+                      if (!rollbackOpen && !checked) return null;
                       return (
-                        <label key={s.user_id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 'var(--radius)', background: checked ? 'rgba(16,185,129,0.06)' : 'transparent', fontSize: '0.8rem', cursor: rollbackOpen ? 'pointer' : 'default' }}>
-                          <input type="checkbox" checked={checked} disabled={!rollbackOpen}
-                            onChange={(e) => setAdjustIds(e.target.checked ? [...adjustIds, s.user_id] : adjustIds.filter((id) => id !== s.user_id))}
-                          />
+                        <div 
+                          key={s.user_id} 
+                          style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'transparent', fontSize: '0.8rem', cursor: rollbackOpen ? 'pointer' : 'default' }}
+                          onClick={() => {
+                            if (!rollbackOpen) return;
+                            setAdjustIds(!checked ? [...adjustIds, s.user_id] : adjustIds.filter((id) => id !== s.user_id));
+                          }}
+                        >
                           <span style={{ flex: 1 }}>{s.name}</span>
                           {checked && <span className="badge badge-success" style={{ fontSize: '0.62rem' }}>✓</span>}
-                        </label>
+                        </div>
                       );
                     })}
                   </div>
@@ -293,7 +329,7 @@ export default function LecturerProgress() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <div className="session-review-actions">
                 <button className="btn-secondary" onClick={() => setShowHistory(false)}>Close</button>
                 <button className="btn-primary" disabled={!rollbackOpen} onClick={() => setShowRecommitPin(true)}>Modify &amp; Re-Commit</button>
               </div>

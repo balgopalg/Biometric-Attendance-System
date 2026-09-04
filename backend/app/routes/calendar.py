@@ -11,7 +11,7 @@ from app.models.calendar import (archive_existing_calendars, create_calendar,
 from app.models.user import find_user_by_email
 from app.services.calendar_ocr import extract_calendar_draft
 from app.utils.auth_decorators import role_required
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 calendar_bp = Blueprint("calendar", __name__)

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 
 import cv2
+import numpy as np
 from app.extensions import get_collection
 from app.models.attendance import log_attendance
 from app.models.audit import log_action
@@ -812,10 +813,121 @@ def recognize_image(user):
             {"$set": {"upload_folder": session_folder}},
         )
 
+    if not faces:
+        # Still save the original image for audit, but with no face crops
+        saved_bundle = save_classroom_upload_bundle(
+            subject_label=subject_label,
+            image=img_raw,
+            detected_crops=[],
+            recognized_crops=[],
+            uploads_dir=uploads_dir,
+            folder_path=session_folder,
+            session_started_at=session.get("started_at"),
+        )
+        return jsonify(
+            {
+                "new_matches": [],
+                "faces_detected": 0,
+                "candidates_count": 0,
+                "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
+                "best_similarity_seen": None,
+                "saved_folder": saved_bundle["folder_path"],
+                "original_path": saved_bundle["original_path"],
+                "face_paths": saved_bundle["face_paths"],
+                "detected_paths": saved_bundle["detected_paths"],
+                "recognized_paths": saved_bundle["recognized_paths"],
+            }
+        )
+
+    candidates = _get_cached_session_candidates(session)
+    threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
+
+    # Batch-generate embeddings for all faces in a single FaceNet inference call
+    crops = [face["crop"] for face in faces]
+    embeddings = generate_embeddings_batch(crops)
+
+    # Deduplicate detected faces by embedding similarity.
+    # If two crops have cosine similarity >= 0.94, they are the same person
+    # from overlapping tiles — keep the one with higher detection confidence.
+    _DEDUP_SIM_THRESHOLD = 0.94
+    deduped_indices = []
+    for i in range(len(faces)):
+        is_dup = False
+        for j in deduped_indices:
+            sim = float(np.dot(embeddings[i], embeddings[j]))
+            if sim >= _DEDUP_SIM_THRESHOLD:
+                # Same person — keep higher confidence
+                if faces[i]["confidence"] > faces[j]["confidence"]:
+                    deduped_indices.remove(j)
+                    deduped_indices.append(i)
+                is_dup = True
+                break
+        if not is_dup:
+            deduped_indices.append(i)
+
+    faces = [faces[i] for i in deduped_indices]
+    embeddings = [embeddings[i] for i in deduped_indices]
+
+    new_matches = []
+    best_similarity_seen = -1.0
+    # Build a set from the DB-authoritative recognized list for thread-safe dedup.
+    recognized_set = set(session.get("recognized") or [])
+
+    # Track recognized faces: keep only the highest-confidence crop per user_id
+    recognized_crops_by_user = {}
+
+    for face, embedding in zip(faces, embeddings):
+        match, face_best_similarity = find_best_match_cached(
+            embedding, candidates, threshold=threshold
+        )
+        if face_best_similarity > best_similarity_seen:
+            best_similarity_seen = face_best_similarity
+
+        if match:
+            uid = match["user_id"]
+            # Keep only the crop with the highest detection confidence per person
+            if uid not in recognized_crops_by_user or face["confidence"] > recognized_crops_by_user[uid]["face"]["confidence"]:
+                recognized_crops_by_user[uid] = {
+                    "face": face,
+                    "reg_number": match.get("reg_number", ""),
+                }
+
+            if uid not in recognized_set:
+                recognized_set.add(uid)
+                stu_user = find_user_by_id(uid)
+                match["name"] = stu_user["name"] if stu_user else "Unknown"
+                new_matches.append(match)
+                attendance_logger.info(
+                    "image_recognition_match",
+                    session_id=session_id,
+                    user_id=uid,
+                    similarity=match.get("similarity"),
+                    threshold=threshold,
+                )
+        elif not match and face_best_similarity >= 0:
+            attendance_logger.debug(
+                "image_recognition_below_threshold",
+                session_id=session_id,
+                best_similarity=round(face_best_similarity, 4),
+                threshold=threshold,
+            )
+
+    _save_recognized_students(session_id, list(recognized_set))
+    _touch_active_session(session_id)
+
+    # All detected face crops (deduplicated — no duplicate persons)
+    all_detected_crops = [face["crop"] for face in faces]
+    # Recognized face crops: one per person, highest confidence, with reg_number
+    recognized_face_crops = [
+        {"crop": f["face"]["crop"], "reg_number": f["reg_number"]}
+        for f in recognized_crops_by_user.values()
+    ]
+
     saved_bundle = save_classroom_upload_bundle(
         subject_label=subject_label,
         image=img_raw,
-        face_crops=[face["crop"] for face in faces],
+        detected_crops=all_detected_crops,
+        recognized_crops=recognized_face_crops,
         uploads_dir=uploads_dir,
         folder_path=session_folder,
         session_started_at=session.get("started_at"),
@@ -828,62 +940,6 @@ def recognize_image(user):
         image_dtype=str(img.dtype),
         saved_folder=saved_bundle.get("folder_path"),
     )
-
-    if not faces:
-        return jsonify(
-            {
-                "new_matches": [],
-                "faces_detected": 0,
-                "candidates_count": 0,
-                "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
-                "best_similarity_seen": None,
-                "saved_folder": saved_bundle["folder_path"],
-                "original_path": saved_bundle["original_path"],
-                "face_paths": saved_bundle["face_paths"],
-            }
-        )
-
-    candidates = _get_cached_session_candidates(session)
-    threshold = current_app.config.get("FACENET_THRESHOLD", 0.60)
-
-    new_matches = []
-    best_similarity_seen = -1.0
-    # Build a set from the DB-authoritative recognized list for thread-safe dedup.
-    recognized_set = set(session.get("recognized") or [])
-
-    # Batch-generate embeddings for all faces in a single FaceNet inference call
-    crops = [face["crop"] for face in faces]
-    embeddings = generate_embeddings_batch(crops)
-
-    for face, embedding in zip(faces, embeddings):
-        match, face_best_similarity = find_best_match_cached(
-            embedding, candidates, threshold=threshold
-        )
-        if face_best_similarity > best_similarity_seen:
-            best_similarity_seen = face_best_similarity
-
-        if match and match["user_id"] not in recognized_set:
-            recognized_set.add(match["user_id"])
-            stu_user = find_user_by_id(match["user_id"])
-            match["name"] = stu_user["name"] if stu_user else "Unknown"
-            new_matches.append(match)
-            attendance_logger.info(
-                "image_recognition_match",
-                session_id=session_id,
-                user_id=match["user_id"],
-                similarity=match.get("similarity"),
-                threshold=threshold,
-            )
-        elif not match and face_best_similarity >= 0:
-            attendance_logger.debug(
-                "image_recognition_below_threshold",
-                session_id=session_id,
-                best_similarity=round(face_best_similarity, 4),
-                threshold=threshold,
-            )
-
-    _save_recognized_students(session_id, list(recognized_set))
-    _touch_active_session(session_id)
 
     return jsonify(
         {
@@ -900,6 +956,8 @@ def recognize_image(user):
             "saved_folder": saved_bundle["folder_path"],
             "original_path": saved_bundle["original_path"],
             "face_paths": saved_bundle["face_paths"],
+            "detected_paths": saved_bundle["detected_paths"],
+            "recognized_paths": saved_bundle["recognized_paths"],
         }
     )
 
