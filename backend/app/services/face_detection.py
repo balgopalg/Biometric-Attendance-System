@@ -15,6 +15,8 @@ from .mediapipe_assets import ensure_asset
 # Minimum face bounding-box dimension (in pixels) to accept.
 # Faces smaller than this produce noisy embeddings and hurt recognition accuracy.
 _MIN_FACE_SIZE = 30
+_MIN_VERIFIED_CONFIDENCE = 0.5
+_MIN_VERIFIED_SIZE = 50
 # Smaller overlapping tiles make distant faces large enough for the
 # short-range detector while retaining their coordinates in the source image.
 _GROUP_TILE_SIZE = 640
@@ -212,6 +214,16 @@ class FaceDetector:
 
         return faces
 
+    def _is_verified_face_crop(self, crop: np.ndarray):
+        """Reject detector artifacts before they reach FaceNet or storage."""
+        verified = self._detect_mediapipe(crop)
+        return any(
+            face["confidence"] >= _MIN_VERIFIED_CONFIDENCE
+            and min(face["bbox"][2], face["bbox"][3])
+            >= _MIN_VERIFIED_SIZE
+            for face in verified
+        )
+
     def _detect_haar_fallback(self, image_rgb: np.ndarray):
         return self._detect_haar(image_rgb, group_mode=False)
 
@@ -295,30 +307,25 @@ class FaceDetector:
         Returns a list of dicts:
           [{"bbox": (x, y, w, h), "confidence": float, "crop": np.ndarray}, ...]
         """
-        primary_faces = self._detect_mediapipe(image_rgb)
-        if len(primary_faces) >= self.fallback_min_faces:
-            return primary_faces
-
-        # Fallback improves tough cases (low light, side profiles, grayscale group shots).
-        fallback_faces = self._detect_haar_fallback(image_rgb)
-        return self._merge_faces(primary_faces, fallback_faces)
+        return self._detect_mediapipe(image_rgb)
 
     def detect_faces_group(self, image_rgb: np.ndarray):
-        """Detect faces in an uploaded group photo with relaxed thresholds.
+        """Detect face-only crops in an uploaded group photo.
 
-        Unlike ``detect_faces`` (webcam), this always runs both MediaPipe
-        and the Haar cascade with permissive settings to maximize recall
-        for dense classroom / group photos.
+        Group images use the tiled MediaPipe pass so small faces are enlarged
+        before detection. Haar's permissive group mode is intentionally not
+        merged here because it can classify hands, clothing, and objects as
+        faces and send non-face crops to recognition.
 
         Returns a list of dicts:
           [{"bbox": (x, y, w, h), "confidence": float, "crop": np.ndarray}, ...]
         """
-        # Always run both detectors and merge for maximum face count
         primary_faces = self._detect_mediapipe(image_rgb)
         tiled_faces = self._detect_mediapipe_group_tiled(image_rgb)
-        primary_faces = self._merge_faces(primary_faces, tiled_faces)
-        fallback_faces = self._detect_haar_group(image_rgb)
-        return self._merge_faces(primary_faces, fallback_faces)
+        candidates = self._merge_faces(primary_faces, tiled_faces)
+        return [
+            face for face in candidates if self._is_verified_face_crop(face["crop"])
+        ]
 
     def close(self):
         self.detector.close()

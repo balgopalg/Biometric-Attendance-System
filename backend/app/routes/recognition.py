@@ -18,6 +18,24 @@ from flask import Blueprint, current_app, jsonify, request
 recognition_bp = Blueprint("recognition", __name__)
 
 
+def _first_photo_url(doc):
+    if not doc:
+        return ""
+
+    raw = doc.get("photo_urls") or []
+    if isinstance(raw, str):
+        candidate = raw.strip()
+        return candidate
+
+    if isinstance(raw, list):
+        for item in raw:
+            candidate = str(item or "").strip()
+            if candidate:
+                return candidate
+
+    return ""
+
+
 @recognition_bp.route("/detect", methods=["POST"])
 @role_required("lecturer", "admin")
 @limiter.limit("30 per minute")
@@ -237,6 +255,10 @@ def find_student_by_face(user):
 
     from app.routes.auth import _build_profile_picture_url
 
+    photo_url = _build_profile_picture_url(matched_user) or _first_photo_url(
+        profile
+    )
+
     return jsonify(
         {
             "student": {
@@ -248,7 +270,7 @@ def find_student_by_face(user):
                     "academic_session", profile.get("academic_year", "N/A")
                 ),
                 "current_semester": profile.get("current_semester", "N/A"),
-                "photo_url": _build_profile_picture_url(matched_user) or None,
+                "photo_url": photo_url or None,
                 "similarity": match["similarity"],
             }
         }
@@ -327,13 +349,17 @@ def find_lecturer_by_face(user):
 
     from app.routes.auth import _build_profile_picture_url
 
+    photo_url = _build_profile_picture_url(matched_user) or _first_photo_url(
+        matched_user
+    )
+
     return jsonify(
         {
             "lecturer": {
                 "name": matched_user.get("name", "N/A"),
                 "email": matched_user.get("email", "N/A"),
                 "department": dept_name,
-                "photo_url": _build_profile_picture_url(matched_user) or None,
+                "photo_url": photo_url or None,
                 "similarity": match["similarity"],
             }
         }
