@@ -39,25 +39,28 @@ export default function LecturerTimetable() {
 
     setExportingPdf(true);
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import('html2canvas'),
+      const [{ toPng }, { jsPDF }] = await Promise.all([
+        import('html-to-image'),
         import('jspdf'),
       ]);
 
-      const canvas = await html2canvas(exportContainerRef.current, {
-        scale: 2,
-        useCORS: true,
+      const imgData = await toPng(exportContainerRef.current, {
+        pixelRatio: 2,
         backgroundColor: '#ffffff',
       });
 
-      const imgData = canvas.toDataURL('image/png');
+      // Load the image to get its natural dimensions for PDF scaling
+      const img = new Image();
+      img.src = imgData;
+      await new Promise((resolve) => { img.onload = resolve; });
+
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
-      const ratio = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
-      const imgWidth = canvas.width * ratio;
-      const imgHeight = canvas.height * ratio;
+      const ratio = Math.min(pageWidth / img.naturalWidth, pageHeight / img.naturalHeight);
+      const imgWidth = img.naturalWidth * ratio;
+      const imgHeight = img.naturalHeight * ratio;
       const x = (pageWidth - imgWidth) / 2;
       const y = 12;
 

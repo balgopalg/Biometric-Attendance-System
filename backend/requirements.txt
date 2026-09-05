@@ -5,7 +5,7 @@ python-dotenv>=1.2.2                       # Loads environment variables from .e
 
 # --- Database Integration ─────────────────────────────────────────────────────────
 # MongoDB Integration
-Flask-PyMongo>=2.3.0                       # Flask wrapper for MongoDB connection handling
+Flask-PyMongo>=3.0.0                       # Flask wrapper for MongoDB connection handling (3.x required for PyMongo 4.x)
 pymongo>=4.11.3                            # Core MongoDB driver for Python
 
 # --- Security & Authentication ────────────────────────────────────────────────────
@@ -22,9 +22,9 @@ Flask-CORS>=6.0.0                          # Cross-Origin Resource Sharing (CORS
 # --- Computer Vision & Machine Learning ───────────────────────────────────────────
 # Image Processing
 opencv-python-headless>=4.11.0.86          # Core image processing library (headless version)
-numpy>=1.26.4                              # High-performance matrix math for CV operations
+numpy>=1.26.4,<2.0.0                       # High-performance matrix math for CV operations (capped <2.0 for TF/keras-facenet ABI compat)
 scipy>=1.14.1                              # Scientific computing for advanced array operations
-imutils>=0.5.4                             # Convenience functions for image processing
+# imutils>=0.5.4                           # Currently unused — all image processing uses cv2/PIL directly
 
 # Deep Learning & Face Recognition
 mediapipe>=1.0.1                           # Fast primary face detection via MediaPipe Tasks
@@ -41,7 +41,7 @@ reportlab>=4.4.10                          # PDF generation for academic reports
 # --- Background Jobs & Caching ────────────────────────────────────────────────────
 # In-Memory Data Store
 redis>=5.2.1                               # In-memory data store for caching and queue management
-rq>=1.15.1                                 # Redis Queue library for background job processing
+# rq>=1.15.1                               # Currently unused — worker uses raw redis commands (brpop/hsets) instead
 
 # --- Observability, Logging & Production ──────────────────────────────────────────
 # Production Server & WSGI
@@ -52,7 +52,7 @@ python-json-logger>=2.0.7                  # Formats logs in structured JSON for
 
 # Monitoring & Metrics
 prometheus-client>=0.19.0                  # Exposes application metrics for Prometheus scraping
-sentry-sdk>=2.8.0                          # Application error tracking and crash reporting
+# sentry-sdk>=2.8.0                        # Currently unused — error tracking goes to MongoDB (audit.error_logs). Uncomment if wiring up Sentry.
 
 # --- Communications ───────────────────────────────────────────────────────────────
 # Email Services

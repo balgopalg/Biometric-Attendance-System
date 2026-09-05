@@ -293,22 +293,20 @@ export default function LecturerProgress() {
 
               {/* Scrollable Middle Content */}
               <div 
-                className="session-review-grid" 
+                className="session-review-grid flex flex-col md:flex-row" 
                 style={{ 
                   flex: 1, 
                   minHeight: 0, 
-                  display: 'flex',
-                  flexDirection: 'column',
                   gap: '20px',
                   paddingBottom: 4
                 }}
               >
                 {/* Present Card */}
-                <div className="glass-card" style={{ padding: 14, display: 'flex', flexDirection: 'column' }}>
+                <div className="glass-card flex-1" style={{ padding: 14, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-emerald)', display: 'inline-block' }} /> Present ({presentCount})
                   </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '180px', overflowY: 'auto', paddingRight: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, maxHeight: '240px', overflowY: 'auto', paddingRight: 4 }}>
                     {(sessionReview.candidates || []).map((s) => {
                       const checked = adjustIds.includes(s.user_id);
                       if (!rollbackOpen && !checked) return null;
@@ -330,11 +328,11 @@ export default function LecturerProgress() {
                 </div>
                 
                 {/* Absent Card */}
-                <div className="glass-card" style={{ padding: 14, display: 'flex', flexDirection: 'column' }}>
+                <div className="glass-card flex-1" style={{ padding: 14, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-rose)', display: 'inline-block' }} /> Absent ({absentStudents.length})
                   </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '160px', overflowY: 'auto', paddingRight: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, maxHeight: '240px', overflowY: 'auto', paddingRight: 4 }}>
                     {absentStudents.length === 0 ? (
                       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '6px 8px' }}>No absentees 🎉</p>
                     ) : absentStudents.map((s) => (

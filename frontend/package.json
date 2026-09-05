@@ -10,14 +10,15 @@
     "preview": "vite preview",
     "test:e2e": "playwright test"
   },
+  "_unusedDependencies_NOTE": "Packages below are not currently imported but kept for reference. Reinstall to dependencies if needed.",
+  "_unused_mediapipe_camera_utils": "^0.3.1675466862 — webcam handled natively via navigator.mediaDevices.getUserMedia()",
+  "_unused_mediapipe_drawing_utils": "^0.3.1675466124 — landmarks computed mathematically, no visual mesh overlay needed",
+  "_unused_html2canvas": "^1.4.1 — replaced by html-to-image (better CSS fidelity, smaller bundle)",
   "dependencies": {
-    "@mediapipe/camera_utils": "^0.3.1675466862",
-    "@mediapipe/drawing_utils": "^0.3.1675466124",
     "@mediapipe/face_mesh": "^0.4.1633559619",
     "axios": "^1.15.0",
     "framer-motion": "^12.38.0",
     "html-to-image": "^1.11.13",
-    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
