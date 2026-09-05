@@ -828,11 +828,11 @@ def recognize_image(user):
                 "candidates_count": 0,
                 "threshold": current_app.config.get("FACENET_THRESHOLD", 0.60),
                 "best_similarity_seen": None,
-                "saved_folder": saved_bundle["folder_path"],
-                "original_path": saved_bundle["original_path"],
-                "face_paths": saved_bundle["face_paths"],
-                "detected_paths": saved_bundle["detected_paths"],
-                "recognized_paths": saved_bundle["recognized_paths"],
+                "saved_folder": saved_bundle.get("folder_path"),
+                "original_path": saved_bundle.get("original_path"),
+                "face_paths": saved_bundle.get("face_paths", []),
+                "detected_paths": saved_bundle.get("detected_paths", []),
+                "recognized_paths": saved_bundle.get("recognized_paths", []),
             }
         )
 
@@ -950,11 +950,11 @@ def recognize_image(user):
                 if best_similarity_seen >= 0
                 else None
             ),
-            "saved_folder": saved_bundle["folder_path"],
-            "original_path": saved_bundle["original_path"],
-            "face_paths": saved_bundle["face_paths"],
-            "detected_paths": saved_bundle["detected_paths"],
-            "recognized_paths": saved_bundle["recognized_paths"],
+            "saved_folder": saved_bundle.get("folder_path"),
+            "original_path": saved_bundle.get("original_path"),
+            "face_paths": saved_bundle.get("face_paths", []),
+            "detected_paths": saved_bundle.get("detected_paths", []),
+            "recognized_paths": saved_bundle.get("recognized_paths", []),
         }
     )
 
