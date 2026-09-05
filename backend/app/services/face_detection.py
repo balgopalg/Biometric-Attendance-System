@@ -217,7 +217,6 @@ class FaceDetector:
         """Reject detector artifacts before they reach FaceNet or storage."""
         verified = self._detect_mediapipe(crop)
         crop_height, crop_width = crop.shape[:2]
-        crop_area = crop_width * crop_height
         for face in verified:
             x, y, width, height = face["bbox"]
             if face["confidence"] < _MIN_VERIFIED_CONFIDENCE:

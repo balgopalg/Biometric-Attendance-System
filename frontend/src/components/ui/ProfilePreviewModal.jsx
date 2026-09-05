@@ -11,15 +11,10 @@ export default function ProfilePreviewModal({
   imageSrc,
   name = '',
   role = 'student',
-  hasFace = false,
-  email = '',
-  phone = null,
   regNumber = null,
   department = null,
   course = null,
-  semester = null,
   session = null,
-  paperCount = null,
 }) {
   const [downloading, setDownloading] = useState(false);
   const [qrSrc, setQrSrc] = useState('');

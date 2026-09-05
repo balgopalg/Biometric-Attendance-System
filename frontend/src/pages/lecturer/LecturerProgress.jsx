@@ -292,19 +292,30 @@ export default function LecturerProgress() {
               </div>
 
               {/* Scrollable Middle Content */}
-              <div className="session-review-grid" style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingRight: 4, paddingBottom: 4, gap: 24 }}>
-                <div className="glass-card" style={{ padding: 12, height: 'max-content' }}>
-                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div 
+                className="session-review-grid" 
+                style={{ 
+                  flex: 1, 
+                  minHeight: 0, 
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '20px',
+                  paddingBottom: 4
+                }}
+              >
+                {/* Present Card */}
+                <div className="glass-card" style={{ padding: 14, display: 'flex', flexDirection: 'column' }}>
+                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-emerald)', display: 'inline-block' }} /> Present ({presentCount})
                   </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '180px', overflowY: 'auto', paddingRight: 4 }}>
                     {(sessionReview.candidates || []).map((s) => {
                       const checked = adjustIds.includes(s.user_id);
                       if (!rollbackOpen && !checked) return null;
                       return (
                         <div 
                           key={s.user_id} 
-                          style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'transparent', fontSize: '0.8rem', cursor: rollbackOpen ? 'pointer' : 'default' }}
+                          style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'rgba(0,0,0,0.02)', fontSize: '0.8rem', cursor: rollbackOpen ? 'pointer' : 'default' }}
                           onClick={() => {
                             if (!rollbackOpen) return;
                             setAdjustIds(!checked ? [...adjustIds, s.user_id] : adjustIds.filter((id) => id !== s.user_id));
@@ -318,15 +329,16 @@ export default function LecturerProgress() {
                   </div>
                 </div>
                 
-                <div className="glass-card" style={{ padding: 12, height: 'max-content' }}>
-                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {/* Absent Card */}
+                <div className="glass-card" style={{ padding: 14, display: 'flex', flexDirection: 'column' }}>
+                  <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-rose)', display: 'inline-block' }} /> Absent ({absentStudents.length})
                   </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '160px', overflowY: 'auto', paddingRight: 4 }}>
                     {absentStudents.length === 0 ? (
-                      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: 10 }}>No absentees 🎉</p>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: '6px 8px' }}>No absentees 🎉</p>
                     ) : absentStudents.map((s) => (
-                      <div key={s.user_id} style={{ padding: '6px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', borderRadius: 'var(--radius)' }}>{s.name}</div>
+                      <div key={s.user_id} style={{ padding: '6px 8px', fontSize: '0.8rem', color: 'var(--text-secondary)', borderRadius: 'var(--radius)', background: 'rgba(0,0,0,0.02)' }}>{s.name}</div>
                     ))}
                   </div>
                 </div>

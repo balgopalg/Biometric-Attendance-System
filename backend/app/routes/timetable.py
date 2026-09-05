@@ -19,8 +19,7 @@ from app.models.timetable import (clear_active_timetable_for_scope,
                                   update_timetable)
 from app.services.timetable_generator import WEEKDAYS, generate_timetable_slots
 from app.utils.auth_decorators import role_required
-from app.utils.helpers import (_as_text, _id_variants, _to_bool, _to_int,
-                               _to_oid, sanitise_many, sanitise_mongo_doc)
+from app.utils.helpers import (_to_bool, _to_oid, sanitise_many)
 from bson import ObjectId
 from flask import Blueprint, jsonify, request
 

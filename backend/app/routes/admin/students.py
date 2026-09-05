@@ -12,7 +12,6 @@ from ._helpers import *
 def list_students(user):
     page = max(1, _to_int(request.args.get("page", 1), 1))
     per_page = max(1, min(_to_int(request.args.get("per_page", 20), 20), 2000))
-    skip = (page - 1) * per_page
 
     # Scope courses to department for department admins
     dept_id = None
@@ -205,7 +204,6 @@ def list_students(user):
     )
     profiles = paginated["data"]
     total = paginated["total"]
-    total_pages = paginated["total_pages"]
     user_map = get_users_by_ids(p.get("user_id") for p in profiles)
 
     result = []
@@ -548,7 +546,7 @@ def add_student(user):
             if attempt == 4:  # Last attempt
                 break
             continue
-        except Exception as exc:
+        except Exception:
             current_app.logger.exception(
                 f"Profile creation attempt {attempt + 1} failed"
             )

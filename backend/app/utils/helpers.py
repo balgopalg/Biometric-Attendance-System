@@ -4,7 +4,7 @@ import base64
 import io
 import os
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import cv2
 import numpy as np

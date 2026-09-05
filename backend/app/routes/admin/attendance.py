@@ -1479,8 +1479,6 @@ def _build_attendance_matrix_payload(args):
             }
         )
 
-    user_ids = set(s["user_id"] for s in students)
-
     if allowed_paper_set:
         paper_filter_set = set(allowed_paper_set)
     else:
@@ -1729,8 +1727,6 @@ def attendance_matrix(user):
 @role_required("department_admin")
 def attendance_matrix_export(user):
     payload = _build_attendance_matrix_payload(request.args)
-    tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
-
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -1887,7 +1883,6 @@ def attendance_matrix_export(user):
 @role_required("department_admin")
 def attendance_matrix_export_csv(user):
     payload = _build_attendance_matrix_payload(request.args)
-    tz_offset_minutes = _to_int(request.args.get("tz_offset_minutes", 0), 0)
 
     dates = payload.get("dates") or []
     rows = payload.get("rows") or []
@@ -2432,8 +2427,6 @@ def monthly_attendance_trend_api(user):
     # Build a map of committed session IDs
     committed_sessions = list(sessions_col.find(sess_query, {"session_id": 1, "committed_at": 1}))
     committed_session_ids = [s.get("session_id") for s in committed_sessions]
-    committed_session_map = {s.get("session_id"): s.get("committed_at") for s in committed_sessions}
-    
     # Add session_id filter to attendance logs query to only include committed sessions
     att_query = query.copy()
     att_query["session_id"] = {"$in": committed_session_ids}

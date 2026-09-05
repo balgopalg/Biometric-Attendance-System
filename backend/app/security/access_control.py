@@ -7,7 +7,7 @@ Updated for the 4-tier RBAC model:
 from functools import wraps
 
 from app.extensions import get_collection
-from app.security.rbac import (ADMIN_ROLES, effective_allowed_roles,
+from app.security.rbac import (ADMIN_ROLES,
                                get_user_department_id, is_super_admin,
                                validate_department_access)
 from flask import g, jsonify, request

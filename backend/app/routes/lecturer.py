@@ -33,7 +33,6 @@ from app.services.face_recognition import (find_best_match,
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import (_id_variants, decode_base64_image,
                                decode_image_bytes, sanitise_mongo_doc)
-from bson import ObjectId
 from flask import Blueprint, current_app, jsonify, request
 
 lecturer_bp = Blueprint("lecturer", __name__)
@@ -641,8 +640,6 @@ def recognize_frame(user):
     if str(session.get("lecturer_id")) != str(user["_id"]):
         return jsonify({"error": "Unauthorized"}), 403
 
-    paper_id = session["paper_id"]
-
     try:
         img = decode_base64_image(frame_b64)
     except ValueError as e:
@@ -1114,7 +1111,7 @@ def commit_session(user):
                 str(user["_id"]),
                 details="Biometric verification successful",
             )
-        except Exception as exc:
+        except Exception:
             current_app.logger.exception(
                 "Biometric commit verification failed"
             )
@@ -1522,11 +1519,6 @@ def lecturer_progress(user):
         session_query["committed_at"] = committed_ts
 
     committed_docs = list(sessions_col.find(session_query).limit(5000))
-    session_docs = {
-        doc.get("session_id"): doc
-        for doc in committed_docs
-        if doc.get("session_id")
-    }
 
     # Precompute total enrolled students per paper for attended/total metrics.
     enrolled_totals_by_paper = {}

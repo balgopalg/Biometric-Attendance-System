@@ -6,7 +6,6 @@ from app.extensions import get_collection
 from app.models.attendance import get_approved_leave_dates, session_date_str
 from app.models.course import get_course_by_id
 from app.models.enrollment import get_profile_by_user
-from app.models.paper import get_paper_by_id
 from app.repositories import find_many_by_ids
 from app.utils.auth_decorators import role_required
 from app.utils.helpers import (_as_text, _id_variants, _to_bool, _to_int,

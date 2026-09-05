@@ -21,7 +21,7 @@ class HealthChecker:
             start = time.time()
 
             # Ping database
-            result = mongo.cx.admin.command("ping")
+            mongo.cx.admin.command("ping")
 
             latency_ms = (time.time() - start) * 1000
 

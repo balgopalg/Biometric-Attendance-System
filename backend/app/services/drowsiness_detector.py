@@ -1,7 +1,5 @@
-from pathlib import Path
 import threading
 
-import mediapipe as mp
 import numpy as np
 from scipy.spatial import distance as dist
 from mediapipe.tasks.python.core import base_options as base_options_module
