@@ -17,7 +17,7 @@ function normalizeUtcTimestamp(value) {
 }
 
 function RollbackTimerText({ rollbackUntil, type = 'badge' }) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const ms = new Date(normalizeUtcTimestamp(rollbackUntil)).getTime() - Date.now();
     if (ms <= 0) return;
@@ -278,8 +278,9 @@ export default function LecturerProgress() {
           const presentCount = adjustIds.length;
           const totalCount = (sessionReview.candidates || []).length;
           return (
-            <>
-              <div style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+              {/* Fixed Header */}
+              <div style={{ flexShrink: 0, display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
                 {[{ label: 'Subject', value: `${sessionReview.paper?.name || selectedSession?.paper_name} (${sessionReview.paper?.code || selectedSession?.paper_code})` },
                   { label: 'Present', value: `${presentCount} / ${totalCount}`, accent: 'var(--accent-emerald)' },
                   { label: 'Rollback', value: <RollbackTimerText rollbackUntil={sessionReview.rollback_until} type="text" />, accent: rollbackOpen ? 'var(--accent-amber)' : 'var(--accent-rose)' }].map(({ label, value, accent }) => (
@@ -290,12 +291,13 @@ export default function LecturerProgress() {
                 ))}
               </div>
 
-              <div className="session-review-grid">
-                <div className="glass-card" style={{ padding: 12 }}>
+              {/* Scrollable Middle Content */}
+              <div className="session-review-grid" style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingRight: 4, paddingBottom: 4, gap: 24 }}>
+                <div className="glass-card" style={{ padding: 12, height: 'max-content' }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-emerald)', display: 'inline-block' }} /> Present ({presentCount})
                   </h4>
-                  <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {(sessionReview.candidates || []).map((s) => {
                       const checked = adjustIds.includes(s.user_id);
                       if (!rollbackOpen && !checked) return null;
@@ -315,11 +317,12 @@ export default function LecturerProgress() {
                     })}
                   </div>
                 </div>
-                <div className="glass-card" style={{ padding: 12 }}>
+                
+                <div className="glass-card" style={{ padding: 12, height: 'max-content' }}>
                   <h4 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-rose)', display: 'inline-block' }} /> Absent ({absentStudents.length})
                   </h4>
-                  <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {absentStudents.length === 0 ? (
                       <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', padding: 10 }}>No absentees 🎉</p>
                     ) : absentStudents.map((s) => (
@@ -329,11 +332,12 @@ export default function LecturerProgress() {
                 </div>
               </div>
 
-              <div className="session-review-actions">
+              {/* Fixed Footer Actions */}
+              <div className="session-review-actions" style={{ flexShrink: 0, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-glass)' }}>
                 <button className="btn-secondary" onClick={() => setShowHistory(false)}>Close</button>
                 <button className="btn-primary" disabled={!rollbackOpen} onClick={() => setShowRecommitPin(true)}>Modify &amp; Re-Commit</button>
               </div>
-            </>
+            </div>
           );
         })()}
       </Modal>

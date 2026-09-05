@@ -656,12 +656,10 @@ class AuthFlowTests(BaseApiFlowTestCase):
         new_login = self.client.post("/api/auth/login", json={"email": "admin@system.com", "password": "NewPass123!A"})
         self.assertEqual(new_login.status_code, 200)
 
-
     def test_brute_force_lockout_atomic(self):
         email = "admin@system.com"
         wrong_password = "wrongpass"
         threshold = self.app.config.get("LOGIN_LOCKOUT_THRESHOLD", 5)
-        lockout_duration = self.app.config.get("LOGIN_LOCKOUT_DURATION_MINUTES", 15)
 
         # First (threshold - 1) attempts return 401 (wrong password but not yet locked)
         for i in range(threshold - 1):

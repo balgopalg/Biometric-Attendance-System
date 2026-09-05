@@ -134,10 +134,12 @@
   transition: transform 140ms ease, box-shadow 140ms ease, background 120ms ease;
 }
 
-.academic-calendar-panel .ac-day-cell:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
-  z-index: 1;
+@media (hover: hover) {
+  .academic-calendar-panel .ac-day-cell:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+    z-index: 1;
+  }
 }
 
 /* Today special glow ring */
@@ -168,9 +170,11 @@
   background: rgba(34,211,238,0.06);
   transition: transform 140ms ease, box-shadow 140ms ease;
 }
-.ac-upcoming-chip:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(34,211,238,0.12);
+@media (hover: hover) {
+  .ac-upcoming-chip:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(34,211,238,0.12);
+  }
 }
 .ac-upcoming-chip.is-today {
   border-color: rgba(34,211,238,0.28);
@@ -359,9 +363,11 @@ textarea:focus-visible,
   overflow: hidden;
 }
 
-.glass-card:hover {
-  border-color: var(--card-hover-border);
-  box-shadow: var(--shadow-glow);
+@media (hover: hover) {
+  .glass-card:hover {
+    border-color: var(--card-hover-border);
+    box-shadow: var(--shadow-glow);
+  }
 }
 
 /* ─── Stat Card ─── */
@@ -381,10 +387,12 @@ textarea:focus-visible,
   cursor: pointer;
 }
 
-.stat-card.clickable:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  border-color: var(--card-hover-border);
+@media (hover: hover) {
+  .stat-card.clickable:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    border-color: var(--card-hover-border);
+  }
 }
 
 /* ─── Gradient Text ─── */
@@ -411,9 +419,11 @@ textarea:focus-visible,
   gap: 8px;
 }
 
-.btn-primary:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.25);
+@media (hover: hover) {
+  .btn-primary:hover {
+    filter: brightness(1.05);
+    box-shadow: 0 4px 15px rgba(139, 92, 246, 0.25);
+  }
 }
 
 .btn-primary:disabled {
@@ -457,9 +467,11 @@ textarea:focus-visible,
   gap: 8px;
 }
 
-.btn-danger:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 4px 15px rgba(244, 63, 94, 0.25);
+@media (hover: hover) {
+  .btn-danger:hover {
+    filter: brightness(1.05);
+    box-shadow: 0 4px 15px rgba(244, 63, 94, 0.25);
+  }
 }
 
 @media (max-width: 768px) {
@@ -834,9 +846,11 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   overflow: visible;
 }
 
-.admin-page .glass-card:hover {
-  transform: none;
-  box-shadow: 0 8px 18px rgba(2, 8, 23, 0.12);
+@media (hover: hover) {
+  .admin-page .glass-card:hover {
+    transform: none;
+    box-shadow: 0 8px 18px rgba(2, 8, 23, 0.12);
+  }
 }
 
 .admin-page .filter-bar {
@@ -1160,9 +1174,11 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   box-shadow: 0 8px 20px rgba(2, 8, 23, 0.12);
 }
 
-.lecturer-page .glass-card:hover,
-.student-page .glass-card:hover {
-  box-shadow: 0 10px 24px rgba(2, 8, 23, 0.14);
+@media (hover: hover) {
+  .lecturer-page .glass-card:hover,
+  .student-page .glass-card:hover {
+    box-shadow: 0 10px 24px rgba(2, 8, 23, 0.14);
+  }
 }
 
 .lecturer-page .btn-primary,
@@ -1938,6 +1954,7 @@ input[type="date"]:invalid::-webkit-datetime-edit {
     padding: 18px !important;
     border-radius: 14px !important;
     max-height: 92vh !important;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35) !important;
   }
 
   /* ── Login card mobile ── */
@@ -1953,6 +1970,12 @@ input[type="date"]:invalid::-webkit-datetime-edit {
   /* ── Lecturer progress filter ── */
   .lecturer-progress-filters {
     grid-template-columns: 1fr !important;
+  }
+
+  /* ── Mobile card shadow refinement ── */
+  .lecturer-page .glass-card,
+  .student-page .glass-card {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
   }
 
   /* ── Session info grid ── */

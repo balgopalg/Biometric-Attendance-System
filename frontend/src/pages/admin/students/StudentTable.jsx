@@ -274,6 +274,7 @@ export default function StudentTable() {
         }
         semester={previewStudent?.current_semester ? `Semester ${previewStudent.current_semester}` : null}
         session={previewStudent?.academic_session || null}
+        department={previewStudent?.course_department || null}
       />
     </>
   );
