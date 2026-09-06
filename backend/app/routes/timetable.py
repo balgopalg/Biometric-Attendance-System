@@ -1409,22 +1409,36 @@ def lecturer_my_timetable(user):
         else {}
     )
 
-    timetable_docs = list(timetables_col.find(timetable_filter, {"_id": 1}))
+    timetable_docs = list(timetables_col.find(timetable_filter))
     timetable_ids = [doc.get("_id") for doc in timetable_docs]
     if not timetable_ids:
         return jsonify({"items": []})
 
-    slots = list(
-        slots_col.find(
-            {
-                "timetable_id": {"$in": timetable_ids},
-                "lecturer_id": lecturer_id,
-            }
-        ).sort([("day_index", 1), ("start_minutes", 1)])
-    )
+    slots = []
+    for t_id in timetable_ids:
+        # Bypass $in operator due to Atlas index edge cases on ObjectIds
+        cursor = slots_col.find({
+            "timetable_id": t_id,
+            "lecturer_id": lecturer_id
+        }).sort([("day_index", 1), ("start_minutes", 1)])
+        slots.extend(list(cursor))
+
+        # Also try matching by string ID just in case
+        cursor_str = slots_col.find({
+            "timetable_id": t_id,
+            "lecturer_id": str(lecturer_id)
+        }).sort([("day_index", 1), ("start_minutes", 1)])
+        slots.extend(list(cursor_str))
 
     items = _enrich_slots(slots)
-    return jsonify({"items": items})
+
+    metadata = {}
+    if timetable_docs:
+        metadata = _build_timetable_payload(
+            timetable_docs[0], include_slots=False
+        )
+
+    return jsonify({"items": items, "metadata": metadata})
 
 
 @timetable_bp.route("/student/my", methods=["GET"])

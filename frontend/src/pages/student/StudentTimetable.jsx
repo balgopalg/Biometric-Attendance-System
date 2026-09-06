@@ -77,10 +77,23 @@ export default function StudentTimetable() {
         import('jspdf'),
       ]);
 
-      const imgData = await toPng(exportContainerRef.current, {
+      // Temporarily expand the grid container so html-to-image captures the full scrollable area
+      const container = exportContainerRef.current;
+      const scrollWrapper = container.querySelector('.timetable-grid-scroll');
+      
+      const originalOverflow = scrollWrapper ? scrollWrapper.style.overflow : '';
+      if (scrollWrapper) {
+        scrollWrapper.style.overflow = 'visible';
+      }
+
+      const imgData = await toPng(container, {
         pixelRatio: 2,
         backgroundColor: '#ffffff',
       });
+
+      if (scrollWrapper) {
+        scrollWrapper.style.overflow = originalOverflow;
+      }
 
       // Load the image to get its natural dimensions for PDF scaling
       const img = new Image();

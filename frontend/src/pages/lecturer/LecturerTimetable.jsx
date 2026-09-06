@@ -11,6 +11,7 @@ export default function LecturerTimetable() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [metadata, setMetadata] = useState({});
   const exportContainerRef = useRef(null);
 
   const loadTimetable = async () => {
@@ -19,8 +20,10 @@ export default function LecturerTimetable() {
     try {
       const res = await api.get('/timetable/lecturer/my');
       setSlots(Array.isArray(res.data?.items) ? res.data.items : []);
+      setMetadata(res.data?.metadata || {});
     } catch (err) {
       setSlots([]);
+      setMetadata({});
       setError(err.response?.data?.error || 'Failed to load lecturer timetable.');
     } finally {
       setLoading(false);
@@ -44,10 +47,17 @@ export default function LecturerTimetable() {
         import('jspdf'),
       ]);
 
+      // Temporarily force overflow to visible to capture full table width
+      const scrollWrapper = exportContainerRef.current.querySelector('.timetable-grid-scroll');
+      const originalOverflow = scrollWrapper ? scrollWrapper.style.overflow : '';
+      if (scrollWrapper) scrollWrapper.style.overflow = 'visible';
+
       const imgData = await toPng(exportContainerRef.current, {
         pixelRatio: 2,
         backgroundColor: '#ffffff',
       });
+      
+      if (scrollWrapper) scrollWrapper.style.overflow = originalOverflow;
 
       // Load the image to get its natural dimensions for PDF scaling
       const img = new Image();
@@ -103,17 +113,19 @@ export default function LecturerTimetable() {
               <HiOutlineDownload size={15} /> {exportingPdf ? 'Exporting...' : 'Export PDF'}
             </button>
           </div>
-          <div ref={exportContainerRef}>
-            <WeeklyTimetableGrid
-              slots={slots}
-              title="My Teaching Timetable"
-              emptyMessage="No active timetable slots are assigned to you yet."
-              classStartTime="09:00"
-              classEndTime="17:00"
-              classDurationMinutes={60}
-              recessStartTime="12:00"
-              recessEndTime="13:00"
-            />
+          <div ref={exportContainerRef} className="glass-card tt-card-container">
+            <div className="tt-card-content">
+              <WeeklyTimetableGrid
+                slots={slots}
+                title="My Teaching Timetable"
+                emptyMessage="No active timetable slots are assigned to you yet."
+                classStartTime={metadata.class_start_time || "09:00"}
+                classEndTime={metadata.class_end_time || "17:00"}
+                classDurationMinutes={metadata.class_duration_minutes || 60}
+                recessStartTime={metadata.recess_start_time || "12:00"}
+                recessEndTime={metadata.recess_end_time || "13:00"}
+              />
+            </div>
           </div>
         </>
       ) : null}
