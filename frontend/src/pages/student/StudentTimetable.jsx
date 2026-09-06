@@ -72,7 +72,7 @@ export default function StudentTimetable() {
 
     setExportingPdf(true);
     try {
-      const [{ toPng }, { jsPDF }] = await Promise.all([
+      const [{ toJpeg }, { jsPDF }] = await Promise.all([
         import('html-to-image'),
         import('jspdf'),
       ]);
@@ -86,8 +86,9 @@ export default function StudentTimetable() {
         scrollWrapper.style.overflow = 'visible';
       }
 
-      const imgData = await toPng(container, {
-        pixelRatio: 2,
+      const imgData = await toJpeg(container, {
+        quality: 0.88,
+        pixelRatio: 1.5,
         backgroundColor: '#ffffff',
       });
 
@@ -100,7 +101,7 @@ export default function StudentTimetable() {
       img.src = imgData;
       await new Promise((resolve) => { img.onload = resolve; });
 
-      const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4', compress: true });
 
       const pageWidth = pdf.internal.pageSize.getWidth();
       const pageHeight = pdf.internal.pageSize.getHeight();
@@ -110,7 +111,7 @@ export default function StudentTimetable() {
       const x = (pageWidth - imgWidth) / 2;
       const y = 12;
 
-      pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
+      pdf.addImage(imgData, 'JPEG', x, y, imgWidth, imgHeight, undefined, 'FAST');
       const semesterLabel = metadata.semester || 'NA';
       const sessionLabel = metadata.academic_session || 'NA';
       pdf.save(`Student_Timetable_S${semesterLabel}_${sessionLabel}.pdf`);
